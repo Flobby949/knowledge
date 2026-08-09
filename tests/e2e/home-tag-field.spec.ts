@@ -24,6 +24,43 @@ test.describe("home neural tag field", () => {
     viewport: { width: 1_600, height: 1_000 },
   });
 
+  test("an empty instance offers only the real first-record actions", async ({
+    page,
+  }) => {
+    await page.goto(appUrl("/"));
+
+    const home = page.getByRole("main", { name: "首页" });
+    const scene = home.getByRole("region", { name: "神经标签场" });
+    const emptyState = scene
+      .getByRole("status")
+      .filter({ hasText: "记录第一条知识，让网络开始生长" });
+    const firstRecordActions = emptyState.getByRole("button", {
+      name: "新建第一条记录",
+      exact: true,
+    });
+
+    await expect(
+      scene.getByRole("list", { name: "全部标签" }).getByRole("button"),
+    ).toHaveCount(0);
+    await expect(emptyState).toBeVisible();
+    await expect(firstRecordActions).toHaveCount(2);
+    await expect(
+      page
+        .getByRole("navigation", { name: "主导航" })
+        .getByRole("searchbox", { name: "定位标签或搜索记录" }),
+    ).toBeEnabled();
+
+    for (let index = 0; index < 2; index += 1) {
+      await firstRecordActions.nth(index).click();
+
+      const dialog = page.getByRole("dialog", { name: "新建记录" });
+
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "关闭新建记录" }).click();
+      await expect(dialog).toBeHidden();
+    }
+  });
+
   test("every tag remains identifiable and operable in the motion-safe universe and its WebGL2 fallback", async ({
     context,
     page,

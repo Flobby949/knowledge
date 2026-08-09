@@ -71,7 +71,28 @@ test.describe("global search suggestions", () => {
     await search
       .getByRole("option", { name: tagName, exact: true })
       .click();
-    await expect(page).toHaveURL(appUrl(`/search?tag=${tagId}`));
+    await expect(page).toHaveURL((url) =>
+      url.pathname === "/" && url.searchParams.get("tag") === tagId,
+    );
+
+    const tagField = page.getByRole("region", { name: "神经标签场" });
+    const focusedTag = tagField
+      .getByRole("list", { name: "全部标签" })
+      .getByRole("button", { name: tagName, exact: true });
+
+    await expect(focusedTag).toHaveAttribute(
+      "data-state",
+      /(?:^|\s)focused(?:\s|$)/u,
+    );
+    await expect(
+      tagField.getByRole("status", { name: "标签焦点信息" }),
+    ).toContainText(`${tagName} · 已认可 · 1 条记录`);
+    await expect
+      .poll(async () =>
+        Number(await tagField.getAttribute("data-camera-distance")),
+      )
+      .toBeLessThanOrEqual(7.2);
+    expect(submittedSearches).toBe(0);
 
     await page.goBack();
     await input.fill(`自然语言问题 ${marker}`);

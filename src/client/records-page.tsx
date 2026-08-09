@@ -842,7 +842,7 @@ export function AppNavigation({
                     onClick={() => {
                       setSuggestionsOpen(false);
                       const search = new URLSearchParams({ tag: tag.id });
-                      void navigate(`/search?${search.toString()}`);
+                      void navigate(`/?${search.toString()}`);
                     }}
                     role="option"
                     type="button"

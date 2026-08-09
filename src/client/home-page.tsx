@@ -6,7 +6,7 @@
  * FORM: Brief-pinned Experience surface; depth-first orbital field, with no concept seed required.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import * as THREE from "three";
 
 import { getTagField, type TagFieldItem } from "./api.js";
@@ -19,6 +19,7 @@ const CAMERA_STORAGE_KEY = "knowledge.home.camera.v1";
 
 export function HomePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [tags, setTags] = useState<TagFieldItem[]>([]);
   const [tagFieldStatus, setTagFieldStatus] = useState<
     "failed" | "loading" | "ready"
@@ -30,6 +31,7 @@ export function HomePage() {
     "static-motion",
   );
   const [newRecordOpen, setNewRecordOpen] = useState(false);
+  const requestedTagId = searchParams.get("tag");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraStatusRef = useRef<HTMLOutputElement>(null);
   const cameraRef = useRef<CameraState>(readStoredCamera());
@@ -164,6 +166,18 @@ export function HomePage() {
       button.removeAttribute("data-behind-camera");
     }
   }, [renderMode, tags]);
+
+  useEffect(() => {
+    const requestedTag = tags.find((tag) => tag.id === requestedTagId);
+
+    if (!requestedTag) {
+      return;
+    }
+
+    setFocusedId(requestedTag.id);
+    setQuery(requestedTag.name);
+    webGlFieldRef.current?.focusTag(requestedTag.id);
+  }, [renderMode, requestedTagId, tags]);
 
   const matches = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
