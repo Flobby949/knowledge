@@ -271,7 +271,7 @@ test.describe("home neural tag field", () => {
     await tagNode(fallbackTags, approved).click();
     await expect(fallbackPage).toHaveURL(tagSearchUrl(approved.id));
     await expect(
-      fallbackPage.getByRole("status", { name: "当前标签筛选" }),
+      fallbackPage.getByRole("region", { name: "标签硬筛选" }),
     ).toContainText(approved.name);
   });
 });

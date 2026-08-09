@@ -74,6 +74,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: #edf6ff;
 }
 
+.app-navigation.dark .global-search-suggestions {
+  color: #dceaff;
+  background: #071126;
+  border-color: rgba(126, 163, 211, 0.3);
+}
+
+.app-navigation.dark .global-search-suggestions > div + div {
+  border-top-color: rgba(126, 163, 211, 0.2);
+}
+
+.app-navigation.dark .global-search-suggestions button:hover,
+.app-navigation.dark .global-search-suggestions button:focus-visible {
+  background: rgba(76, 139, 224, 0.18);
+}
+
 .app-navigation.dark .nav-divider {
   background: rgba(131, 162, 204, 0.28);
 }
@@ -135,6 +150,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .global-search input, .toolbar-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
 .global-search input::placeholder, .toolbar-search input::placeholder { color: #7d8ba8; }
+.global-search-suggestions {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  padding: 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 12px 28px rgb(19 41 78 / 12%);
+}
+.global-search-suggestions > div + div { padding-top: 7px; margin-top: 7px; border-top: 1px solid var(--border); }
+.global-search-suggestions p { margin: 0 8px 4px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.global-search-suggestions button { display: block; width: 100%; min-height: 34px; padding: 6px 8px; overflow: hidden; border: 0; border-radius: 5px; background: transparent; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.global-search-suggestions button:hover, .global-search-suggestions button:focus-visible { background: var(--signal-soft); }
+.global-search-suggestions span { display: block; padding: 6px 8px; color: var(--muted); font-size: 13px; }
 .search-icon { flex: 0 0 auto; width: 15px; height: 15px; margin-right: 12px; border: 1.5px solid #52668c; border-radius: 50%; }
 .search-icon::after { display: block; width: 6px; height: 1.5px; margin: 11px 0 0 11px; transform: rotate(45deg); background: #52668c; content: ""; }
 
