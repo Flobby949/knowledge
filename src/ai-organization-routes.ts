@@ -153,6 +153,17 @@ export function registerAiOrganizationRoutes(
     scheduleSemanticIndex,
   } = options;
 
+  app.addHook("onReady", async () => {
+    await pool.query(
+      `UPDATE ai_tasks
+          SET status = 'FAILED',
+              failure_code = 'SYSTEM_INTERRUPTED',
+              failure_message = '服务进程终止，AI 整理未完成，请重试。',
+              finished_at = clock_timestamp()
+        WHERE status IN ('QUEUED', 'RUNNING')`,
+    );
+  });
+
   app.post<{ Body: OrganizeBody; Params: OrganizeParams }>(
     "/api/v1/records/:id/organize",
     async (request, reply) => {
@@ -1304,8 +1315,12 @@ async function processTask(options: {
       const validation = validateGeneratedAnalysis(task.source_text, generated);
 
       if (validation.ok) {
-        await publishAnalysis(pool, task, validation.value);
-        scheduleSemanticIndex();
+        const published = await publishAnalysis(pool, task, validation.value);
+
+        if (published) {
+          scheduleSemanticIndex();
+        }
+
         return;
       }
 
@@ -1353,7 +1368,7 @@ async function publishAnalysis(
   pool: Pool,
   task: TaskSourceRow,
   analysis: AnalysisOutput,
-): Promise<void> {
+): Promise<boolean> {
   const client = await pool.connect();
 
   try {
@@ -1397,7 +1412,17 @@ async function publishAnalysis(
 
     if (!record) {
       await client.query("ROLLBACK");
-      return;
+      return false;
+    }
+
+    const currentTask = await client.query<{ status: AiTaskRow["status"] }>(
+      "SELECT status FROM ai_tasks WHERE id = $1 FOR UPDATE",
+      [task.id],
+    );
+
+    if (currentTask.rows[0]?.status !== "RUNNING") {
+      await client.query("ROLLBACK");
+      return false;
     }
 
     const publishable =
@@ -1530,6 +1555,7 @@ async function publishAnalysis(
       [task.id],
     );
     await client.query("COMMIT");
+    return true;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
