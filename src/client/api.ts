@@ -234,16 +234,23 @@ interface RecordHistoryResponse {
   page: { nextCursor: string | null };
 }
 
+export interface SearchMatch {
+  reason: "knowledge_point" | "original_text" | "semantic";
+  snippets: Array<{
+    text: string;
+    highlights: Array<{ start: number; end: number }>;
+  }>;
+  source: {
+    id: string;
+    type: "fragment" | "knowledge_point" | "overview";
+  };
+  visibility: "current" | "pending_review";
+}
+
 export interface SearchResult {
   record: RecordCard;
-  match: {
-    reason: "knowledge_point" | "original_text" | "semantic";
-    snippets: Array<{
-      text: string;
-      highlights: Array<{ start: number; end: number }>;
-    }>;
-    visibility: "current" | "pending_review";
-  };
+  match: SearchMatch;
+  otherMatches: SearchMatch[];
 }
 
 interface SearchResponse {

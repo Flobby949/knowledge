@@ -271,7 +271,17 @@ test("Search / 搜索 · 1600×1000 基线与 1280×800 的 480px 推挤抽屉",
   await expect(readiness).toContainText("关键词检索可用");
   await expect(results.getByRole("article")).toHaveCount(2);
   await expect(detailResult).toHaveCount(1);
-  await expect(detailResult).toContainText("命中原文");
+  await expect(
+    detailResult.getByRole("region", {
+      name: "AI 概览命中 · 最相关",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    detailResult.getByRole("button", {
+      name: /查看其他 \d+ 个命中来源/u,
+    }),
+  ).toBeVisible();
   await expect(detailResult).toContainText(visualFixture.primaryTagName);
   await expect(page.getByRole("button", { name: /加载更多/u })).toHaveCount(0);
   await detailResult.getByRole("button", {
@@ -297,7 +307,7 @@ test("Search / 搜索 · 1600×1000 基线与 1280×800 的 480px 推挤抽屉",
   await expect(currentPoints.getByRole("article")).toHaveCount(3);
   await expect(currentPoints).toContainText("CDC 捕获增量变化");
   await expect(originalExcerpt).toContainText("传统轮询会增加数据库负载");
-  await expect(drawer.getByLabel("原文匹配片段")).toContainText("CDC");
+  await expect(drawer.getByLabel("概览匹配片段")).toContainText("CDC");
   await expect(drawer.getByRole("link", { name: "打开完整详情" }))
     .toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);

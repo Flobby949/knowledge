@@ -25,6 +25,7 @@ import {
   searchRecords,
   type RecordDetail,
   type SearchHealth,
+  type SearchMatch,
   type SearchPage as SearchPageResponse,
   type SearchResult,
   type TagFieldItem,
@@ -642,27 +643,66 @@ function SearchResultGroup({
   result: SearchResult;
   selected: boolean;
 }) {
-  const snippets =
-    result.match.snippets.length > 0
-      ? result.match.snippets
-      : [{ text: result.record.preview, highlights: [] }];
+  const matches = searchMatches(result);
+  const [otherMatchesOpen, setOtherMatchesOpen] = useState(false);
+  const otherMatchCount = Math.max(0, matches.length - 1);
+  const visibleMatches = otherMatchesOpen ? matches : matches.slice(0, 1);
 
   return (
     <article className={selected ? "search-result-group selected" : "search-result-group"}>
       <div className="search-result-copy">
         <div className="search-match-meta">
           <p>{matchReasonLabel(result.match.reason)}</p>
-          {result.match.visibility === "pending_review" ? (
+          {matches.some((match) => match.visibility === "pending_review") ? (
             <span>待审查内容</span>
           ) : null}
         </div>
         <h2>{result.record.title}</h2>
-        <div className="search-result-snippets">
-          {snippets.map((snippet, index) => (
-            <p className="search-result-snippet" key={`${snippet.text}-${index}`}>
-              {snippet.text}
-            </p>
-          ))}
+        <p className="search-result-summary">{result.record.preview}</p>
+        <div aria-label="命中来源" className="search-result-sources">
+          {visibleMatches.map((match, matchIndex) => {
+            const snippets =
+              match.snippets.length > 0
+                ? match.snippets
+                : [{ text: result.record.preview, highlights: [] }];
+
+            return (
+              <section
+                aria-label={`${sourceMatchLabel(match)}${matchIndex === 0 ? " · 最相关" : ""}`}
+                className="search-result-source"
+                key={`${match.source.type}-${match.source.id}`}
+              >
+                <div>
+                  <strong>{sourceMatchLabel(match)}</strong>
+                  {matchIndex === 0 ? <span>最相关</span> : null}
+                  {match.visibility === "pending_review" ? (
+                    <span>待审查</span>
+                  ) : null}
+                </div>
+                <div className="search-result-snippets">
+                  {snippets.map((snippet, index) => (
+                    <p
+                      className="search-result-snippet"
+                      key={`${snippet.text}-${index}`}
+                    >
+                      {snippet.text}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+          {otherMatchCount > 0 ? (
+            <button
+              aria-expanded={otherMatchesOpen}
+              className="search-source-disclosure"
+              onClick={() => setOtherMatchesOpen((open) => !open)}
+              type="button"
+            >
+              {otherMatchesOpen ? "收起" : "查看"}其他 {otherMatchCount} 个命中来源
+              <span aria-hidden="true">{otherMatchesOpen ? "↑" : "↓"}</span>
+            </button>
+          ) : null}
         </div>
         <div className="search-result-tags">
           {result.record.myTags.map((tag) => (
@@ -694,14 +734,15 @@ function SearchDetailDrawer({
 }) {
   const [detail, setDetail] = useState<RecordDetail | null>(null);
   const [detailError, setDetailError] = useState(false);
+  const matches = searchMatches(result);
   const snippet = result.match.snippets[0]?.text ?? result.record.preview;
-  const matchedSnippets = new Set(
-    result.match.snippets.map((item) => item.text.trim()),
+  const matchedPointIds = new Set(
+    matches.flatMap((match) =>
+      match.source.type === "knowledge_point" ? [match.source.id] : [],
+    ),
   );
   const isMatchedPoint = (item: RecordDetail["organizedItems"][number]) =>
-    result.match.reason === "knowledge_point" &&
-    (matchedSnippets.has(item.title.trim()) ||
-      matchedSnippets.has(item.body.trim()));
+    matchedPointIds.has(item.id);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -725,7 +766,7 @@ function SearchDetailDrawer({
         <div>
           <p>记录命中核验</p>
           <h2>{detail?.presentation.title ?? result.record.title}</h2>
-          {result.match.visibility === "pending_review" ? (
+          {matches.some((match) => match.visibility === "pending_review") ? (
             <span className="search-drawer-review">待审查内容</span>
           ) : null}
         </div>
@@ -753,7 +794,7 @@ function SearchDetailDrawer({
       <section aria-labelledby="matched-content-title" className="matched-original">
         <div>
           <h3 id="matched-content-title">
-            {matchedContentTitle(result.match.reason)}
+            {matchedContentTitle(result.match)}
           </h3>
           <span>
             {result.match.reason === "knowledge_point"
@@ -763,9 +804,11 @@ function SearchDetailDrawer({
         </div>
         <p
           aria-label={
-            result.match.reason === "knowledge_point"
+            result.match.source.type === "knowledge_point"
               ? "知识点匹配片段"
-              : "原文匹配片段"
+              : result.match.source.type === "overview"
+                ? "概览匹配片段"
+                : "原文匹配片段"
           }
         >
           {snippet}
@@ -849,12 +892,38 @@ function matchReasonLabel(reason: SearchResult["match"]["reason"]): string {
   return reason === "semantic" ? "语义相关" : "命中原文";
 }
 
-function matchedContentTitle(reason: SearchResult["match"]["reason"]): string {
-  if (reason === "knowledge_point") {
+function searchMatches(result: SearchResult): SearchMatch[] {
+  return [result.match, ...(result.otherMatches ?? [])];
+}
+
+function sourceMatchLabel(match: SearchMatch): string {
+  if (match.reason === "semantic") {
+    if (match.source.type === "knowledge_point") {
+      return "语义相关 · 知识点";
+    }
+
+    return match.source.type === "overview"
+      ? "语义相关 · AI 概览"
+      : "语义相关 · 原文";
+  }
+
+  if (match.source.type === "knowledge_point") {
+    return "知识点命中";
+  }
+
+  return match.source.type === "overview" ? "AI 概览命中" : "原文命中";
+}
+
+function matchedContentTitle(match: SearchMatch): string {
+  if (match.source.type === "knowledge_point") {
     return "命中知识点";
   }
 
-  return reason === "semantic" ? "语义相关片段" : "命中原文";
+  if (match.source.type === "overview") {
+    return "命中 AI 概览";
+  }
+
+  return match.reason === "semantic" ? "语义相关片段" : "命中原文";
 }
 
 function presentationSourceLabel(

@@ -33,6 +33,7 @@ import {
   createSemanticIndexScheduler,
   findSemanticMatches,
   registerSemanticSearchRoutes,
+  type SemanticMatch,
 } from "./semantic-search.js";
 
 export interface BuildAppOptions {
@@ -174,16 +175,35 @@ interface RecordCard {
   updatedAt: string;
 }
 
+interface SearchMatch {
+  reason: "knowledge_point" | "original_text" | "semantic";
+  snippets: Array<{
+    text: string;
+    highlights: Array<{ start: number; end: number }>;
+  }>;
+  source: {
+    id: string;
+    type: "fragment" | "knowledge_point" | "overview";
+  };
+  visibility: "current" | "pending_review";
+}
+
 interface SearchResultItem {
   record: RecordCard;
-  match: {
-    reason: "knowledge_point" | "original_text" | "semantic";
-    snippets: Array<{
-      text: string;
-      highlights: Array<{ start: number; end: number }>;
-    }>;
-    visibility: "current" | "pending_review";
-  };
+  match: SearchMatch;
+  otherMatches: SearchMatch[];
+}
+
+interface ScoredSearchMatch {
+  match: SearchMatch;
+  score: number;
+}
+
+interface SearchableKnowledgePoint {
+  body: string;
+  id: string;
+  title: string;
+  visibility: "current" | "pending_review";
 }
 
 interface SearchSnapshot {
@@ -201,6 +221,7 @@ const MAX_SEARCH_SNAPSHOTS = 32;
 interface RecordRow {
   id: string;
   content: string;
+  fragment_revision_id: string;
   revision_number: number;
   updated_at: Date | string;
   updated_cursor: string;
@@ -217,9 +238,11 @@ interface RecordRow {
 }
 
 interface StoredRecord {
+  activeAnalysisId: string | null;
   card: RecordCard;
   content: string;
   cursor: RecordCursor;
+  fragmentRevisionId: string;
   knowledgeMatch: null | {
     title: string;
     body: string;
@@ -1668,10 +1691,35 @@ export async function buildApp(
         );
       }
 
-      const records = await findRecords(pool, query, undefined, tagIds, {
+      const records = await findRecords(pool, "", undefined, tagIds, {
         searchScope: scope,
       });
-      const recordIds = new Set(records.map((record) => record.card.id));
+      const pointsByRecord = await findSearchableKnowledgePoints(
+        pool,
+        records.map((record) => record.card.id),
+        query,
+        scope,
+      );
+      const groupedByRecord = new Map<
+        string,
+        { matches: ScoredSearchMatch[]; record: StoredRecord }
+      >();
+
+      for (const record of records) {
+        const matches = keywordMatchesForRecord(
+          record,
+          pointsByRecord.get(record.card.id) ?? [],
+          query,
+        );
+
+        if (matches.length > 0) {
+          groupedByRecord.set(record.card.id, { matches, record });
+        }
+      }
+
+      const recordsById = new Map(
+        records.map((record) => [record.card.id, record]),
+      );
       const semanticMatches =
         query
           ? await findSemanticMatches({
@@ -1681,41 +1729,70 @@ export async function buildApp(
               query,
             })
           : [];
-      const semanticRecords = await Promise.all(
-        semanticMatches
-          .filter((match) => !recordIds.has(match.recordId))
-          .map(async (match) => ({
-            match,
-            record: (await findRecords(pool, "", match.recordId, tagIds))[0],
-          })),
-      );
+
+      for (const semanticMatch of semanticMatches) {
+        const record = recordsById.get(semanticMatch.recordId);
+
+        if (!record) {
+          continue;
+        }
+
+        const group = groupedByRecord.get(record.card.id) ?? {
+          matches: [],
+          record,
+        };
+        const source = semanticSource(semanticMatch);
+        const keywordMatch = group.matches.find(
+          ({ match }) =>
+            match.source.id === source.id &&
+            match.source.type === source.type,
+        );
+
+        if (keywordMatch) {
+          keywordMatch.score += semanticMatch.score;
+        } else {
+          group.matches.push({
+            match: {
+              reason: "semantic",
+              snippets: [{ text: semanticMatch.text, highlights: [] }],
+              source,
+              visibility: "current",
+            },
+            score: semanticMatch.score,
+          });
+        }
+
+        groupedByRecord.set(record.card.id, group);
+      }
+
+      const rankedResults = [...groupedByRecord.values()].flatMap<{
+        item: SearchResultItem;
+        score: number;
+      }>(({ matches, record }) => {
+        matches.sort(compareSearchMatches);
+
+        const [primary, ...others] = matches;
+
+        return primary
+          ? [
+              {
+                item: {
+                  record: record.card,
+                  match: primary.match,
+                  otherMatches: others.map(({ match }) => match),
+                },
+                score: primary.score,
+              },
+            ]
+          : [];
+      });
+
+      rankedResults.sort(compareSearchResults);
 
       const snapshotId = randomUUID();
       const snapshot: SearchSnapshot = {
         signature,
-        items: [
-          ...records.map<SearchResultItem>(({ card, content, knowledgeMatch }) => ({
-            record: card,
-            match:
-              knowledgeMatch && !includesQuery(content, query)
-                ? knowledgePointMatch(knowledgeMatch, query)
-                : originalTextMatch(content, query),
-          })),
-          ...semanticRecords.flatMap<SearchResultItem>(({ match, record }) =>
-            record
-              ? [
-                  {
-                    record: record.card,
-                    match: {
-                      reason: "semantic",
-                      snippets: [{ text: match.text, highlights: [] }],
-                      visibility: "current",
-                    },
-                  },
-                ]
-              : [],
-          ),
-        ],
+        items: rankedResults.map(({ item }) => item),
       };
 
       if (snapshot.items.length > limit) {
@@ -2373,6 +2450,7 @@ async function findRecords(
     `WITH ${LIBRARY_TAG_RECORDS_CTE}
      SELECT record.id,
             revision.content,
+            revision.id AS fragment_revision_id,
             revision.revision_number,
             record.updated_at,
             record.updated_at::text AS updated_cursor,
@@ -2540,8 +2618,10 @@ async function findRecords(
     }
 
     records.set(row.id, {
+      activeAnalysisId: row.active_analysis_id,
       content: row.content,
       cursor: { id: row.id, updatedAt: row.updated_cursor },
+      fragmentRevisionId: row.fragment_revision_id,
       knowledgeMatch:
         row.knowledge_match_title && row.knowledge_match_body
           ? {
@@ -2585,27 +2665,298 @@ function includesQuery(content: string, query: string): boolean {
   return content.toLocaleLowerCase().includes(query.toLocaleLowerCase());
 }
 
-function knowledgePointMatch(
-  point: {
-    title: string;
-    body: string;
-    visibility: "current" | "pending_review";
-  },
+// Lexical bands are intentionally far apart so a weaker field cannot outrank
+// a stronger one. The semantic cosine score is added later within the 0..1
+// interval; record recency is used only after relevance is tied.
+const SEARCH_RELEVANCE = {
+  exact: 700,
+  title: 600,
+  overview: 500,
+  knowledgePointTitle: 400,
+  originalText: 300,
+  knowledgePointBody: 200,
+} as const;
+
+function compareSearchMatches(
+  left: ScoredSearchMatch,
+  right: ScoredSearchMatch,
+): number {
+  return right.score - left.score;
+}
+
+function semanticSource(match: SemanticMatch): SearchMatch["source"] {
+  if (match.sourceType === "KNOWLEDGE_POINT") {
+    return { id: match.sourceId, type: "knowledge_point" };
+  }
+
+  if (match.sourceType === "OVERVIEW") {
+    return { id: match.sourceId, type: "overview" };
+  }
+
+  return { id: match.sourceId, type: "fragment" };
+}
+
+function compareSearchResults(
+  left: { item: SearchResultItem; score: number },
+  right: { item: SearchResultItem; score: number },
+): number {
+  const relevance = right.score - left.score;
+
+  if (relevance !== 0) {
+    return relevance;
+  }
+
+  const updated =
+    Date.parse(right.item.record.updatedAt) -
+    Date.parse(left.item.record.updatedAt);
+
+  return updated !== 0
+    ? updated
+    : right.item.record.id.localeCompare(left.item.record.id);
+}
+
+async function findSearchableKnowledgePoints(
+  pool: Pool,
+  recordIds: string[],
   query: string,
-): SearchResultItem["match"] {
-  const text = includesQuery(point.title, query) ? point.title : point.body;
+  scope: SearchScope,
+): Promise<Map<string, SearchableKnowledgePoint[]>> {
+  if (!query || recordIds.length === 0) {
+    return new Map();
+  }
+
+  const result = await pool.query<{
+    ai_body: string;
+    ai_title: string;
+    id: string;
+    publication_status: string;
+    record_id: string;
+  }>(
+    `SELECT point.id,
+            point.record_id,
+            COALESCE(correction.title, point.ai_title) AS ai_title,
+            COALESCE(correction.body, point.ai_body) AS ai_body,
+            point.publication_status
+       FROM knowledge_points AS point
+       INNER JOIN ai_analysis_revisions AS analysis
+         ON analysis.id = point.analysis_revision_id
+       INNER JOIN records AS record
+         ON record.id = point.record_id
+       LEFT JOIN knowledge_point_corrections AS correction
+         ON correction.knowledge_point_id = point.id
+      WHERE point.record_id = ANY($1::uuid[])
+        AND point.usage_status = 'INCLUDED'
+        AND (
+          (
+            point.publication_status IN ('AUTO_PUBLISHED', 'CONFIRMED')
+            AND (
+              (
+                analysis.id = record.current_analysis_revision_id
+                AND analysis.status = 'ACTIVE'
+              )
+              OR (
+                analysis.fragment_revision_id = record.current_fragment_revision_id
+                AND analysis.status = 'GENERATED'
+              )
+            )
+          )
+          OR (
+            $3::text = 'include_review'
+            AND point.publication_status = 'PENDING_REVIEW'
+            AND analysis.fragment_revision_id = record.current_fragment_revision_id
+            AND analysis.status = 'GENERATED'
+          )
+        )
+        AND (
+          COALESCE(correction.title, point.ai_title) ILIKE '%' || $2 || '%'
+          OR COALESCE(correction.body, point.ai_body) ILIKE '%' || $2 || '%'
+        )
+      ORDER BY point.record_id, point.position, point.id`,
+    [recordIds, query, scope],
+  );
+  const byRecord = new Map<string, SearchableKnowledgePoint[]>();
+
+  for (const row of result.rows) {
+    const points = byRecord.get(row.record_id) ?? [];
+
+    points.push({
+      body: row.ai_body,
+      id: row.id,
+      title: row.ai_title,
+      visibility:
+        row.publication_status === "PENDING_REVIEW"
+          ? "pending_review"
+          : "current",
+    });
+    byRecord.set(row.record_id, points);
+  }
+
+  return byRecord;
+}
+
+function keywordMatchesForRecord(
+  record: StoredRecord,
+  points: SearchableKnowledgePoint[],
+  query: string,
+): ScoredSearchMatch[] {
+  if (!query) {
+    return [
+      {
+        match: {
+          reason: "original_text",
+          snippets: [{ text: firstNonEmptyLine(record.content), highlights: [] }],
+          source: { id: record.fragmentRevisionId, type: "fragment" },
+          visibility: "current",
+        },
+        score: 0,
+      },
+    ];
+  }
+
+  const matches: ScoredSearchMatch[] = [];
+
+  if (record.card.organization.view === "organized" && record.activeAnalysisId) {
+    const titleSnippet = matchingSnippet(record.card.title, query);
+    const summarySnippet = matchingSnippet(record.card.preview, query);
+    const snippets = uniqueSnippets([titleSnippet, summarySnippet]);
+
+    if (snippets.length > 0) {
+      matches.push({
+        match: {
+          reason: "knowledge_point",
+          snippets,
+          source: { id: record.activeAnalysisId, type: "overview" },
+          visibility: "current",
+        },
+        score: Math.max(
+          titleSnippet
+            ? lexicalFieldScore(
+                record.card.title,
+                query,
+                SEARCH_RELEVANCE.title,
+              )
+            : 0,
+          summarySnippet
+            ? lexicalFieldScore(
+                record.card.preview,
+                query,
+                SEARCH_RELEVANCE.overview,
+              )
+            : 0,
+        ),
+      });
+    }
+  }
+
+  for (const point of points) {
+    const titleSnippet = matchingSnippet(point.title, query);
+    const bodySnippet = matchingSnippet(point.body, query);
+    const snippets = uniqueSnippets([titleSnippet, bodySnippet]);
+
+    if (snippets.length === 0) {
+      continue;
+    }
+
+    matches.push({
+      match: {
+        reason: "knowledge_point",
+        snippets,
+        source: { id: point.id, type: "knowledge_point" },
+        visibility: point.visibility,
+      },
+      score: Math.max(
+        titleSnippet
+          ? lexicalFieldScore(
+              point.title,
+              query,
+              SEARCH_RELEVANCE.knowledgePointTitle,
+            )
+          : 0,
+        bodySnippet
+          ? lexicalFieldScore(
+              point.body,
+              query,
+              SEARCH_RELEVANCE.knowledgePointBody,
+            )
+          : 0,
+      ),
+    });
+  }
+
+  const fragmentSnippets = matchingLineSnippets(record.content, query);
+
+  if (fragmentSnippets.length > 0) {
+    const displayTitleScore =
+      record.card.organization.view === "original" &&
+      includesQuery(record.card.title, query)
+        ? lexicalFieldScore(
+            record.card.title,
+            query,
+            SEARCH_RELEVANCE.title,
+          )
+        : 0;
+
+    matches.push({
+      match: {
+        reason: "original_text",
+        snippets: fragmentSnippets,
+        source: { id: record.fragmentRevisionId, type: "fragment" },
+        visibility: "current",
+      },
+      score: Math.max(displayTitleScore, SEARCH_RELEVANCE.originalText),
+    });
+  }
+
+  return matches.sort((left, right) => right.score - left.score);
+}
+
+function lexicalFieldScore(
+  text: string,
+  query: string,
+  fieldScore: number,
+): number {
+  return text.toLocaleLowerCase() === query.toLocaleLowerCase()
+    ? SEARCH_RELEVANCE.exact
+    : fieldScore;
+}
+
+function matchingLineSnippets(
+  content: string,
+  query: string,
+): SearchMatch["snippets"] {
+  return uniqueSnippets(
+    content
+      .split(/\r\n|\n|\r/u)
+      .filter((line) => includesQuery(line, query))
+      .map((line) => matchingSnippet(line, query)),
+  );
+}
+
+function matchingSnippet(
+  text: string,
+  query: string,
+): SearchMatch["snippets"][number] | null {
   const start = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
 
-  return {
-    reason: "knowledge_point",
-    snippets: [
-      {
-        text,
-        highlights: start < 0 ? [] : [{ start, end: start + query.length }],
-      },
-    ],
-    visibility: point.visibility,
-  };
+  return start < 0
+    ? null
+    : { text, highlights: [{ start, end: start + query.length }] };
+}
+
+function uniqueSnippets(
+  candidates: Array<SearchMatch["snippets"][number] | null>,
+): SearchMatch["snippets"] {
+  const seen = new Set<string>();
+
+  return candidates.flatMap((candidate) => {
+    if (!candidate || seen.has(candidate.text)) {
+      return [];
+    }
+
+    seen.add(candidate.text);
+
+    return [candidate];
+  });
 }
 
 function recordCard(
@@ -2658,30 +3009,6 @@ function recordOrganizationActivity(
   }
 
   return "idle";
-}
-
-function originalTextMatch(
-  content: string,
-  query: string,
-): SearchResultItem["match"] {
-  const line = content
-    .split(/\r\n|\n|\r/u)
-    .find((candidate) =>
-      candidate.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
-    );
-  const text = line ?? firstNonEmptyLine(content);
-  const start = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
-
-  return {
-    reason: "original_text",
-    snippets: [
-      {
-        text,
-        highlights: start < 0 ? [] : [{ start, end: start + query.length }],
-      },
-    ],
-    visibility: "current",
-  };
 }
 
 function firstNonEmptyLine(content: string): string {

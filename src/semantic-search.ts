@@ -26,6 +26,9 @@ interface DocumentState {
 
 export interface SemanticMatch {
   recordId: string;
+  score: number;
+  sourceId: string;
+  sourceType: SearchDocument["sourceType"];
   text: string;
 }
 
@@ -194,7 +197,7 @@ export async function findSemanticMatches(options: {
       WHERE configuration_version = $1`,
     [configuration.version],
   );
-  const bestByRecord = new Map<string, { text: string; score: number }>();
+  const matches: SemanticMatch[] = [];
   const currentDocuments = new Map(
     documents.map((document) => [documentKey(document), document]),
   );
@@ -212,19 +215,24 @@ export async function findSemanticMatches(options: {
     }
 
     const score = cosineSimilarity(queryVector, row.embedding);
-    const current = bestByRecord.get(row.record_id);
-
-    if (score >= 0.75 && (!current || score > current.score)) {
-      bestByRecord.set(row.record_id, {
-        text: row.text_content,
+    if (score >= 0.75) {
+      matches.push({
+        recordId: row.record_id,
         score,
+        sourceId: row.source_id,
+        sourceType: row.source_type,
+        text: row.text_content,
       });
     }
   }
 
-  return [...bestByRecord.entries()]
-    .sort((left, right) => right[1].score - left[1].score)
-    .map(([recordId, match]) => ({ recordId, text: match.text }));
+  return matches.sort(
+    (left, right) =>
+      right.score - left.score ||
+      left.recordId.localeCompare(right.recordId) ||
+      left.sourceType.localeCompare(right.sourceType) ||
+      left.sourceId.localeCompare(right.sourceId),
+  );
 }
 
 export async function readSemanticHealth(pool: Pool) {
