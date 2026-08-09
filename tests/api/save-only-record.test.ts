@@ -150,6 +150,10 @@ describe("save-only record public HTTP flow", () => {
           record,
           match: {
             reason: "original_text",
+            source: {
+              id: expect.any(String),
+              type: "fragment",
+            },
             visibility: "current",
             snippets: [
               {
@@ -163,6 +167,7 @@ describe("save-only record public HTTP flow", () => {
               },
             ],
           },
+          otherMatches: [],
         },
       ],
       page: {
