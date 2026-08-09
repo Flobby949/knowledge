@@ -150,6 +150,7 @@ describe("save-only record public HTTP flow", () => {
           record,
           match: {
             reason: "original_text",
+            visibility: "current",
             snippets: [
               {
                 text: title,

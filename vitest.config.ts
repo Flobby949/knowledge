@@ -6,7 +6,7 @@ process.env.TEST_DATABASE_URL ??=
 export default defineConfig({
   test: {
     environment: "node",
-    exclude: ["tests/e2e/**", "node_modules/**"],
+    exclude: ["tests/e2e/**", "tests/visual/**", "node_modules/**"],
     fileParallelism: false,
     testTimeout: 10_000,
     hookTimeout: 20_000,
