@@ -62,11 +62,11 @@ export function NewRecordDialog({
   const initialTags = editingRecord?.editable.myTags;
   const textGraphemeCount = countGraphemes(text);
   const textTooLong = textGraphemeCount > 1_000;
-  const dirty =
+  const persistedFieldsChanged =
     text !== initialText ||
     selectedTags.map(tagSelectionKey).join("|") !==
-      (initialTags ?? []).map(tagSelectionKey).join("|") ||
-    tagDraft.length > 0;
+      (initialTags ?? []).map(tagSelectionKey).join("|");
+  const dirty = persistedFieldsChanged || tagDraft.length > 0;
 
   useEffect(() => {
     if (!open) {
@@ -176,6 +176,7 @@ export function NewRecordDialog({
     hasNonWhitespace(text) &&
     !textTooLong &&
     selectedTags.length > 0 &&
+    (!editingRecord || persistedFieldsChanged) &&
     !submitting;
 
   function requestClose() {

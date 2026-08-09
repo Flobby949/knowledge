@@ -7,6 +7,44 @@ const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 test.describe("record tag-only editing UI tracer", () => {
   test.use({ viewport: { width: 1_600, height: 1_000 } });
 
+  test("unchanged record cannot be submitted and closes without a dirty warning", async ({
+    page,
+    request,
+  }) => {
+    const marker = `unchanged-record-${randomUUID().slice(0, 8)}`;
+    const created = await request.post(appUrl("/api/v1/records"), {
+      data: {
+        text: `未修改的原文 ${marker}`,
+        myTags: [{ name: `未修改标签 ${marker}` }],
+        processing: "save_only",
+      },
+    });
+
+    expect(created.status()).toBe(201);
+
+    const recordId = ((await created.json()) as { record: { id: string } })
+      .record.id;
+
+    await page.goto(appUrl(`/records/${recordId}`));
+    await page
+      .getByRole("toolbar", { name: "记录操作" })
+      .getByRole("button", { name: "编辑记录", exact: true })
+      .click();
+
+    const dialog = page.getByRole("dialog", { name: "编辑记录" });
+    const save = dialog.getByRole("button", {
+      name: "保存修改",
+      exact: true,
+    });
+
+    await expect(save).toBeDisabled();
+    await dialog
+      .getByRole("button", { name: "关闭编辑记录", exact: true })
+      .click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  });
+
   test("user adds a tag without creating a new original-text version", async ({
     page,
     request,
