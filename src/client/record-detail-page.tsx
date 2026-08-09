@@ -17,6 +17,8 @@ import {
   discardOrganizationCandidate,
   getOrganizedItemEvidence,
   getRecordDetail,
+  getRecordHistory,
+  getRecordHistoryEntry,
   organizeRecord,
   putOrganizedItemCorrection,
   putOrganizedItemInclusion,
@@ -482,7 +484,9 @@ export function RecordDetailPage() {
           candidateDecision={candidateDecision}
           candidateError={organizationActionError}
           onCandidateDecision={handleCandidateDecision}
+          onOrganizeLatest={handleReanalysis}
           onOpenOverviewCorrection={() => setOverviewCorrectionOpen(true)}
+          organizeLatestBusy={reanalysisBusy}
           overviewCorrectionButton={overviewCorrectionButton}
           record={record}
         />
@@ -639,14 +643,18 @@ function RecordDetailContent({
   candidateDecision,
   candidateError,
   onCandidateDecision,
+  onOrganizeLatest,
   onOpenOverviewCorrection,
+  organizeLatestBusy,
   overviewCorrectionButton,
   record,
 }: {
   candidateDecision: "adopt" | "discard" | null;
   candidateError: string;
   onCandidateDecision: (decision: "adopt" | "discard") => Promise<void>;
+  onOrganizeLatest: () => Promise<void>;
   onOpenOverviewCorrection: () => void;
+  organizeLatestBusy: boolean;
   overviewCorrectionButton: React.RefObject<HTMLButtonElement | null>;
   record: RecordDetail;
 }) {
@@ -656,6 +664,14 @@ function RecordDetailContent({
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceSpan | null>(
     null,
   );
+  const [historicalSource, setHistoricalSource] = useState<null | {
+    text: string;
+    version: number;
+  }>(null);
+  const [evidenceLoadingVersion, setEvidenceLoadingVersion] = useState<
+    number | null
+  >(null);
+  const [evidenceLoadError, setEvidenceLoadError] = useState("");
   const [editingItem, setEditingItem] = useState<OrganizedItem | null>(null);
   const [excludedOpen, setExcludedOpen] = useState(false);
   const [visibleAiOriginals, setVisibleAiOriginals] = useState<string[]>([]);
@@ -668,12 +684,17 @@ function RecordDetailContent({
   }>(null);
   const correctionButtons = useRef(new Map<string, HTMLButtonElement>());
   const excludedToggle = useRef<HTMLButtonElement>(null);
+  const evidenceRequest = useRef(0);
 
   useEffect(() => {
     setOrganizedItems(record.organizedItems);
     setExcludedItems(record.excludedItems);
     setSelectedItemId(null);
     setSelectedEvidence(null);
+    setHistoricalSource(null);
+    setEvidenceLoadingVersion(null);
+    setEvidenceLoadError("");
+    evidenceRequest.current += 1;
 
     if (record.organization.candidate) {
       setEditingItem(null);
@@ -681,15 +702,87 @@ function RecordDetailContent({
   }, [record]);
 
   async function selectItem(itemId: string) {
+    const requestId = evidenceRequest.current + 1;
+
+    evidenceRequest.current = requestId;
     setSelectedItemId(itemId);
     setSelectedEvidence(null);
+    setHistoricalSource(null);
+    setEvidenceLoadingVersion(null);
+    setEvidenceLoadError("");
 
     try {
       const evidence = await getOrganizedItemEvidence(record.id, itemId);
-      setSelectedEvidence(evidence[0] ?? null);
+      const selected = evidence[0] ?? null;
+
+      if (evidenceRequest.current !== requestId || !selected) {
+        return;
+      }
+
+      if (selected.sourceTextVersion === record.editable.textVersion) {
+        setSelectedEvidence(selected);
+        return;
+      }
+
+      setEvidenceLoadingVersion(selected.sourceTextVersion);
+
+      const history = await getRecordHistory(record.id);
+      const sourceEntry = history.find(
+        (entry) =>
+          entry.type === "original" &&
+          entry.version === selected.sourceTextVersion,
+      );
+
+      if (!sourceEntry) {
+        throw new Error("Referenced source revision is missing");
+      }
+
+      const snapshot = await getRecordHistoryEntry(record.id, sourceEntry.id);
+
+      if (
+        snapshot.type !== "original" ||
+        snapshot.version !== selected.sourceTextVersion ||
+        snapshot.snapshot.text.slice(selected.start, selected.end) !==
+          selected.quote
+      ) {
+        throw new Error("Referenced evidence does not match its source revision");
+      }
+
+      if (evidenceRequest.current !== requestId) {
+        return;
+      }
+
+      setHistoricalSource({
+        text: snapshot.snapshot.text,
+        version: snapshot.version,
+      });
+      setSelectedEvidence(selected);
+      setEvidenceLoadingVersion(null);
     } catch {
-      setSelectedItemId(null);
+      if (evidenceRequest.current !== requestId) {
+        return;
+      }
+
+      setHistoricalSource(null);
+      setSelectedEvidence(null);
+      setEvidenceLoadingVersion(null);
+      setEvidenceLoadError(
+        "暂时无法载入这条知识点所依据的历史原文，请稍后重新选择。",
+      );
     }
+  }
+
+  function showCurrentSource() {
+    evidenceRequest.current += 1;
+    setHistoricalSource(null);
+    setSelectedEvidence(null);
+    setEvidenceLoadingVersion(null);
+    setEvidenceLoadError("");
+  }
+
+  async function organizeLatestSource() {
+    showCurrentSource();
+    await onOrganizeLatest();
   }
 
   function replaceItem(updated: OrganizedItem) {
@@ -845,12 +938,57 @@ function RecordDetailContent({
         <div className="record-original">
           <div className="record-section-heading">
             <h2 id="record-original-title">完整原文</h2>
-            <span>v{record.editable.textVersion}</span>
+            <span aria-label="当前显示原文版本">
+              v{historicalSource?.version ?? record.editable.textVersion}
+            </span>
           </div>
+          {historicalSource ? (
+            <div
+              aria-label="来源版本提示"
+              className="record-source-lag"
+              role="region"
+            >
+              <div>
+                <strong role="status">
+                  此知识点基于 v{historicalSource.version}，当前原文为 v
+                  {record.editable.textVersion}
+                </strong>
+                <span>当前标题、摘要与标签保持不变。</span>
+              </div>
+              <div className="record-source-lag-actions">
+                <button onClick={showCurrentSource} type="button">
+                  返回当前原文
+                </button>
+                <button
+                  disabled={
+                    organizeLatestBusy ||
+                    record.lifecycle === "archived" ||
+                    Boolean(record.organization.candidate) ||
+                    record.organization.activity === "queued" ||
+                    record.organization.activity === "running"
+                  }
+                  onClick={() => void organizeLatestSource()}
+                  type="button"
+                >
+                  {organizeLatestBusy ? "正在整理最新原文…" : "整理最新原文"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {evidenceLoadingVersion ? (
+            <p className="record-source-loading" role="status">
+              正在载入此知识点依据的原文 v{evidenceLoadingVersion}…
+            </p>
+          ) : null}
+          {evidenceLoadError ? (
+            <p className="record-source-error" role="alert">
+              {evidenceLoadError}
+            </p>
+          ) : null}
           <pre aria-label="完整原文">
             <HighlightedSource
               evidence={selectedEvidence}
-              sourceText={record.editable.text}
+              sourceText={historicalSource?.text ?? record.editable.text}
             />
           </pre>
         </div>

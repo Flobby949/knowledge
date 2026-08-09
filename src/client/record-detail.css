@@ -373,6 +373,91 @@
   font-size: 13px;
 }
 
+.record-source-lag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 16px;
+  margin-top: 16px;
+  color: #263c5f;
+  background: #f5f9ff;
+  border: 1px solid #d6e3f4;
+  border-radius: 8px;
+}
+
+.record-source-lag > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.record-source-lag strong {
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.5;
+}
+
+.record-source-lag span {
+  color: #60718e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.record-source-lag-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.record-source-lag-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  color: #23466f;
+  background: #fff;
+  border: 1px solid #c9d8eb;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.record-source-lag-actions button:last-child {
+  color: #fff;
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.record-source-lag-actions button:hover:not(:disabled) {
+  border-color: #80a9dd;
+}
+
+.record-source-lag-actions button:last-child:hover:not(:disabled) {
+  background: #0054db;
+  border-color: #0054db;
+}
+
+.record-source-lag-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.record-source-loading,
+.record-source-error {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.record-source-loading {
+  color: #60718e;
+}
+
+.record-source-error {
+  color: #b12f29;
+}
+
 .record-original pre {
   width: 100%;
   padding: 24px 0 0;
@@ -1290,6 +1375,12 @@
 }
 
 @media (max-width: 1350px) {
+  .record-source-lag {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
   .record-detail-toolbar {
     padding-inline: 24px;
   }
