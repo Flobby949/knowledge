@@ -14,6 +14,7 @@ import {
   type RecordTagSelection,
   type UserTagListItem,
 } from "./api.js";
+import { getPreferences } from "./preferences-api.js";
 import "./new-record-dialog.css";
 
 export interface NewRecordDialogProps {
@@ -92,8 +93,13 @@ export function NewRecordDialog({
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
 
     if (!editingRecord) {
-      void getModelConfiguration()
-        .then((configuration) => {
+      void Promise.all([
+        getModelConfiguration(),
+        getPreferences().catch(() => ({
+          defaultAiHandling: "automatic" as const,
+        })),
+      ])
+        .then(([configuration, preferences]) => {
           if (!active) {
             return;
           }
@@ -101,7 +107,9 @@ export function NewRecordDialog({
           const available = configuration.active !== null;
 
           setAiAvailable(available);
-          setProcessing(available ? "automatic" : "save_only");
+          setProcessing(
+            available ? preferences.defaultAiHandling : "save_only",
+          );
         })
         .catch(() => {
           if (active) {

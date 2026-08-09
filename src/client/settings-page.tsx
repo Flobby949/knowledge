@@ -17,6 +17,11 @@ import {
 } from "./api.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
+import {
+  getPreferences,
+  updatePreferences,
+  type DefaultAiHandling,
+} from "./preferences-api.js";
 import "./settings-page.css";
 
 const DEFAULT_TEXT_ENDPOINT = {
@@ -217,6 +222,8 @@ function ModelSettingsPanel({
         title="AI 模型"
       />
 
+      <DefaultAiHandlingSetting />
+
       <div aria-label="当前配置" className="configuration-group" role="group">
         <div className="configuration-group-heading">
           <div>
@@ -289,6 +296,112 @@ function ModelSettingsPanel({
         {actionError ? <p className="settings-action-error" role="alert">{actionError}</p> : null}
       </div>
     </section>
+  );
+}
+
+function DefaultAiHandlingSetting() {
+  const [value, setValue] = useState<DefaultAiHandling | null>(null);
+  const [status, setStatus] = useState<
+    "error" | "loading" | "ready" | "saved" | "saving"
+  >("loading");
+
+  useEffect(() => {
+    let active = true;
+
+    void getPreferences()
+      .then((preferences) => {
+        if (active) {
+          setValue(preferences.defaultAiHandling);
+          setStatus("ready");
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setStatus("error");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function choose(next: DefaultAiHandling) {
+    if (!value || next === value || status === "saving") {
+      return;
+    }
+
+    setStatus("saving");
+
+    try {
+      const preferences = await updatePreferences(next);
+
+      setValue(preferences.defaultAiHandling);
+      setStatus("saved");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  const disabled = value === null || status === "saving";
+  const statusCopy =
+    status === "loading"
+      ? "正在载入默认值…"
+      : status === "saving"
+        ? "正在保存…"
+        : status === "saved"
+          ? "默认值已保存"
+          : status === "error"
+            ? "默认值暂时无法载入或保存，请重试。"
+            : value === "review"
+              ? "当前默认：由我确认"
+              : "当前默认：自动采用";
+
+  return (
+    <div
+      aria-labelledby="handling-preference-title"
+      className="handling-preference"
+      role="group"
+    >
+      <div className="handling-preference-copy">
+        <h3 id="handling-preference-title">新记录默认处理</h3>
+        <p id="handling-preference-help">
+          每次新建时仍可单独切换；仅保存不受此默认值影响。
+        </p>
+      </div>
+      <div
+        aria-describedby="handling-preference-help"
+        className="handling-preference-options"
+      >
+        <label>
+          <input
+            checked={value === "automatic"}
+            disabled={disabled}
+            name="default-ai-handling"
+            onChange={() => void choose("automatic")}
+            type="radio"
+          />
+          <span>AI 整理并自动采用</span>
+        </label>
+        <label>
+          <input
+            checked={value === "review"}
+            disabled={disabled}
+            name="default-ai-handling"
+            onChange={() => void choose("review")}
+            type="radio"
+          />
+          <span>AI 整理后由我确认</span>
+        </label>
+      </div>
+      <output
+        aria-label="默认处理状态"
+        className={status === "error" ? "is-error" : undefined}
+        role={status === "error" ? "alert" : "status"}
+      >
+        {statusCopy}
+      </output>
+    </div>
   );
 }
 
