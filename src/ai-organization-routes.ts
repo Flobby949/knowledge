@@ -23,6 +23,10 @@ interface TaskParams {
   id: string;
 }
 
+interface TaskListQuery {
+  scope?: "all" | "attention";
+}
+
 interface OrganizationCandidateParams extends OrganizeParams {
   candidateId: string;
 }
@@ -59,6 +63,16 @@ interface AiTaskRow {
 
 interface ObservableAiTaskRow extends AiTaskRow {
   source_text_version: number;
+}
+
+interface AiTaskListRow extends ObservableAiTaskRow {
+  archived_at: Date | string | null;
+  created_at: Date | string;
+  current_source_text: string;
+  effective_title: string | null;
+  finished_at: Date | string | null;
+  retry_task_id: string | null;
+  started_at: Date | string | null;
 }
 
 export interface PublicAiTask {
@@ -280,6 +294,79 @@ export function registerAiOrganizationRoutes(
       }
 
       return { task: publicTask(task) };
+    },
+  );
+
+  app.get<{ Querystring: TaskListQuery }>(
+    "/api/v1/ai-tasks",
+    async (request, reply) => {
+      const scope = request.query.scope ?? "all";
+
+      if (scope !== "all" && scope !== "attention") {
+        return reply.code(422).send({
+          error: {
+            code: "AI_TASK_SCOPE_INVALID",
+            message: "请选择受支持的 AI 任务范围。",
+          },
+        });
+      }
+
+      const result = await pool.query<AiTaskListRow>(
+        `SELECT task.*,
+                source_revision.revision_number AS source_text_version,
+                current_revision.content AS current_source_text,
+                COALESCE(overview.title, active.title) AS effective_title,
+                record.archived_at,
+                retry.id AS retry_task_id
+           FROM ai_tasks AS task
+           INNER JOIN records AS record
+             ON record.id = task.record_id
+           INNER JOIN fragment_revisions AS source_revision
+             ON source_revision.id = task.fragment_revision_id
+           INNER JOIN fragment_revisions AS current_revision
+             ON current_revision.id = record.current_fragment_revision_id
+           LEFT JOIN ai_analysis_revisions AS active
+             ON active.id = record.current_analysis_revision_id
+            AND active.status = 'ACTIVE'
+           LEFT JOIN record_overview_corrections AS overview
+             ON overview.record_id = record.id
+            AND overview.analysis_revision_id = active.id
+           LEFT JOIN LATERAL (
+             SELECT child.id
+               FROM ai_tasks AS child
+              WHERE child.retry_of_task_id = task.id
+              LIMIT 1
+           ) AS retry ON TRUE
+          WHERE $1 = 'all'
+             OR task.status IN ('QUEUED', 'RUNNING')
+             OR (
+               task.status = 'FAILED'
+               AND retry.id IS NULL
+               AND record.archived_at IS NULL
+             )
+          ORDER BY task.created_at DESC, task.id DESC
+          LIMIT 100`,
+        [scope],
+      );
+
+      return {
+        items: result.rows.map((task) => ({
+          ...publicTask(task),
+          record: {
+            id: task.record_id,
+            title:
+              task.effective_title ?? firstNonEmptyLine(task.current_source_text),
+          },
+          createdAt: asIsoString(task.created_at),
+          startedAt: task.started_at ? asIsoString(task.started_at) : null,
+          finishedAt: task.finished_at ? asIsoString(task.finished_at) : null,
+          retryTaskId: task.retry_task_id,
+          canRetry:
+            task.status === "FAILED" &&
+            task.retry_task_id === null &&
+            task.archived_at === null,
+        })),
+      };
     },
   );
 
@@ -1538,4 +1625,8 @@ function publicTask(task: ObservableAiTaskRow): PublicAiTask {
 
 function asIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function firstNonEmptyLine(value: string): string {
+  return value.split(/\r\n|\n|\r/u).find((line) => line.trim())?.trim() ?? value;
 }

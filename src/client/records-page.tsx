@@ -12,6 +12,7 @@ import {
   type RecordCard,
   type TagFieldItem,
 } from "./api.js";
+import { AiTaskPulse } from "./ai-task-pulse.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 
 type ArchiveScope = "active" | "archived" | "all";
@@ -763,6 +764,7 @@ export function AppNavigation({
         </form>
 
         <div className="nav-actions">
+          <AiTaskPulse />
           <button ref={newRecordButton} className="primary-button" onClick={onCreate} type="button">
             新建记录
           </button>

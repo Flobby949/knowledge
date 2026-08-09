@@ -1,0 +1,359 @@
+.ai-task-page-shell {
+  min-height: 100vh;
+  background: var(--paper);
+}
+
+.ai-task-page-main {
+  width: calc(100% - 64px);
+  padding: 28px 0 72px;
+  margin: 0 32px;
+}
+
+.ai-task-page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  min-height: 110px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-task-page-heading p {
+  margin: 0 0 3px;
+  color: #6a7c99;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ai-task-page-heading h1 {
+  margin: 0;
+  font-size: 31px;
+  font-weight: 680;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.ai-task-page-heading > div > span {
+  display: block;
+  max-width: 68ch;
+  margin-top: 8px;
+  color: #5c6d88;
+  font-size: 13px;
+}
+
+.ai-task-status-filter {
+  display: grid;
+  grid-template-columns: auto 148px;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px 0 15px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.ai-task-status-filter > span {
+  color: #667793;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ai-task-status-filter select {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-task-status-filter:focus-within {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px rgba(0, 95, 249, 0.12);
+}
+
+.ai-task-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 64px;
+  color: #536681;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ai-task-list-heading output {
+  color: #71809a;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ai-task-list {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.ai-task-row {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) 220px;
+  gap: 28px;
+  min-height: 132px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-task-row:last-child {
+  border-bottom: 0;
+}
+
+.ai-task-row-state {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-content: start;
+  gap: 5px 9px;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.ai-task-row-mark {
+  display: block;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.ai-task-row-mark.is-queued {
+  color: #9a680c;
+  background: #fff0c7;
+}
+
+.ai-task-row-mark.is-running {
+  color: var(--signal);
+  background: var(--signal);
+  box-shadow: inset 0 0 0 2px #ffffff;
+}
+
+.ai-task-row-mark.is-failed {
+  color: #b42318;
+  background: #ffe3e0;
+  border-radius: 2px;
+}
+
+.ai-task-row-mark.is-succeeded {
+  color: var(--success);
+  background: var(--success);
+  box-shadow: inset 0 0 0 2px #ffffff;
+}
+
+.ai-task-row-state strong {
+  font-size: 13px;
+}
+
+.ai-task-row-state strong.is-queued {
+  color: #815709;
+}
+
+.ai-task-row-state strong.is-running {
+  color: #175db6;
+}
+
+.ai-task-row-state strong.is-failed {
+  color: #a82c23;
+}
+
+.ai-task-row-state strong.is-succeeded {
+  color: var(--success);
+}
+
+.ai-task-row-state time {
+  grid-column: 2;
+  color: #7a88a0;
+  font-size: 11px;
+}
+
+.ai-task-row-content {
+  min-width: 0;
+}
+
+.ai-task-row-content h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.ai-task-row-content > p {
+  margin: 5px 0 0;
+  color: #657590;
+  font-size: 12px;
+}
+
+.ai-task-row-failure {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  max-width: 76ch;
+  padding: 10px 12px;
+  margin-top: 13px;
+  color: #7e2922;
+  background: #fff8f7;
+  border: 1px solid #eed2cf;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.ai-task-row-failure > span {
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.ai-task-row-failure p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-task-row-failure code {
+  color: #8f4a44;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ai-task-row-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ai-task-row-actions a,
+.ai-task-row-actions button {
+  display: inline-grid;
+  min-height: 38px;
+  padding: 7px 13px;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ai-task-row-actions a {
+  color: #3d5272;
+  background: #fbfcfe;
+  border: 1px solid var(--border);
+}
+
+.ai-task-row-actions a:hover {
+  color: #174f9e;
+  border-color: #a6bdd8;
+}
+
+.ai-task-row-actions button {
+  color: #ffffff;
+  background: var(--signal);
+  border: 1px solid var(--signal);
+  cursor: pointer;
+}
+
+.ai-task-row-actions button:hover:not(:disabled) {
+  background: #0054dc;
+}
+
+.ai-task-row-actions button:disabled {
+  color: #91a0bc;
+  background: #e7ecf4;
+  border-color: #d8e0eb;
+  cursor: wait;
+}
+
+.ai-task-row-actions > span {
+  padding-top: 8px;
+  color: #60718b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ai-task-page-error {
+  padding: 11px 14px;
+  margin: 0 0 14px;
+  color: #9b2c24;
+  background: #fff7f6;
+  border: 1px solid #efcfcb;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.ai-task-page-feedback {
+  padding: 32px;
+  margin: 0;
+  color: #687995;
+  text-align: center;
+}
+
+.ai-task-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  min-height: 260px;
+  padding: 40px;
+}
+
+.ai-task-empty-signal {
+  position: relative;
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border: 1px solid #9ab0cd;
+  border-radius: 50%;
+}
+
+.ai-task-empty-signal::before {
+  position: absolute;
+  inset: 7px -4px;
+  transform: rotate(-28deg);
+  border: 1px solid #c3d2e5;
+  border-radius: 50%;
+  content: "";
+}
+
+.ai-task-empty-signal i {
+  width: 12px;
+  height: 12px;
+  background: #c7d7eb;
+  border-radius: 50%;
+}
+
+.ai-task-empty h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.ai-task-empty p {
+  margin: 4px 0 0;
+  color: #687995;
+  font-size: 13px;
+}
+
+@media (max-width: 1360px) {
+  .ai-task-row {
+    grid-template-columns: 142px minmax(0, 1fr) 200px;
+    gap: 20px;
+  }
+
+  .ai-task-row-failure {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .ai-task-row-failure code {
+    grid-column: 2;
+  }
+}

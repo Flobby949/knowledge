@@ -10,6 +10,7 @@ const textApiKey = process.env.DEEPSEEK_API_KEY;
 const embeddingApiKey = process.env.KNOELEDGE_API_KEY;
 const useE2eFakeAi = process.env.E2E_FAKE_AI === "1";
 const reanalysisFakeCallsBySource = new Map<string, number>();
+const taskRetryFakeCallsBySource = new Map<string, number>();
 const e2eAiGates = new Map<string, E2eAiGate>();
 const settledE2eAiTaskIds = new Set<string>();
 const bootstrapModelDraft =
@@ -85,9 +86,24 @@ async function testE2eModelEndpoint(): ReturnType<ModelEndpointTester> {
 async function generateE2eAnalysis({
   sourceText,
 }: Parameters<AnalysisGenerator>[0]): ReturnType<AnalysisGenerator> {
+  const taskRetryGateId = aiTaskRetryGateId(sourceText);
   const gateId = deleteDuringAiGateId(sourceText);
 
-  if (gateId) {
+  if (taskRetryGateId) {
+    const call = (taskRetryFakeCallsBySource.get(sourceText) ?? 0) + 1;
+
+    taskRetryFakeCallsBySource.set(sourceText, call);
+
+    if (call === 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
+      throw new Error("E2E 模拟 AI 服务暂时不可用");
+    }
+
+    const gate = e2eAiGate(taskRetryGateId);
+
+    gate.started = true;
+    await gate.wait;
+  } else if (gateId) {
     const gate = e2eAiGate(gateId);
 
     gate.started = true;
@@ -185,6 +201,10 @@ interface E2eAiGate {
 
 function deleteDuringAiGateId(sourceText: string): string | null {
   return /E2E_DELETE_DURING_AI ([0-9a-f]{8})/u.exec(sourceText)?.[1] ?? null;
+}
+
+function aiTaskRetryGateId(sourceText: string): string | null {
+  return /E2E_AI_TASK_RETRY ([0-9a-f]{8})/u.exec(sourceText)?.[1] ?? null;
 }
 
 function e2eAiGate(gateId: string): E2eAiGate {
