@@ -1,0 +1,41 @@
+{
+  "name": "knowledge",
+  "private": true,
+  "packageManager": "pnpm@11.20.0",
+  "type": "module",
+  "scripts": {
+    "db:migrate": "tsx scripts/migrate.ts",
+    "dev:api": "tsx watch src/server.ts",
+    "dev:web": "vite",
+    "test": "vitest run",
+    "test:api": "vitest run tests/api --no-file-parallelism",
+    "test:e2e": "playwright test --project=chrome",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": "24.18.1",
+    "pnpm": "11.20.0"
+  },
+  "dependencies": {
+    "fastify": "5.11.3",
+    "pg": "8.22.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2",
+    "three": "0.180.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.2.0",
+    "@types/pg": "8.21.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@types/three": "0.180.0",
+    "@vitejs/plugin-react": "6.0.5",
+    "tsx": "4.23.11",
+    "typescript": "7.0.2",
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
+  }
+}
