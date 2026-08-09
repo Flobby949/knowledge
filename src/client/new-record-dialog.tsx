@@ -53,6 +53,7 @@ export function NewRecordDialog({
   });
   const [processing, setProcessing] = useState<Processing>("save_only");
   const [aiAvailable, setAiAvailable] = useState(false);
+  const [aiAvailabilityResolved, setAiAvailabilityResolved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -82,6 +83,7 @@ export function NewRecordDialog({
     setTagLookup({ query: "", items: [], status: "idle" });
     setProcessing("save_only");
     setAiAvailable(false);
+    setAiAvailabilityResolved(false);
     setSubmitting(false);
     setSubmitError("");
     setConfirmDiscard(false);
@@ -107,6 +109,7 @@ export function NewRecordDialog({
           const available = configuration.active !== null;
 
           setAiAvailable(available);
+          setAiAvailabilityResolved(true);
           setProcessing(
             available ? preferences.defaultAiHandling : "save_only",
           );
@@ -114,6 +117,7 @@ export function NewRecordDialog({
         .catch(() => {
           if (active) {
             setAiAvailable(false);
+            setAiAvailabilityResolved(true);
             setProcessing("save_only");
           }
         });
@@ -431,12 +435,18 @@ export function NewRecordDialog({
               </label>
               <label className={`${processing === "automatic" ? "selected" : ""}${aiAvailable ? "" : " disabled-option"}`}>
                 <input checked={processing === "automatic"} disabled={!aiAvailable} name="processing" onChange={() => setProcessing("automatic")} type="radio" />
-                <span><strong>AI 整理并自动采用</strong><small>{aiAvailable ? "整理完成后自动采用 AI 结果。" : "配置模型后可用。"}</small></span>
+                <span><strong>AI 整理并自动采用</strong><small>{aiAvailable ? "整理完成后自动采用 AI 结果。" : aiAvailabilityResolved ? "配置模型后可用。" : "正在检查模型配置…"}</small></span>
               </label>
               <label className={`${processing === "review" ? "selected" : ""}${aiAvailable ? "" : " disabled-option"}`}>
                 <input checked={processing === "review"} disabled={!aiAvailable} name="processing" onChange={() => setProcessing("review")} type="radio" />
-                <span><strong>AI 整理后由我确认</strong><small>{aiAvailable ? "整理完成后逐项确认 AI 结果。" : "配置模型后可用。"}</small></span>
+                <span><strong>AI 整理后由我确认</strong><small>{aiAvailable ? "整理完成后逐项确认 AI 结果。" : aiAvailabilityResolved ? "配置模型后可用。" : "正在检查模型配置…"}</small></span>
               </label>
+              {!editingRecord && aiAvailabilityResolved ? (
+                <p className="model-settings-hint">
+                  <span>{aiAvailable ? "可在设置中管理本实例模型。" : "启用完整模型配置后即可使用 AI 整理。"}</span>
+                  <Link to="/settings#model-settings">前往模型设置</Link>
+                </p>
+              ) : null}
             </div>
           </fieldset>
         </div>

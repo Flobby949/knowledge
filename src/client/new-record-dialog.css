@@ -61,6 +61,9 @@
 .processing-options strong { font-size: 14px; line-height: 1.4; }
 .processing-options small { margin-top: 4px; color: #6b7892; font-size: 12px; line-height: 1.45; }
 .processing-options .disabled-option { color: #8e99ad; background: #fafbfd; cursor: not-allowed; }
+.model-settings-hint { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0 0; color: #65748f; font-size: 12px; line-height: 1.5; }
+.model-settings-hint a { flex: none; color: var(--signal); font-weight: 650; text-decoration: underline; text-decoration-color: rgb(5 99 253 / 30%); text-underline-offset: 3px; }
+.model-settings-hint a:hover { text-decoration-color: currentColor; }
 
 .dialog-footer { display: flex; align-items: center; justify-content: space-between; height: 76px; padding: 0 32px; background: #fbfcfe; border-top: 1px solid var(--border); }
 .dialog-footer p { margin: 0; color: #6a7894; font-size: 13px; }

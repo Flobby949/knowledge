@@ -77,6 +77,9 @@ test.describe("save-only record UI tracer", () => {
     });
     await expect(textInput).toBeFocused();
     await expect(saveButton).toBeDisabled();
+    await expect(
+      dialog.getByRole("link", { name: "前往模型设置", exact: true }),
+    ).toHaveAttribute("href", "/settings#model-settings");
 
     const title = `Save Only 保留原文 ${marker}`;
     const preview = "第二行保留换行与上下文，不请求 AI 整理。";
@@ -108,7 +111,7 @@ test.describe("save-only record UI tracer", () => {
     ).toBeVisible();
     await expect(createdCard.getByText(preview, { exact: true })).toBeVisible();
     await expect(createdCard.getByText(tagName, { exact: true })).toBeVisible();
-    await expect(createdCard.getByText("已保存", { exact: true })).toBeVisible();
+    await expect(createdCard.getByText("仅保存", { exact: true })).toBeVisible();
     await expect(
       navigation.getByRole("button", { name: /AI 任务/u }),
     ).toHaveCount(0);
