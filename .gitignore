@@ -1,0 +1,39 @@
+# macOS and Windows metadata
+.DS_Store
+Thumbs.db
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build, test, and tooling output
+dist/
+build/
+coverage/
+.vite/
+.turbo/
+.cache/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local design-tool runtime state
+.impeccable/questions/*.state.json
