@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   Link,
   useLocation,
@@ -882,6 +888,28 @@ function RecordArchiveCard({
   record: RecordCard;
 }) {
   const excerpt = recordExcerpt(record);
+  const link = useRef<HTMLAnchorElement>(null);
+  const [visibility, setVisibility] = useState({
+    intrinsicSize: 220,
+    nearViewport: true,
+  });
+
+  useEffect(() => {
+    const element = link.current;
+
+    if (!element) {
+      return;
+    }
+
+    return observeRecordCard(element, (nearViewport, intrinsicSize) => {
+      setVisibility((current) => ({
+        intrinsicSize: intrinsicSize > 0
+          ? intrinsicSize
+          : current.intrinsicSize,
+        nearViewport,
+      }));
+    });
+  }, []);
 
   return (
     <article
@@ -891,10 +919,14 @@ function RecordArchiveCard({
     >
       <Link
         aria-label={`打开记录：${record.title}`}
-        className="record-card-link"
+        className={`record-card-link${visibility.nearViewport ? " is-near-viewport" : ""}`}
         onClick={(event) =>
           onOpen(event.currentTarget.getBoundingClientRect().top)
         }
+        ref={link}
+        style={{
+          "--record-card-intrinsic-size": `${visibility.intrinsicSize}px`,
+        } as CSSProperties}
         to={`/records/${record.id}`}
       >
         <div className="record-index-row" aria-hidden="true">
@@ -922,6 +954,44 @@ function RecordArchiveCard({
       </Link>
     </article>
   );
+}
+
+const recordCardObservers = new Map<
+  Element,
+  (nearViewport: boolean, intrinsicSize: number) => void
+>();
+let recordCardObserver: IntersectionObserver | null = null;
+
+function observeRecordCard(
+  element: Element,
+  onVisibilityChange: (
+    nearViewport: boolean,
+    intrinsicSize: number,
+  ) => void,
+): () => void {
+  recordCardObserver ??= new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        recordCardObservers.get(entry.target)?.(
+          entry.isIntersecting,
+          entry.target.getBoundingClientRect().height,
+        );
+      }
+    },
+    { rootMargin: "400px 0px" },
+  );
+  recordCardObservers.set(element, onVisibilityChange);
+  recordCardObserver.observe(element);
+
+  return () => {
+    recordCardObserver?.unobserve(element);
+    recordCardObservers.delete(element);
+
+    if (recordCardObservers.size === 0) {
+      recordCardObserver?.disconnect();
+      recordCardObserver = null;
+    }
+  };
 }
 
 function recordStateLabel(record: RecordCard): string {

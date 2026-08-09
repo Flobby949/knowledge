@@ -94,6 +94,24 @@ test.describe("record library effective cards and cursor browsing", () => {
     await expect(activeSentinel).toBeVisible();
     await activeSentinel.scrollIntoViewIfNeeded();
     await expect(list.getByRole("article")).toHaveCount(26);
+    await expect
+      .poll(() =>
+        list
+          .getByRole("article")
+          .first()
+          .getByRole("link")
+          .evaluate((link) => getComputedStyle(link).contentVisibility),
+      )
+      .toBe("auto");
+    await expect
+      .poll(() =>
+        list
+          .getByRole("article")
+          .last()
+          .getByRole("link")
+          .evaluate((link) => getComputedStyle(link).contentVisibility),
+      )
+      .toBe("visible");
 
     const activeRequests = recordRequests.filter(
       (url) => (url.searchParams.get("archive") ?? "active") === "active",

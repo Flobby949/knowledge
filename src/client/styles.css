@@ -350,7 +350,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .record-card:hover { border-color: #9eb5d2; box-shadow: 0 8px 20px rgba(33, 58, 103, 0.07); transform: translateY(-2px); }
-.record-card-link { display: block; padding: 16px 20px 18px; }
+.record-card-link {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--record-card-intrinsic-size, 220px);
+  display: block;
+  padding: 16px 20px 18px;
+}
+.record-card-link.is-near-viewport {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
 .record-index-row { display: flex; align-items: center; justify-content: space-between; height: 20px; margin-bottom: 10px; color: #66789a; font-size: 13px; }
 .archive-glyph { color: #687da4; font-size: 12px; }
 .record-card h2 { margin: 0 0 8px; font-size: 18px; font-weight: 650; line-height: 1.55; letter-spacing: -0.01em; }
