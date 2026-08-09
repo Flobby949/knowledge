@@ -322,6 +322,59 @@ test.describe("home neural tag field", () => {
       fallbackPage.getByRole("region", { name: "标签硬筛选" }),
     ).toContainText(approved.name);
   });
+
+  test("a high-density field keeps every tag operable while reducing default label work", async ({
+    page,
+    request,
+  }) => {
+    const marker = `home-lod-${randomUUID().slice(0, 8)}`;
+    const tagCount = 601;
+
+    await seedDenseTagRecord(request, marker, tagCount);
+    await disableWebGl2(page);
+    await page.goto(appUrl("/"));
+
+    const scene = page.getByRole("region", { name: "神经标签场" });
+    const tagList = scene.getByRole("list", { name: "全部标签" });
+    const tags = tagList.getByRole("button");
+    const seededTags = tagList.getByRole("button", {
+      name: new RegExp(marker, "u"),
+    });
+
+    await expect(scene).toHaveAttribute("data-lod", "compact");
+    await expect(seededTags).toHaveCount(tagCount);
+    await expect
+      .poll(() =>
+        tags.evaluateAll((buttons) =>
+          buttons.every((button) => !(button as HTMLButtonElement).disabled),
+        ),
+      )
+      .toBe(true);
+
+    const hiddenLabelNode = scene
+      .locator('.tag-node-list button[data-label="lod-hidden"]')
+      .first();
+    const hiddenLabelName = await hiddenLabelNode.getAttribute("aria-label");
+
+    expect(hiddenLabelName).not.toBeNull();
+    await expect(hiddenLabelNode).toBeEnabled();
+    await expect(hiddenLabelNode.locator("strong")).toHaveCSS("opacity", "0");
+    await hiddenLabelNode.focus();
+
+    const focusedNode = scene.getByRole("button", {
+      name: hiddenLabelName ?? "",
+      exact: true,
+    });
+
+    await expect(focusedNode).toBeFocused();
+    await expect(focusedNode.locator("strong")).toHaveCSS("opacity", "1");
+
+    const focusedTagId = await focusedNode.getAttribute("data-tag-id");
+
+    expect(focusedTagId).not.toBeNull();
+    await focusedNode.press("Enter");
+    await expect(page).toHaveURL(tagSearchUrl(focusedTagId ?? ""));
+  });
 });
 
 test.describe("home neural tag field live motion", () => {
@@ -705,6 +758,25 @@ async function seedSaveOnlyTag(
       processing: "save_only",
       text: `首页神经标签场 ${tagName}`,
     },
+  });
+
+  expect(response.status()).toBe(201);
+}
+
+async function seedDenseTagRecord(
+  request: APIRequestContext,
+  marker: string,
+  tagCount: number,
+): Promise<void> {
+  const response = await request.post(appUrl("/api/v1/records"), {
+    data: {
+      myTags: Array.from({ length: tagCount }, (_, index) => ({
+        name: `LOD ${marker} ${String(index + 1).padStart(4, "0")}`,
+      })),
+      processing: "save_only",
+      text: `首页高密度标签场 ${marker}`,
+    },
+    timeout: 30_000,
   });
 
   expect(response.status()).toBe(201);

@@ -244,9 +244,20 @@
 }
 
 .tag-field[data-lod="balanced"] .tag-node-orbit-secondary,
+.tag-field[data-lod="compact"] .tag-node-orbit-secondary,
 .tag-field[data-lod="dense"] .tag-node-orbit-secondary,
+.tag-field[data-lod="compact"] .tag-node-shell::after,
+.tag-field[data-lod="dense"] .tag-node-shell::before,
 .tag-field[data-lod="dense"] .tag-node-shell::after {
   display: none;
+}
+
+.tag-field[data-lod="balanced"] .tag-node-energy {
+  filter: drop-shadow(0 0 11px color-mix(in srgb, var(--node-color) 30%, transparent));
+}
+
+.tag-field[data-lod="compact"] .tag-node-energy {
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--node-color) 24%, transparent));
 }
 
 .tag-field[data-lod="dense"] .tag-node-energy {

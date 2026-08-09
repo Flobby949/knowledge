@@ -9,6 +9,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import * as THREE from "three";
 
+import {
+  getTagFieldRenderBudget,
+  type TagFieldRenderBudget,
+} from "../domain/tag-field-lod.js";
 import { getTagField, type TagFieldItem } from "./api.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
@@ -41,6 +45,10 @@ export function HomePage() {
   const pointerRef = useRef<PointerDrag | null>(null);
   const tagNodeRefs = useRef(new Map<string, HTMLButtonElement>());
   const webGlFieldRef = useRef<WebGlTagField | null>(null);
+  const renderBudget = useMemo(
+    () => getTagFieldRenderBudget(tags.length),
+    [tags.length],
+  );
 
   useEffect(() => {
     let active = true;
@@ -100,6 +108,7 @@ export function HomePage() {
             onCameraFrame: publishCamera,
             onProjection: applyNodeProjections,
             reducedMotion,
+            renderBudget,
             shouldAutoRotate: () =>
               pointerRef.current === null &&
               focusedIdRef.current === null &&
@@ -142,7 +151,7 @@ export function HomePage() {
         webGlFieldRef.current = null;
       }
     };
-  }, [motionMode, tags]);
+  }, [motionMode, renderBudget, tags]);
 
   useEffect(() => {
     if (renderMode !== "dom-2d") {
@@ -381,7 +390,7 @@ export function HomePage() {
           data-camera-pitch={cameraRef.current.pitch.toFixed(3)}
           data-camera-yaw={cameraRef.current.yaw.toFixed(3)}
           data-interaction="idle"
-          data-lod={tagFieldLod(tags.length)}
+          data-lod={renderBudget.level}
           data-state={`deep-space ${renderMode} ${motionMode}`}
           onPointerCancel={finishPointerInteraction}
           onPointerDown={handlePointerDown}
@@ -398,6 +407,7 @@ export function HomePage() {
               const labelHidden = shouldHideNodeLabel(
                 tag.id,
                 tags.length,
+                renderBudget,
                 tag.id === focusedId,
               );
 
@@ -633,6 +643,7 @@ type WebGlTagFieldOptions = {
   onCameraFrame: (camera: CameraState) => void;
   onProjection: (projections: TagProjection[]) => void;
   reducedMotion: boolean;
+  renderBudget: TagFieldRenderBudget;
   shouldAutoRotate: () => boolean;
 };
 
@@ -715,25 +726,20 @@ function nodeDiameter(recordCount: number): number {
   return Math.min(112, Math.round(48 + Math.log2(recordCount + 1) * 16));
 }
 
-function tagFieldLod(tagCount: number): "balanced" | "dense" | "full" {
-  if (tagCount <= 300) {
-    return "full";
-  }
-
-  return tagCount <= 1_000 ? "balanced" : "dense";
-}
-
 function shouldHideNodeLabel(
   id: string,
   tagCount: number,
+  renderBudget: TagFieldRenderBudget,
   focused: boolean,
 ): boolean {
-  if (focused || tagCount <= 80) {
+  if (focused || tagCount <= renderBudget.labelTarget) {
     return false;
   }
 
-  const targetVisibleLabels = tagCount <= 300 ? 96 : tagCount <= 1_000 ? 70 : 52;
-  const stride = Math.max(2, Math.ceil(tagCount / targetVisibleLabels));
+  const stride = Math.max(
+    2,
+    Math.ceil(tagCount / renderBudget.labelTarget),
+  );
 
   return stableHash(id) % stride !== 0;
 }
@@ -817,16 +823,16 @@ function createWebGlTagField(
   scene.fog = new THREE.FogExp2(0x00030b, 0.085);
   scene.add(staticLayer, nodeGroup);
 
-  const starField = createStarField();
-  const dustField = createDustField();
+  const starField = createStarField(options.renderBudget.glowTextureSize);
+  const dustField = createDustField(options.renderBudget.glowTextureSize);
 
   staticLayer.add(starField, dustField);
 
-  for (const mesh of createInstancedTagEnergy(tags)) {
+  for (const mesh of createInstancedTagEnergy(tags, options.renderBudget)) {
     nodeGroup.add(mesh);
   }
 
-  const signalTraces = createSignalTraces(tags);
+  const signalTraces = createSignalTraces(tags, options.renderBudget);
 
   for (const trace of signalTraces) {
     staticLayer.add(trace.line, trace.pulse);
@@ -1044,7 +1050,7 @@ function createWebGlTagField(
   };
 }
 
-function createStarField(): THREE.Points {
+function createStarField(glowTextureSize: number): THREE.Points {
   const count = 420;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
@@ -1076,7 +1082,7 @@ function createStarField(): THREE.Points {
       sizeAttenuation: true,
       transparent: true,
       opacity: 0.74,
-      map: createGlowTexture(),
+      map: createGlowTexture(glowTextureSize),
       vertexColors: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -1084,7 +1090,7 @@ function createStarField(): THREE.Points {
   );
 }
 
-function createDustField(): THREE.Points {
+function createDustField(glowTextureSize: number): THREE.Points {
   const count = 96;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
@@ -1117,7 +1123,7 @@ function createDustField(): THREE.Points {
       sizeAttenuation: true,
       transparent: true,
       opacity: 0.34,
-      map: createGlowTexture(),
+      map: createGlowTexture(glowTextureSize),
       vertexColors: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -1125,23 +1131,31 @@ function createDustField(): THREE.Points {
   );
 }
 
-function createGlowTexture(): THREE.CanvasTexture {
+function createGlowTexture(size: number): THREE.CanvasTexture {
   const textureCanvas = document.createElement("canvas");
 
-  textureCanvas.width = 64;
-  textureCanvas.height = 64;
+  textureCanvas.width = size;
+  textureCanvas.height = size;
 
   const context = textureCanvas.getContext("2d");
 
   if (context) {
-    const glow = context.createRadialGradient(32, 32, 0, 32, 32, 31);
+    const center = size / 2;
+    const glow = context.createRadialGradient(
+      center,
+      center,
+      0,
+      center,
+      center,
+      center - 1,
+    );
 
     glow.addColorStop(0, "rgba(255, 255, 255, 1)");
     glow.addColorStop(0.14, "rgba(255, 255, 255, 0.82)");
     glow.addColorStop(0.46, "rgba(255, 255, 255, 0.2)");
     glow.addColorStop(1, "rgba(255, 255, 255, 0)");
     context.fillStyle = glow;
-    context.fillRect(0, 0, 64, 64);
+    context.fillRect(0, 0, size, size);
   }
 
   const texture = new THREE.CanvasTexture(textureCanvas);
@@ -1151,20 +1165,22 @@ function createGlowTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-function createInstancedTagEnergy(tags: TagFieldItem[]): THREE.InstancedMesh[] {
+function createInstancedTagEnergy(
+  tags: TagFieldItem[],
+  renderBudget: TagFieldRenderBudget,
+): THREE.InstancedMesh[] {
   if (tags.length === 0) {
     return [];
   }
 
-  const highDensity = tags.length > 300;
-  const widthSegments = highDensity ? 10 : 18;
-  const heightSegments = highDensity ? 7 : 12;
+  const { height: heightSegments, width: widthSegments } =
+    renderBudget.sphereSegments;
   const shell = new THREE.InstancedMesh(
     new THREE.SphereGeometry(1, widthSegments, heightSegments),
     new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: highDensity ? 0.06 : 0.1,
+      opacity: renderBudget.energyOpacity.shell,
       wireframe: false,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -1176,7 +1192,7 @@ function createInstancedTagEnergy(tags: TagFieldItem[]): THREE.InstancedMesh[] {
     new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: highDensity ? 0.54 : 0.74,
+      opacity: renderBudget.energyOpacity.core,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
@@ -1221,12 +1237,18 @@ function createInstancedTagEnergy(tags: TagFieldItem[]): THREE.InstancedMesh[] {
   return [shell, core];
 }
 
-function createSignalTraces(tags: TagFieldItem[]): SignalTrace[] {
+function createSignalTraces(
+  tags: TagFieldItem[],
+  renderBudget: TagFieldRenderBudget,
+): SignalTrace[] {
   if (tags.length < 2) {
     return [];
   }
 
-  const curveCount = Math.min(4, Math.max(1, Math.floor(tags.length / 3)));
+  const curveCount = Math.min(
+    renderBudget.traceLimit,
+    Math.max(1, Math.floor(tags.length / 3)),
+  );
   const traces: SignalTrace[] = [];
 
   for (let index = 0; index < curveCount; index += 1) {
@@ -1246,7 +1268,9 @@ function createSignalTraces(tags: TagFieldItem[]): SignalTrace[] {
 
     middle.y += (stableUnit(`signal:${index}:bend`) - 0.5) * 1.1;
     const curve = new THREE.QuadraticBezierCurve3(from, middle, to);
-    const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(36));
+    const geometry = new THREE.BufferGeometry().setFromPoints(
+      curve.getPoints(renderBudget.traceSegments),
+    );
     const line = new THREE.Line(
       geometry,
       new THREE.LineBasicMaterial({
@@ -1265,7 +1289,7 @@ function createSignalTraces(tags: TagFieldItem[]): SignalTrace[] {
         sizeAttenuation: true,
         transparent: true,
         opacity: 0.8,
-        map: createGlowTexture(),
+        map: createGlowTexture(renderBudget.glowTextureSize),
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
