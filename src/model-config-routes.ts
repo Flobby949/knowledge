@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 import {
   decryptCredential,
@@ -342,6 +342,17 @@ export function registerModelConfigRoutes(
         });
       }
 
+      const activeResult = await client.query<ModelConfigRow>(
+        `SELECT *
+           FROM model_configurations
+          WHERE state = 'ACTIVE'
+          FOR UPDATE`,
+      );
+      const previousActive = activeResult.rows[0];
+      const canReuseSemanticIndex =
+        previousActive?.embedding_base_url === draft.embedding_base_url &&
+        previousActive.embedding_model === draft.embedding_model;
+
       await client.query(
         `UPDATE model_configurations
             SET state = 'SUPERSEDED',
@@ -357,6 +368,11 @@ export function registerModelConfigRoutes(
           RETURNING *`,
         [draft.version],
       );
+
+      if (previousActive && canReuseSemanticIndex) {
+        await reuseSemanticIndex(client, previousActive.version, draft.version);
+      }
+
       await client.query("COMMIT");
       scheduleSemanticIndex();
 
@@ -374,6 +390,54 @@ export function registerModelConfigRoutes(
       client.release();
     }
   });
+}
+
+async function reuseSemanticIndex(
+  client: PoolClient,
+  previousConfigurationVersion: number,
+  nextConfigurationVersion: number,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO semantic_document_states
+       (configuration_version, source_type, source_id, record_id,
+        text_content, status, failure_reason, attempt_count, updated_at)
+     SELECT $2, source_type, source_id, record_id,
+            text_content, status, failure_reason, attempt_count, updated_at
+       FROM semantic_document_states
+      WHERE configuration_version = $1`,
+    [previousConfigurationVersion, nextConfigurationVersion],
+  );
+  await client.query(
+    `INSERT INTO semantic_embeddings
+       (configuration_version, embedding_model, source_type, source_id,
+        record_id, text_content, embedding, created_at)
+     SELECT $2, embedding_model, source_type, source_id,
+            record_id, text_content, embedding, created_at
+       FROM semantic_embeddings
+      WHERE configuration_version = $1`,
+    [previousConfigurationVersion, nextConfigurationVersion],
+  );
+  await client.query(
+    `INSERT INTO semantic_index_states (configuration_version, activated_at)
+     SELECT $2,
+            COALESCE(
+              (SELECT activated_at
+                 FROM semantic_index_states
+                WHERE configuration_version = $1),
+              clock_timestamp()
+            )
+      WHERE EXISTS (
+              SELECT 1
+                FROM semantic_index_states
+               WHERE configuration_version = $1
+            )
+         OR NOT EXISTS (
+              SELECT 1
+                FROM semantic_embeddings
+               WHERE configuration_version NOT IN ($1, $2)
+            )`,
+    [previousConfigurationVersion, nextConfigurationVersion],
+  );
 }
 
 async function readPreferences(pool: Pool) {
