@@ -1532,7 +1532,7 @@ async function publishAnalysis(
         );
       }
 
-      await assignCandidateTags(client, pointId, point.tags ?? []);
+      await assignCandidateTags(client, pointId, analysisId, point.tags ?? []);
     }
 
     if (automaticPublish) {
@@ -1567,6 +1567,7 @@ async function publishAnalysis(
 async function assignCandidateTags(
   client: PoolClient,
   pointId: string,
+  analysisId: string,
   names: string[],
 ): Promise<void> {
   for (const displayName of names) {
@@ -1594,10 +1595,15 @@ async function assignCandidateTags(
 
     await client.query(
       `INSERT INTO tag_assignments
-         (knowledge_point_id, tag_id, assigned_by, status)
-       VALUES ($1, $2, 'AI', 'ACTIVE')
+         (knowledge_point_id,
+          tag_id,
+          assigned_by,
+          status,
+          analysis_revision_id,
+          raw_label)
+       VALUES ($1, $2, 'AI', 'ACTIVE', $3, $4)
        ON CONFLICT DO NOTHING`,
-      [pointId, tagId],
+      [pointId, tagId, analysisId, displayName],
     );
   }
 }

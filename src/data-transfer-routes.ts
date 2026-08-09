@@ -59,6 +59,8 @@ interface TagAssignmentSnapshotRow extends DomainRow {
   status: "ACTIVE" | "SUPPRESSED";
   created_at: Timestamp;
   knowledge_point_id: string | null;
+  analysis_revision_id: string | null;
+  raw_label: string | null;
 }
 
 interface AnalysisSnapshotRow extends DomainRow {
@@ -636,6 +638,8 @@ function validateTagAssignmentRow(row: DomainRow): void {
     "status",
     "created_at",
     "knowledge_point_id",
+    "analysis_revision_id",
+    "raw_label",
   ]);
   requireUuid(row, "id");
   requireNullableUuid(row, "record_id");
@@ -644,14 +648,29 @@ function validateTagAssignmentRow(row: DomainRow): void {
   requireEnum(row, "status", ["ACTIVE", "SUPPRESSED"]);
   requireTimestamp(row, "created_at");
   requireNullableUuid(row, "knowledge_point_id");
+  requireNullableUuid(row, "analysis_revision_id");
+
+  if (
+    row.raw_label !== null &&
+    (typeof row.raw_label !== "string" || row.raw_label.length === 0)
+  ) {
+    throw new Error("raw_label must be a nullable non-empty string");
+  }
 
   const hasRecord = row.record_id !== null;
   const hasKnowledgePoint = row.knowledge_point_id !== null;
 
   if (
     hasRecord === hasKnowledgePoint ||
-    (row.assigned_by === "USER" && (!hasRecord || row.status !== "ACTIVE")) ||
-    (row.assigned_by === "AI" && !hasKnowledgePoint)
+    (row.assigned_by === "USER" &&
+      (!hasRecord ||
+        row.status !== "ACTIVE" ||
+        row.analysis_revision_id !== null ||
+        row.raw_label !== null)) ||
+    (row.assigned_by === "AI" &&
+      (!hasKnowledgePoint ||
+        row.analysis_revision_id === null ||
+        row.raw_label === null))
   ) {
     throw new Error("tag assignment target is invalid");
   }
@@ -945,11 +964,15 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   }
 
   for (const assignment of snapshot.tagAssignments) {
+    const point = assignment.knowledge_point_id
+      ? points.get(assignment.knowledge_point_id)
+      : undefined;
+
     if (
       !tags.has(assignment.tag_id) ||
       (assignment.record_id !== null && !records.has(assignment.record_id)) ||
       (assignment.knowledge_point_id !== null &&
-        !points.has(assignment.knowledge_point_id))
+        (!point || assignment.analysis_revision_id !== point.analysis_revision_id))
     ) {
       throw new Error("tag assignment reference is invalid");
     }
@@ -1156,6 +1179,8 @@ async function restoreSnapshot(
     "status",
     "created_at",
     "knowledge_point_id",
+    "analysis_revision_id",
+    "raw_label",
   ], snapshot.tagAssignments);
 }
 

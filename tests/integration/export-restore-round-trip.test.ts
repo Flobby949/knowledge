@@ -40,7 +40,14 @@ type DomainJson = {
   >;
   tags: Array<Record<string, unknown> & { id: string }>;
   tagAssignments: Array<
-    Record<string, unknown> & { id: string; record_id: string | null }
+    Record<string, unknown> & {
+      id: string;
+      record_id: string | null;
+      knowledge_point_id: string | null;
+      assigned_by: "USER" | "AI";
+      analysis_revision_id: string | null;
+      raw_label: string | null;
+    }
   >;
   analyses: Array<Record<string, unknown> & { id: string }>;
   knowledgePoints: Array<
@@ -397,6 +404,37 @@ describe("complete export and empty-instance restore", () => {
         snapshot.tagAssignments = snapshot.tagAssignments.filter(
           (assignment) => assignment.record_id !== recordId,
         );
+      }),
+      mutateDomainJson(archive, (snapshot) => {
+        const assignment = snapshot.tagAssignments.find(
+          (candidate) => candidate.assigned_by === "AI",
+        )!;
+
+        assignment.raw_label = null;
+      }),
+      mutateDomainJson(archive, (snapshot) => {
+        const assignment = snapshot.tagAssignments.find(
+          (candidate) => candidate.assigned_by === "AI",
+        )!;
+        const sourceAnalysis = snapshot.analyses.find(
+          (analysis) => analysis.id === assignment.analysis_revision_id,
+        )!;
+        const otherAnalysisId = crypto.randomUUID();
+
+        snapshot.analyses.push({
+          ...sourceAnalysis,
+          id: otherAnalysisId,
+          status: "GENERATED",
+        });
+        assignment.analysis_revision_id = otherAnalysisId;
+      }),
+      mutateDomainJson(archive, (snapshot) => {
+        const assignment = snapshot.tagAssignments.find(
+          (candidate) => candidate.assigned_by === "USER",
+        )!;
+
+        assignment.analysis_revision_id = snapshot.analyses[0]!.id;
+        assignment.raw_label = "不应属于用户关联";
       }),
     ];
 

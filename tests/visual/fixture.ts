@@ -302,6 +302,8 @@ function createVisualRestoreArchive(): Buffer {
     status: "ACTIVE",
     created_at: FIXED_TIME,
     knowledge_point_id: null,
+    analysis_revision_id: null,
+    raw_label: null,
   }));
   userAssignments.push(
     {
@@ -312,6 +314,8 @@ function createVisualRestoreArchive(): Buffer {
       status: "ACTIVE",
       created_at: FIXED_TIME,
       knowledge_point_id: null,
+      analysis_revision_id: null,
+      raw_label: null,
     },
     {
       id: stableUuid(4, 21),
@@ -321,6 +325,8 @@ function createVisualRestoreArchive(): Buffer {
       status: "ACTIVE",
       created_at: FIXED_TIME,
       knowledge_point_id: null,
+      analysis_revision_id: null,
+      raw_label: null,
     },
   );
   const aiAssignments = [1, 4].map((pointIndex, index) => ({
@@ -331,6 +337,8 @@ function createVisualRestoreArchive(): Buffer {
     status: "ACTIVE",
     created_at: FIXED_TIME,
     knowledge_point_id: stableUuid(6, pointIndex),
+    analysis_revision_id: knowledgePoints[pointIndex - 1]!.analysis_revision_id,
+    raw_label: candidateTag.display_name,
   }));
   const snapshot = {
     formatVersion: 1,

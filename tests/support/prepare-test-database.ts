@@ -13,7 +13,9 @@ export interface PreparedTestDatabase {
   dispose: () => void;
 }
 
-export function prepareTestDatabase(): PreparedTestDatabase {
+export function prepareTestDatabase(options?: {
+  migrationsThrough?: string;
+}): PreparedTestDatabase {
   const databaseName = `knowledge_test_${randomUUID().replaceAll("-", "")}`;
   const postgresUser = readPostgresEnvironment("POSTGRES_USER");
   const postgresPassword = readPostgresEnvironment("POSTGRES_PASSWORD");
@@ -33,6 +35,11 @@ export function prepareTestDatabase(): PreparedTestDatabase {
   try {
     for (const filename of readdirSync(migrationsDirectory)
       .filter((entry) => entry.endsWith(".sql"))
+      .filter(
+        (entry) =>
+          options?.migrationsThrough === undefined ||
+          entry <= options.migrationsThrough,
+      )
       .sort()) {
       runDockerCompose(
         [

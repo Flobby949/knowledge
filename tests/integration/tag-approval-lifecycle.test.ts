@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../../src/app.js";
+import { readStoredZip } from "../../src/zip-archive.js";
 import {
   prepareTestDatabase,
   type PreparedTestDatabase,
@@ -120,6 +121,56 @@ describe("unified AI candidate tag approval public flow", () => {
     if (!candidateId) {
       throw new Error("organized knowledge must expose its AI candidate tag");
     }
+
+    const domain = await exportDomainJson(app);
+    const assignmentsByPoint = new Map(
+      domain.tagAssignments.map((assignment) => [
+        assignment.knowledge_point_id,
+        assignment,
+      ]),
+    );
+
+    expect(
+      detailBeforeApproval.organizedItems.map((item) => {
+        const assignment = assignmentsByPoint.get(item.id);
+        const point = domain.knowledgePoints.find(
+          (candidate) => candidate.id === item.id,
+        );
+
+        return {
+          tagId: assignment?.tag_id,
+          analysisId: assignment?.analysis_revision_id,
+          pointAnalysisId: point?.analysis_revision_id,
+          rawLabel: assignment?.raw_label,
+        };
+      }),
+    ).toEqual([
+      {
+        tagId: candidateId,
+        analysisId: expect.any(String),
+        pointAnalysisId: expect.any(String),
+        rawLabel: "CDC",
+      },
+      {
+        tagId: candidateId,
+        analysisId: expect.any(String),
+        pointAnalysisId: expect.any(String),
+        rawLabel: "ＣＤＣ",
+      },
+    ]);
+    expect(
+      domain.tagAssignments
+        .filter((assignment) => assignment.knowledge_point_id !== null)
+        .every((assignment) => {
+          const point = domain.knowledgePoints.find(
+            (candidate) => candidate.id === assignment.knowledge_point_id,
+          );
+
+          return (
+            assignment.analysis_revision_id === point?.analysis_revision_id
+          );
+        }),
+    ).toBe(true);
 
     expect(
       detailBeforeApproval.editable.myTags.some(
@@ -289,4 +340,56 @@ function spanFor(sourceText: string, quote: string) {
   }
 
   return { quote, start, end: start + quote.length };
+}
+
+async function exportDomainJson(app: FastifyInstance) {
+  const requested = await app.inject({
+    method: "POST",
+    url: "/api/v1/exports",
+  });
+
+  expect(requested.statusCode).toBe(202);
+
+  const exportId = (requested.json() as { export: { id: string } }).export.id;
+  let downloadUrl: string | undefined;
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const status = await app.inject({
+      method: "GET",
+      url: `/api/v1/exports/${exportId}`,
+    });
+    const body = status.json() as {
+      export: { status: string; downloadUrl?: string };
+    };
+
+    if (body.export.status === "succeeded") {
+      downloadUrl = body.export.downloadUrl;
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  if (!downloadUrl) {
+    throw new Error("tag provenance export did not complete");
+  }
+
+  const downloaded = await app.inject({ method: "GET", url: downloadUrl });
+  const json = readStoredZip(downloaded.rawPayload)
+    .get("domain.json")
+    ?.toString("utf8");
+
+  if (!json) {
+    throw new Error("tag provenance export is missing domain.json");
+  }
+
+  return JSON.parse(json) as {
+    tagAssignments: Array<{
+      knowledge_point_id: string | null;
+      tag_id: string;
+      analysis_revision_id: string | null;
+      raw_label: string | null;
+    }>;
+    knowledgePoints: Array<{ id: string; analysis_revision_id: string }>;
+  };
 }
