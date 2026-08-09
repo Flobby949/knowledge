@@ -22,6 +22,10 @@ interface ModelConfigDraftBody {
   embedding: ModelConfigEndpointBody;
 }
 
+interface PreferenceBody {
+  defaultAiHandling?: string;
+}
+
 export interface BootstrapModelDraft {
   text: Required<ModelConfigEndpointBody>;
   embedding: Required<ModelConfigEndpointBody>;
@@ -58,6 +62,39 @@ export function registerModelConfigRoutes(
 
   app.get("/api/v1/model-config/draft", async () =>
     readPublicConfiguration(pool, credentialSecret),
+  );
+
+  app.get("/api/v1/preferences", async () => ({
+    preferences: await readPreferences(pool),
+  }));
+
+  app.patch<{ Body: PreferenceBody }>(
+    "/api/v1/preferences",
+    async (request, reply) => {
+      const handling = request.body?.defaultAiHandling;
+
+      if (handling !== "automatic" && handling !== "review") {
+        return reply.code(422).send({
+          error: {
+            code: "PREFERENCE_INVALID",
+            message: "请选择自动采用或人工审查作为默认处理方式。",
+          },
+        });
+      }
+
+      const result = await pool.query<{ default_ai_handling: string }>(
+        `UPDATE instance_preferences
+            SET default_ai_handling = $1,
+                updated_at = clock_timestamp()
+          WHERE singleton = true
+        RETURNING default_ai_handling`,
+        [handling === "automatic" ? "AUTOMATIC" : "REVIEW"],
+      );
+
+      return {
+        preferences: publicPreferences(result.rows[0]?.default_ai_handling),
+      };
+    },
   );
 
   app.put<{ Body: ModelConfigDraftBody }>(
@@ -337,6 +374,24 @@ export function registerModelConfigRoutes(
       client.release();
     }
   });
+}
+
+async function readPreferences(pool: Pool) {
+  const result = await pool.query<{ default_ai_handling: string }>(
+    `SELECT default_ai_handling
+       FROM instance_preferences
+      WHERE singleton = true`,
+  );
+
+  return publicPreferences(result.rows[0]?.default_ai_handling);
+}
+
+function publicPreferences(value: string | undefined): {
+  defaultAiHandling: "automatic" | "review";
+} {
+  return {
+    defaultAiHandling: value === "REVIEW" ? "review" : "automatic",
+  };
 }
 
 export async function ensureBootstrapModelDraft(
