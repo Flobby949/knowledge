@@ -237,17 +237,35 @@ interface RecordHistoryResponse {
 export interface SearchResult {
   record: RecordCard;
   match: {
-    reason: "original_text";
+    reason: "knowledge_point" | "original_text" | "semantic";
     snippets: Array<{
       text: string;
       highlights: Array<{ start: number; end: number }>;
     }>;
+    visibility: "current" | "pending_review";
   };
 }
 
 interface SearchResponse {
   items: SearchResult[];
   page: { nextCursor: string | null };
+}
+
+export interface SearchPage {
+  items: SearchResult[];
+  nextCursor: string | null;
+}
+
+export interface SearchHealth {
+  keyword: { status: "ready" };
+  semantic: {
+    configurationVersion: number;
+    failedDocuments: number;
+    model: string;
+    readyDocuments: number;
+    status: "building" | "paused" | "ready";
+    totalDocuments: number;
+  };
 }
 
 export interface ActiveModelEndpoint {
@@ -323,8 +341,14 @@ export async function listRecords(options: {
   return { items: body.items, nextCursor: body.page.nextCursor };
 }
 
-export async function getRecordDetail(id: string): Promise<RecordDetail> {
-  const response = await fetch(`/api/v1/records/${encodeURIComponent(id)}`);
+export async function getRecordDetail(
+  id: string,
+  signal?: AbortSignal,
+): Promise<RecordDetail> {
+  const response = await fetch(
+    `/api/v1/records/${encodeURIComponent(id)}`,
+    signal ? { signal } : undefined,
+  );
 
   return parseResponse<RecordDetail>(response);
 }
@@ -605,23 +629,52 @@ export async function listTagRecords(tagId: string): Promise<RecordCard[]> {
   return body.items;
 }
 
-export async function searchRecords(
-  query: string,
-  tagId?: string,
-): Promise<SearchResult[]> {
+export async function searchRecords(options: {
+  cursor?: string;
+  limit: number;
+  query: string;
+  scope: "current" | "include_review";
+  signal?: AbortSignal;
+  tagIds: string[];
+}): Promise<SearchPage> {
   const search = new URLSearchParams();
 
-  if (query) {
-    search.set("q", query);
+  if (options.cursor) {
+    search.set("cursor", options.cursor);
   }
 
-  if (tagId) {
-    search.set("tag", tagId);
+  search.set("limit", String(options.limit));
+
+  if (options.query) {
+    search.set("q", options.query);
   }
-  const response = await fetch(`/api/v1/search?${search.toString()}`);
+
+  if (options.scope === "include_review") {
+    search.set("scope", options.scope);
+  }
+
+  for (const tagId of options.tagIds) {
+    search.append("tag", tagId);
+  }
+  const response = await fetch(`/api/v1/search?${search.toString()}`, {
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
   const body = await parseResponse<SearchResponse>(response);
 
-  return body.items;
+  return {
+    items: body.items,
+    nextCursor: body.page.nextCursor,
+  };
+}
+
+export async function getSearchHealth(
+  signal?: AbortSignal,
+): Promise<SearchHealth> {
+  const response = await fetch("/api/v1/search-health", {
+    ...(signal ? { signal } : {}),
+  });
+
+  return parseResponse<SearchHealth>(response);
 }
 
 export async function getModelConfiguration(): Promise<ModelConfigurationState> {

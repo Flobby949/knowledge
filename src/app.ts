@@ -63,6 +63,14 @@ interface RecordQuery {
   tag?: string | string[];
 }
 
+interface SearchQuery {
+  cursor?: string;
+  limit?: string;
+  q?: string;
+  scope?: "include_review";
+  tag?: string | string[];
+}
+
 type RecordArchiveScope = "active" | "archived" | "all";
 type RecordProcessingFilter =
   | "all"
@@ -71,6 +79,7 @@ type RecordProcessingFilter =
   | "processed"
   | "failed";
 type RecordSort = "updated_desc" | "updated_asc";
+type SearchScope = "current" | "include_review";
 
 interface RecordCursor {
   id: string;
@@ -82,6 +91,7 @@ interface FindRecordsOptions {
   cursor?: RecordCursor | null;
   limit?: number;
   processing?: RecordProcessingFilter;
+  searchScope?: SearchScope;
   sort?: RecordSort;
 }
 
@@ -164,6 +174,30 @@ interface RecordCard {
   updatedAt: string;
 }
 
+interface SearchResultItem {
+  record: RecordCard;
+  match: {
+    reason: "knowledge_point" | "original_text" | "semantic";
+    snippets: Array<{
+      text: string;
+      highlights: Array<{ start: number; end: number }>;
+    }>;
+    visibility: "current" | "pending_review";
+  };
+}
+
+interface SearchSnapshot {
+  items: SearchResultItem[];
+  signature: string;
+}
+
+interface SearchCursor {
+  offset: number;
+  snapshotId: string;
+}
+
+const MAX_SEARCH_SNAPSHOTS = 32;
+
 interface RecordRow {
   id: string;
   content: string;
@@ -175,6 +209,7 @@ interface RecordRow {
   display_name: string;
   knowledge_match_title: string | null;
   knowledge_match_body: string | null;
+  knowledge_match_publication_status: string | null;
   active_analysis_id: string | null;
   effective_title: string | null;
   effective_summary: string | null;
@@ -185,7 +220,11 @@ interface StoredRecord {
   card: RecordCard;
   content: string;
   cursor: RecordCursor;
-  knowledgeMatch: null | { title: string; body: string };
+  knowledgeMatch: null | {
+    title: string;
+    body: string;
+    visibility: "current" | "pending_review";
+  };
 }
 
 const EFFECTIVE_TAG_RECORDS_CTE = `effective_tag_records AS (
@@ -257,6 +296,7 @@ export async function buildApp(
 ): Promise<FastifyInstance> {
   const app = Fastify();
   const pool = new Pool({ connectionString: options.databaseUrl });
+  const searchSnapshots = new Map<string, SearchSnapshot>();
 
   app.addHook("onClose", async () => {
     await pool.end();
@@ -1571,9 +1611,9 @@ export async function buildApp(
     },
   );
 
-  app.get<{ Querystring: RecordQuery }>(
+  app.get<{ Querystring: SearchQuery }>(
     "/api/v1/search",
-    async (request) => {
+    async (request, reply) => {
       const query = request.query.q ?? "";
       const requestedTags = request.query.tag;
       const tagIds = requestedTags
@@ -1581,10 +1621,59 @@ export async function buildApp(
           ? requestedTags
           : [requestedTags]
         : [];
-      const records = await findRecords(pool, query, undefined, tagIds);
+      const scope: SearchScope =
+        request.query.scope === "include_review"
+          ? "include_review"
+          : "current";
+      const limit = parseRecordPageLimit(request.query.limit);
+      const cursor = decodeSearchCursor(request.query.cursor);
+
+      if (limit === null || cursor === undefined) {
+        return reply.code(400).send({
+          error: {
+            code: "INVALID_SEARCH_PAGE",
+            message: "搜索分页参数无效。",
+          },
+        });
+      }
+
+      const signature = searchSignature(query, tagIds, scope);
+
+      if (cursor) {
+        const snapshot = searchSnapshots.get(cursor.snapshotId);
+
+        if (!snapshot) {
+          return reply.code(410).send({
+            error: {
+              code: "SEARCH_SNAPSHOT_EXPIRED",
+              message: "本次搜索快照已失效，请重新提交查询。",
+            },
+          });
+        }
+
+        if (snapshot.signature !== signature) {
+          return reply.code(400).send({
+            error: {
+              code: "SEARCH_CURSOR_MISMATCH",
+              message: "搜索条件已变化，请重新提交查询。",
+            },
+          });
+        }
+
+        return searchSnapshotPage(
+          cursor.snapshotId,
+          snapshot,
+          cursor.offset,
+          limit,
+        );
+      }
+
+      const records = await findRecords(pool, query, undefined, tagIds, {
+        searchScope: scope,
+      });
       const recordIds = new Set(records.map((record) => record.card.id));
       const semanticMatches =
-        query && tagIds.length === 0
+        query
           ? await findSemanticMatches({
               pool,
               credentialSecret,
@@ -1597,20 +1686,22 @@ export async function buildApp(
           .filter((match) => !recordIds.has(match.recordId))
           .map(async (match) => ({
             match,
-            record: (await findRecords(pool, "", match.recordId))[0],
+            record: (await findRecords(pool, "", match.recordId, tagIds))[0],
           })),
       );
 
-      return {
+      const snapshotId = randomUUID();
+      const snapshot: SearchSnapshot = {
+        signature,
         items: [
-          ...records.map(({ card, content, knowledgeMatch }) => ({
+          ...records.map<SearchResultItem>(({ card, content, knowledgeMatch }) => ({
             record: card,
             match:
               knowledgeMatch && !includesQuery(content, query)
                 ? knowledgePointMatch(knowledgeMatch, query)
                 : originalTextMatch(content, query),
           })),
-          ...semanticRecords.flatMap(({ match, record }) =>
+          ...semanticRecords.flatMap<SearchResultItem>(({ match, record }) =>
             record
               ? [
                   {
@@ -1618,14 +1709,28 @@ export async function buildApp(
                     match: {
                       reason: "semantic",
                       snippets: [{ text: match.text, highlights: [] }],
+                      visibility: "current",
                     },
                   },
                 ]
               : [],
           ),
         ],
-        page: { nextCursor: null },
       };
+
+      if (snapshot.items.length > limit) {
+        searchSnapshots.set(snapshotId, snapshot);
+
+        if (searchSnapshots.size > MAX_SEARCH_SNAPSHOTS) {
+          const oldestSnapshotId = searchSnapshots.keys().next().value;
+
+          if (typeof oldestSnapshotId === "string") {
+            searchSnapshots.delete(oldestSnapshotId);
+          }
+        }
+      }
+
+      return searchSnapshotPage(snapshotId, snapshot, 0, limit);
     },
   );
 
@@ -2186,6 +2291,70 @@ function decodeRecordCursor(
   }
 }
 
+function encodeSearchCursor(cursor: SearchCursor): string {
+  return Buffer.from(
+    JSON.stringify([cursor.snapshotId, cursor.offset]),
+  ).toString("base64url");
+}
+
+function decodeSearchCursor(
+  value: string | undefined,
+): SearchCursor | null | undefined {
+  if (value === undefined) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as unknown;
+
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length !== 2 ||
+      typeof parsed[0] !== "string" ||
+      !isUuid(parsed[0]) ||
+      typeof parsed[1] !== "number" ||
+      !Number.isSafeInteger(parsed[1]) ||
+      parsed[1] < 1
+    ) {
+      return undefined;
+    }
+
+    return { snapshotId: parsed[0], offset: parsed[1] };
+  } catch {
+    return undefined;
+  }
+}
+
+function searchSignature(
+  query: string,
+  tagIds: string[],
+  scope: SearchScope,
+): string {
+  return JSON.stringify([query, [...tagIds].sort(), scope]);
+}
+
+function searchSnapshotPage(
+  snapshotId: string,
+  snapshot: SearchSnapshot,
+  offset: number,
+  limit: number,
+) {
+  const items = snapshot.items.slice(offset, offset + limit);
+  const nextOffset = offset + items.length;
+
+  return {
+    items,
+    page: {
+      nextCursor:
+        nextOffset < snapshot.items.length
+          ? encodeSearchCursor({ snapshotId, offset: nextOffset })
+          : null,
+    },
+  };
+}
+
 async function findRecords(
   pool: Pool,
   query: string,
@@ -2196,6 +2365,7 @@ async function findRecords(
   const archive = options.archive ?? "active";
   const cursor = options.cursor ?? null;
   const processing = options.processing ?? "all";
+  const searchScope = options.searchScope ?? "current";
   const sort = options.sort ?? "updated_desc";
   const cursorComparator = sort === "updated_asc" ? ">" : "<";
   const sortDirection = sort === "updated_asc" ? "ASC" : "DESC";
@@ -2216,7 +2386,9 @@ async function findRecords(
               AS effective_summary,
             observable_task.status AS organization_task_status,
             knowledge_match.ai_title AS knowledge_match_title,
-            knowledge_match.ai_body AS knowledge_match_body
+            knowledge_match.ai_body AS knowledge_match_body,
+            knowledge_match.publication_status
+              AS knowledge_match_publication_status
        FROM records AS record
        INNER JOIN fragment_revisions AS revision
          ON revision.id = record.current_fragment_revision_id
@@ -2243,22 +2415,33 @@ async function findRecords(
        ) AS observable_task ON TRUE
        LEFT JOIN LATERAL (
          SELECT COALESCE(correction.title, point.ai_title) AS ai_title,
-                COALESCE(correction.body, point.ai_body) AS ai_body
+                COALESCE(correction.body, point.ai_body) AS ai_body,
+                point.publication_status
            FROM knowledge_points AS point
            INNER JOIN ai_analysis_revisions AS analysis
             ON analysis.id = point.analysis_revision_id
            LEFT JOIN knowledge_point_corrections AS correction
              ON correction.knowledge_point_id = point.id
           WHERE point.record_id = record.id
-            AND point.publication_status IN ('AUTO_PUBLISHED', 'CONFIRMED')
             AND point.usage_status = 'INCLUDED'
             AND (
               (
-                analysis.id = record.current_analysis_revision_id
-                AND analysis.status = 'ACTIVE'
+                point.publication_status IN ('AUTO_PUBLISHED', 'CONFIRMED')
+                AND (
+                  (
+                    analysis.id = record.current_analysis_revision_id
+                    AND analysis.status = 'ACTIVE'
+                  )
+                  OR (
+                    analysis.fragment_revision_id = record.current_fragment_revision_id
+                    AND analysis.status = 'GENERATED'
+                  )
+                )
               )
               OR (
-                analysis.fragment_revision_id = record.current_fragment_revision_id
+                $9::text = 'include_review'
+                AND point.publication_status = 'PENDING_REVIEW'
+                AND analysis.fragment_revision_id = record.current_fragment_revision_id
                 AND analysis.status = 'GENERATED'
               )
             )
@@ -2342,6 +2525,7 @@ async function findRecords(
       cursor?.id ?? null,
       archive,
       processing,
+      searchScope,
     ],
   );
 
@@ -2363,6 +2547,10 @@ async function findRecords(
           ? {
               title: row.knowledge_match_title,
               body: row.knowledge_match_body,
+              visibility:
+                row.knowledge_match_publication_status === "PENDING_REVIEW"
+                  ? "pending_review"
+                  : "current",
             }
           : null,
       card: recordCard(
@@ -2398,9 +2586,13 @@ function includesQuery(content: string, query: string): boolean {
 }
 
 function knowledgePointMatch(
-  point: { title: string; body: string },
+  point: {
+    title: string;
+    body: string;
+    visibility: "current" | "pending_review";
+  },
   query: string,
-) {
+): SearchResultItem["match"] {
   const text = includesQuery(point.title, query) ? point.title : point.body;
   const start = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
 
@@ -2412,6 +2604,7 @@ function knowledgePointMatch(
         highlights: start < 0 ? [] : [{ start, end: start + query.length }],
       },
     ],
+    visibility: point.visibility,
   };
 }
 
@@ -2467,7 +2660,10 @@ function recordOrganizationActivity(
   return "idle";
 }
 
-function originalTextMatch(content: string, query: string) {
+function originalTextMatch(
+  content: string,
+  query: string,
+): SearchResultItem["match"] {
   const line = content
     .split(/\r\n|\n|\r/u)
     .find((candidate) =>
@@ -2484,6 +2680,7 @@ function originalTextMatch(content: string, query: string) {
         highlights: start < 0 ? [] : [{ start, end: start + query.length }],
       },
     ],
+    visibility: "current",
   };
 }
 
