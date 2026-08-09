@@ -61,6 +61,8 @@ export function RecordDetailPage() {
   const reanalysisButton = useRef<HTMLButtonElement>(null);
   const overviewCorrectionButton = useRef<HTMLButtonElement>(null);
   const moreButton = useRef<HTMLButtonElement>(null);
+  const archiveDialog = useRef<HTMLDivElement>(null);
+  const archiveCancelButton = useRef<HTMLButtonElement>(null);
   const deleteDialog = useRef<HTMLDivElement>(null);
   const deleteCancelButton = useRef<HTMLButtonElement>(null);
   const restoreReanalysisFocus = useRef(false);
@@ -124,6 +126,20 @@ export function RecordDetailPage() {
 
     return () => window.cancelAnimationFrame(frame);
   }, [record]);
+
+  useEffect(() => {
+    if (!archiveConfirmation) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() =>
+      lifecycleBusy
+        ? archiveDialog.current?.focus()
+        : archiveCancelButton.current?.focus(),
+    );
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [archiveConfirmation, lifecycleBusy]);
 
   useEffect(() => {
     if (!deleteConfirmation) {
@@ -219,6 +235,7 @@ export function RecordDetailPage() {
       setRecord(await getRecordDetail(record.id));
       setArchiveConfirmation(false);
       setMoreOpen(false);
+      window.requestAnimationFrame(() => moreButton.current?.focus());
     } finally {
       setLifecycleBusy(false);
     }
@@ -236,6 +253,51 @@ export function RecordDetailPage() {
       setRecord(await getRecordDetail(record.id));
     } finally {
       setLifecycleBusy(false);
+    }
+  }
+
+  function closeArchiveConfirmation() {
+    if (lifecycleBusy) {
+      return;
+    }
+
+    setArchiveConfirmation(false);
+    window.requestAnimationFrame(() => moreButton.current?.focus());
+  }
+
+  function handleArchiveDialogKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeArchiveConfirmation();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusable = [
+      ...(archiveDialog.current?.querySelectorAll<HTMLButtonElement>(
+        "button:not([disabled])",
+      ) ?? []),
+    ];
+    const first = focusable[0];
+    const last = focusable.at(-1);
+
+    if (!first || !last) {
+      event.preventDefault();
+      archiveDialog.current?.focus();
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
     }
   }
 
@@ -525,7 +587,10 @@ export function RecordDetailPage() {
             aria-labelledby="archive-confirm-title"
             aria-modal="true"
             className="detail-confirm-dialog"
+            onKeyDown={handleArchiveDialogKeyDown}
+            ref={archiveDialog}
             role="alertdialog"
+            tabIndex={-1}
           >
             <h2 id="archive-confirm-title">归档记录？</h2>
             <p>归档后会从默认记录库隐藏，原文与历史版本仍会完整保留。</p>
@@ -533,7 +598,8 @@ export function RecordDetailPage() {
               <button
                 className="secondary-button"
                 disabled={lifecycleBusy}
-                onClick={() => setArchiveConfirmation(false)}
+                onClick={closeArchiveConfirmation}
+                ref={archiveCancelButton}
                 type="button"
               >
                 取消

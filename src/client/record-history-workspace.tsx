@@ -168,7 +168,50 @@ export function RecordHistoryWorkspace({
             <span>版本时间轴</span>
             <span>{entries.length}</span>
           </div>
-          <div aria-label="版本时间轴" className="history-tabs" role="tablist">
+          <div
+            aria-label="版本时间轴"
+            className="history-tabs"
+            onKeyDown={(event) => {
+              if (
+                event.key !== "ArrowLeft" &&
+                event.key !== "ArrowRight" &&
+                event.key !== "Home" &&
+                event.key !== "End"
+              ) {
+                return;
+              }
+
+              const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                '[role="tab"]',
+              )];
+              const currentIndex = tabs.indexOf(
+                event.target as HTMLButtonElement,
+              );
+
+              if (currentIndex < 0 || tabs.length === 0) {
+                return;
+              }
+
+              event.preventDefault();
+              const nextIndex =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? tabs.length - 1
+                    : event.key === "ArrowRight"
+                      ? (currentIndex + 1) % tabs.length
+                      : (currentIndex - 1 + tabs.length) % tabs.length;
+              const nextTab = tabs[nextIndex];
+              const nextEntry = entries[nextIndex];
+
+              nextTab?.focus();
+
+              if (nextEntry) {
+                void selectEntry(nextEntry);
+              }
+            }}
+            role="tablist"
+          >
             {entries.map((entry) => {
               const isSelected = selected?.id === entry.id;
 
@@ -180,6 +223,7 @@ export function RecordHistoryWorkspace({
                   key={entry.id}
                   onClick={() => void selectEntry(entry)}
                   role="tab"
+                  tabIndex={isSelected ? 0 : -1}
                   type="button"
                 >
                   <span className="history-tab-version">

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test, type APIRequestContext } from "./fixture.js";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+} from "./fixture.js";
 
 const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 
@@ -12,8 +17,8 @@ test.describe("AI analysis history workspace", () => {
     request,
   }) => {
     const marker = `history-analysis-${randomUUID().slice(0, 8)}`;
-    const firstQuote = `CDC 读取提交日志 ${marker}。`;
-    const secondQuote = `下游依据顺序消费增量 ${marker}。`;
+    const firstQuote = `CDC 读取提交日志 ${marker}。${"原始证据保持逐字可核验。".repeat(42)}`;
+    const secondQuote = `下游依据顺序消费增量 ${marker}。${"消费边界保持稳定。".repeat(24)}`;
     const sourceText = `${firstQuote}\n${secondQuote}`;
 
     await enableDeterministicFakeConfiguration(request);
@@ -38,6 +43,17 @@ test.describe("AI analysis history workspace", () => {
     await firstSelection.click();
     await expect(firstSelection).toHaveAttribute("aria-pressed", "true");
     await expect(rawText.locator("mark")).toHaveText(firstQuote);
+
+    const sourcePane = detail.getByRole("region", { name: "记录与原文" });
+    const knowledgePane = detail.getByRole("region", { name: "知识点" });
+
+    const scrollBeforeHistory = await Promise.all([
+      setPaneScroll(sourcePane, 180),
+      setPaneScroll(knowledgePane, 220),
+    ]);
+
+    expect(scrollBeforeHistory[0]).toBeGreaterThan(0);
+    expect(scrollBeforeHistory[1]).toBeGreaterThan(0);
 
     await page
       .getByRole("toolbar", { name: "记录操作" })
@@ -107,6 +123,12 @@ test.describe("AI analysis history workspace", () => {
     await expect(firstSelection).toHaveAttribute("aria-pressed", "true");
     await expect(rawText.locator("mark")).toHaveText(firstQuote);
     expect(await rawText.textContent()).toBe(sourceText);
+    await expect
+      .poll(() => readPaneScroll(sourcePane))
+      .toBe(scrollBeforeHistory[0]);
+    await expect
+      .poll(() => readPaneScroll(knowledgePane))
+      .toBe(scrollBeforeHistory[1]);
   });
 
   test("user compares a superseded AI analysis with the active analysis", async ({
@@ -208,6 +230,22 @@ test.describe("AI analysis history workspace", () => {
     }
   });
 });
+
+async function setPaneScroll(
+  pane: Locator,
+  requested: number,
+): Promise<number> {
+  return pane.evaluate((element, top) => {
+    element.scrollTop = Math.min(top, element.scrollHeight - element.clientHeight);
+    return element.scrollTop;
+  }, requested);
+}
+
+async function readPaneScroll(
+  pane: Locator,
+): Promise<number> {
+  return pane.evaluate((element) => element.scrollTop);
+}
 
 async function createAndOrganizeRecord(
   request: APIRequestContext,

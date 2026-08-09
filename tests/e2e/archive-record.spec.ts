@@ -46,6 +46,32 @@ test.describe("record archiving UI tracer", () => {
     });
 
     await expect(confirmation).toBeVisible();
+    const cancel = confirmation.getByRole("button", {
+      name: "取消",
+      exact: true,
+    });
+    const confirm = confirmation.getByRole("button", {
+      name: "确认归档",
+      exact: true,
+    });
+
+    await expect(cancel).toBeFocused();
+    await cancel.press("Shift+Tab");
+    await expect(confirm).toBeFocused();
+    await confirm.press("Tab");
+    await expect(cancel).toBeFocused();
+    await cancel.press("Escape");
+    await expect(confirmation).toBeHidden();
+    await expect(
+      toolbar.getByRole("button", { name: "更多操作", exact: true }),
+    ).toBeFocused();
+
+    await toolbar.getByRole("button", { name: "更多操作" }).click();
+    await page
+      .getByRole("menu", { name: "更多操作" })
+      .getByRole("menuitem", { name: "归档记录" })
+      .click();
+    await expect(confirmation).toBeVisible();
     await confirmation
       .getByRole("button", { name: "确认归档", exact: true })
       .click();

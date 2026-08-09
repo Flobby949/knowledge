@@ -44,15 +44,20 @@ test.describe("record history workspace", () => {
     await expectBox(workspace, { x: 0, y: 0, width: 1_600, height: 1_000 });
     await expect(page).toHaveURL(detailUrl);
     await expect(currentTab).toHaveAttribute("aria-selected", "true");
+    await expect(currentTab).toHaveAttribute("tabindex", "0");
     await expect(v1Tab).toBeVisible();
 
-    await v1Tab.click();
+    await currentTab.focus();
+    await currentTab.press("ArrowLeft");
 
     const selectedText = workspace.getByLabel("版本 v1 原文", {
       exact: true,
     });
 
+    await expect(v1Tab).toBeFocused();
     await expect(v1Tab).toHaveAttribute("aria-selected", "true");
+    await expect(v1Tab).toHaveAttribute("tabindex", "0");
+    await expect(currentTab).toHaveAttribute("tabindex", "-1");
     expect(await selectedText.textContent()).toBe(v1Text);
 
     await workspace
