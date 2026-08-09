@@ -382,22 +382,24 @@ async function buildExport(pool: Pool, exportId: string): Promise<void> {
 }
 
 async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
-  const [
-    records,
-    fragmentRevisions,
-    tags,
-    tagAssignments,
-    analyses,
-    knowledgePoints,
-    evidenceSpans,
-    corrections,
-    overviewCorrections,
-  ] = await Promise.all([
-    pool.query("SELECT * FROM records ORDER BY created_at, id"),
-    pool.query("SELECT * FROM fragment_revisions ORDER BY record_id, revision_number"),
-    pool.query("SELECT * FROM tags ORDER BY created_at, id"),
-    pool.query("SELECT * FROM tag_assignments ORDER BY created_at, id"),
-    pool.query(
+  const client = await pool.connect();
+  let transactionOpen = false;
+
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    transactionOpen = true;
+
+    const records = await client.query(
+      "SELECT * FROM records ORDER BY created_at, id",
+    );
+    const fragmentRevisions = await client.query(
+      "SELECT * FROM fragment_revisions ORDER BY record_id, revision_number",
+    );
+    const tags = await client.query("SELECT * FROM tags ORDER BY created_at, id");
+    const tagAssignments = await client.query(
+      "SELECT * FROM tag_assignments ORDER BY created_at, id",
+    );
+    const analyses = await client.query(
       `SELECT id,
               record_id,
               fragment_revision_id,
@@ -408,25 +410,45 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
               generated_at
          FROM ai_analysis_revisions
         ORDER BY generated_at, id`,
-    ),
-    pool.query("SELECT * FROM knowledge_points ORDER BY record_id, analysis_revision_id, position"),
-    pool.query("SELECT * FROM evidence_spans ORDER BY knowledge_point_id, position"),
-    pool.query("SELECT * FROM knowledge_point_corrections ORDER BY knowledge_point_id"),
-    pool.query("SELECT * FROM record_overview_corrections ORDER BY record_id"),
-  ]);
+    );
+    const knowledgePoints = await client.query(
+      "SELECT * FROM knowledge_points ORDER BY record_id, analysis_revision_id, position",
+    );
+    const evidenceSpans = await client.query(
+      "SELECT * FROM evidence_spans ORDER BY knowledge_point_id, position",
+    );
+    const corrections = await client.query(
+      "SELECT * FROM knowledge_point_corrections ORDER BY knowledge_point_id",
+    );
+    const overviewCorrections = await client.query(
+      "SELECT * FROM record_overview_corrections ORDER BY record_id",
+    );
+    const snapshot: DomainSnapshot = {
+      formatVersion: 1,
+      records: records.rows,
+      fragmentRevisions: fragmentRevisions.rows,
+      tags: tags.rows,
+      tagAssignments: tagAssignments.rows,
+      analyses: analyses.rows,
+      knowledgePoints: knowledgePoints.rows,
+      evidenceSpans: evidenceSpans.rows,
+      corrections: corrections.rows,
+      overviewCorrections: overviewCorrections.rows,
+    };
 
-  return {
-    formatVersion: 1,
-    records: records.rows,
-    fragmentRevisions: fragmentRevisions.rows,
-    tags: tags.rows,
-    tagAssignments: tagAssignments.rows,
-    analyses: analyses.rows,
-    knowledgePoints: knowledgePoints.rows,
-    evidenceSpans: evidenceSpans.rows,
-    corrections: corrections.rows,
-    overviewCorrections: overviewCorrections.rows,
-  };
+    await client.query("COMMIT");
+    transactionOpen = false;
+
+    return snapshot;
+  } catch (error) {
+    if (transactionOpen) {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function parseSnapshot(archive: Buffer): DomainSnapshot {
