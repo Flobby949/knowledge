@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "./fixture.js";
 
 import { expectBox, expectHorizontalSplit } from "./geometry.js";
 

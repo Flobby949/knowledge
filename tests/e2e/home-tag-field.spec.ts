@@ -6,7 +6,7 @@ import {
   type APIRequestContext,
   type Locator,
   type Page,
-} from "@playwright/test";
+} from "./fixture.js";
 
 import { expectBox } from "./geometry.js";
 
@@ -116,13 +116,6 @@ test.describe("home neural tag field", () => {
     await expectEnergyNode(tagNode(tagList, approved), "complete");
     await expectEnergyNode(tagNode(tagList, candidate), "dashed");
 
-    const [higherUseBox, lowerUseBox] = await Promise.all([
-      tagNode(tagList, highUseTag).locator("[data-energy-core]").boundingBox(),
-      tagNode(tagList, candidate).locator("[data-energy-core]").boundingBox(),
-    ]);
-
-    expect(higherUseBox?.width ?? 0).toBeGreaterThan(lowerUseBox?.width ?? 0);
-
     const searchInput = searchHud.getByRole("searchbox", {
       name: "定位标签或搜索记录",
     });
@@ -144,8 +137,15 @@ test.describe("home neural tag field", () => {
     ).toContainText("AI 候选");
 
     const cameraBeforeInteraction = await readCameraState(scene);
+    const dragTargetY =
+      cameraBeforeInteraction.pitch <= 0 ? 528 : 392;
 
-    await dragScene(page, scene, { x: 46, y: 460 }, { x: 176, y: 392 });
+    await dragScene(
+      page,
+      scene,
+      { x: 46, y: 460 },
+      { x: 176, y: dragTargetY },
+    );
 
     const cameraAfterDrag = await readCameraState(scene);
 
@@ -229,6 +229,16 @@ test.describe("home neural tag field", () => {
     const tagsAfterContextLoss = lostContextScene.getByRole("list", {
       name: "全部标签",
     });
+    const [higherUseBox, lowerUseBox] = await Promise.all([
+      tagNode(tagsAfterContextLoss, highUseTag)
+        .locator("[data-energy-core]")
+        .boundingBox(),
+      tagNode(tagsAfterContextLoss, candidate)
+        .locator("[data-energy-core]")
+        .boundingBox(),
+    ]);
+
+    expect(higherUseBox?.width ?? 0).toBeGreaterThan(lowerUseBox?.width ?? 0);
 
     for (const tag of seeded.tags) {
       await expect(tagNode(tagsAfterContextLoss, tag)).toBeVisible();
@@ -268,7 +278,8 @@ test.describe("home neural tag field", () => {
       await expect(node).toBeVisible();
     }
 
-    await tagNode(fallbackTags, approved).click();
+    await tagNode(fallbackTags, approved).focus();
+    await tagNode(fallbackTags, approved).press("Enter");
     await expect(fallbackPage).toHaveURL(tagSearchUrl(approved.id));
     await expect(
       fallbackPage.getByRole("region", { name: "标签硬筛选" }),

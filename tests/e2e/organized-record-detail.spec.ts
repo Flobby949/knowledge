@@ -4,7 +4,7 @@ import {
   expect,
   test,
   type APIRequestContext,
-} from "@playwright/test";
+} from "./fixture.js";
 
 import { expectBox, expectHorizontalSplit } from "./geometry.js";
 

@@ -6,7 +6,7 @@ import {
   type APIRequestContext,
   type Locator,
   type Page,
-} from "@playwright/test";
+} from "./fixture.js";
 
 import { expectBox, expectHorizontalSplit } from "./geometry.js";
 

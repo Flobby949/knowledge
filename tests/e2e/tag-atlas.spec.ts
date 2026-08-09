@@ -5,7 +5,7 @@ import {
   test,
   type APIRequestContext,
   type Locator,
-} from "@playwright/test";
+} from "./fixture.js";
 
 import { expectBox } from "./geometry.js";
 
