@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 
 const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 
@@ -115,7 +115,126 @@ test.describe("record tag-only editing UI tracer", () => {
       await detail.getByLabel("完整原文", { exact: true }).textContent(),
     ).toBe(originalText);
   });
+
+  test("changing the original unlocks AI handling and starts the selected review task", async ({
+    page,
+    request,
+  }) => {
+    await enableDeterministicFakeConfiguration(request);
+
+    const marker = `edit-and-review-${randomUUID().slice(0, 8)}`;
+    const originalText = `编辑前的原文 ${marker}`;
+    const updatedText = `${originalText}\n新增内容会进入人工审查。`;
+    const created = await request.post(appUrl("/api/v1/records"), {
+      data: {
+        text: originalText,
+        myTags: [{ name: `编辑整理标签 ${marker}` }],
+        processing: "save_only",
+      },
+    });
+
+    expect(created.status()).toBe(201);
+
+    const recordId = ((await created.json()) as { record: { id: string } })
+      .record.id;
+
+    await page.goto(appUrl(`/records/${recordId}`));
+    await page
+      .getByRole("toolbar", { name: "记录操作" })
+      .getByRole("button", { name: "编辑记录", exact: true })
+      .click();
+
+    const dialog = page.getByRole("dialog", { name: "编辑记录" });
+    const automatic = dialog.getByRole("radio", {
+      name: /^AI 整理并自动采用/u,
+    });
+    const review = dialog.getByRole("radio", {
+      name: /^AI 整理后由我确认/u,
+    });
+
+    await expect(automatic).toBeDisabled();
+    await expect(review).toBeDisabled();
+
+    await dialog.getByRole("textbox", { name: "记录正文" }).fill(updatedText);
+
+    await expect(automatic).toBeEnabled();
+    await expect(automatic).toBeChecked();
+    await expect(review).toBeEnabled();
+    await review.check();
+
+    const updateResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        new URL(response.url()).pathname === `/api/v1/records/${recordId}`,
+    );
+    const organizeResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/records/${recordId}/organize`,
+    );
+
+    await dialog
+      .getByRole("button", { name: "保存修改", exact: true })
+      .click();
+
+    expect((await updateResponse).status()).toBe(200);
+    const organized = await organizeResponse;
+
+    expect(organized.status()).toBe(202);
+    expect(organized.request().postDataJSON()).toEqual({ handling: "review" });
+
+    const task = (await organized.json()) as {
+      task: { id: string; sourceTextVersion: number };
+    };
+
+    expect(task.task.sourceTextVersion).toBe(2);
+    await expect(dialog).toBeHidden();
+    await expect(
+      page
+        .getByRole("main", { name: "记录详情" })
+        .getByLabel("完整原文", { exact: true }),
+    ).toHaveText(updatedText);
+    await expect(page.getByRole("main", { name: "记录详情" })).toContainText(
+      "原文 v2",
+    );
+  });
 });
+
+async function enableDeterministicFakeConfiguration(
+  request: APIRequestContext,
+): Promise<void> {
+  const saved = await request.put(appUrl("/api/v1/model-config/draft"), {
+    data: {
+      text: {
+        baseUrl: "http://127.0.0.1:9/e2e-text/v1",
+        model: "deepseek-v4-flash",
+        apiKey: "e2e-fake-text-key",
+      },
+      embedding: {
+        baseUrl: "http://127.0.0.1:9/e2e-embedding/v1",
+        model: "BAAI/bge-m3",
+        apiKey: "e2e-fake-embedding-key",
+      },
+    },
+  });
+
+  expect(saved.status()).toBe(200);
+
+  for (const kind of ["text", "embedding"] as const) {
+    const tested = await request.post(
+      appUrl(`/api/v1/model-config/draft/tests/${kind}`),
+    );
+
+    expect(tested.status()).toBe(200);
+  }
+
+  const activated = await request.post(
+    appUrl("/api/v1/model-config/draft/activate"),
+  );
+
+  expect(activated.status()).toBe(200);
+}
 
 function appUrl(pathname: string): string {
   return new URL(pathname, appBaseUrl).toString();

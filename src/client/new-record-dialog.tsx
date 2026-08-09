@@ -62,6 +62,7 @@ export function NewRecordDialog({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const initialText = editingRecord?.editable.text ?? "";
   const initialTags = editingRecord?.editable.myTags;
+  const textChanged = text !== initialText;
   const textGraphemeCount = countGraphemes(text);
   const textTooLong = textGraphemeCount > 1_000;
   const persistedFieldsChanged =
@@ -94,40 +95,54 @@ export function NewRecordDialog({
 
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
 
-    if (!editingRecord) {
-      void Promise.all([
-        getModelConfiguration(),
-        getPreferences().catch(() => ({
+    void Promise.all([
+      getModelConfiguration(),
+      editingRecord
+        ? Promise.resolve({ defaultAiHandling: "automatic" as const })
+        : getPreferences().catch(() => ({
           defaultAiHandling: "automatic" as const,
         })),
-      ])
-        .then(([configuration, preferences]) => {
-          if (!active) {
-            return;
-          }
+    ])
+      .then(([configuration, preferences]) => {
+        if (!active) {
+          return;
+        }
 
-          const available = configuration.active !== null;
+        const available = configuration.active !== null;
 
-          setAiAvailable(available);
+        setAiAvailable(available);
+        setAiAvailabilityResolved(true);
+        setProcessing(
+          available && !editingRecord
+            ? preferences.defaultAiHandling
+            : "save_only",
+        );
+      })
+      .catch(() => {
+        if (active) {
+          setAiAvailable(false);
           setAiAvailabilityResolved(true);
-          setProcessing(
-            available ? preferences.defaultAiHandling : "save_only",
-          );
-        })
-        .catch(() => {
-          if (active) {
-            setAiAvailable(false);
-            setAiAvailabilityResolved(true);
-            setProcessing("save_only");
-          }
-        });
-    }
+          setProcessing("save_only");
+        }
+      });
 
     return () => {
       active = false;
       window.cancelAnimationFrame(frame);
     };
   }, [editingRecord, open]);
+
+  useEffect(() => {
+    if (!open || !editingRecord) {
+      return;
+    }
+
+    if (!textChanged) {
+      setProcessing("save_only");
+    } else if (aiAvailable) {
+      setProcessing("automatic");
+    }
+  }, [aiAvailable, editingRecord, open, textChanged]);
 
   useEffect(() => {
     const query = cleanTagName(tagDraft);
@@ -238,13 +253,26 @@ export function NewRecordDialog({
     const input = { text, tags: selectedTags };
 
     if (editingRecord) {
+      let record: RecordCard;
+
       try {
-        onSaved(await updateRecord(editingRecord.id, input));
+        record = await updateRecord(editingRecord.id, input);
       } catch {
         setSubmitError("保存修改失败，原文仍在此处，请重试。");
         setSubmitting(false);
+        return;
       }
 
+      if (textChanged && processing !== "save_only") {
+        try {
+          await organizeRecord(record.id, processing);
+        } catch {
+          onSaved(record);
+          return;
+        }
+      }
+
+      onSaved(record);
       return;
     }
 
@@ -433,18 +461,22 @@ export function NewRecordDialog({
                 <input checked={processing === "save_only"} name="processing" onChange={() => setProcessing("save_only")} type="radio" />
                 <span><strong>仅保存</strong><small>仅保存记录，不进行任何处理。</small></span>
               </label>
-              <label className={`${processing === "automatic" ? "selected" : ""}${aiAvailable ? "" : " disabled-option"}`}>
-                <input checked={processing === "automatic"} disabled={!aiAvailable} name="processing" onChange={() => setProcessing("automatic")} type="radio" />
-                <span><strong>AI 整理并自动采用</strong><small>{aiAvailable ? "整理完成后自动采用 AI 结果。" : aiAvailabilityResolved ? "配置模型后可用。" : "正在检查模型配置…"}</small></span>
+              <label className={`${processing === "automatic" ? "selected" : ""}${aiAvailable && (!editingRecord || textChanged) ? "" : " disabled-option"}`}>
+                <input checked={processing === "automatic"} disabled={!aiAvailable || Boolean(editingRecord && !textChanged)} name="processing" onChange={() => setProcessing("automatic")} type="radio" />
+                <span><strong>AI 整理并自动采用</strong><small>{processingOptionHelp("automatic", { aiAvailable, aiAvailabilityResolved, editingRecord: Boolean(editingRecord), textChanged })}</small></span>
               </label>
-              <label className={`${processing === "review" ? "selected" : ""}${aiAvailable ? "" : " disabled-option"}`}>
-                <input checked={processing === "review"} disabled={!aiAvailable} name="processing" onChange={() => setProcessing("review")} type="radio" />
-                <span><strong>AI 整理后由我确认</strong><small>{aiAvailable ? "整理完成后逐项确认 AI 结果。" : aiAvailabilityResolved ? "配置模型后可用。" : "正在检查模型配置…"}</small></span>
+              <label className={`${processing === "review" ? "selected" : ""}${aiAvailable && (!editingRecord || textChanged) ? "" : " disabled-option"}`}>
+                <input checked={processing === "review"} disabled={!aiAvailable || Boolean(editingRecord && !textChanged)} name="processing" onChange={() => setProcessing("review")} type="radio" />
+                <span><strong>AI 整理后由我确认</strong><small>{processingOptionHelp("review", { aiAvailable, aiAvailabilityResolved, editingRecord: Boolean(editingRecord), textChanged })}</small></span>
               </label>
-              {!editingRecord && aiAvailabilityResolved ? (
+              {aiAvailabilityResolved && (!editingRecord || !aiAvailable) ? (
                 <p className="model-settings-hint">
                   <span>{aiAvailable ? "可在设置中管理本实例模型。" : "启用完整模型配置后即可使用 AI 整理。"}</span>
                   <Link to="/settings#model-settings">前往模型设置</Link>
+                </p>
+              ) : editingRecord && !textChanged ? (
+                <p className="model-settings-hint">
+                  <span>原文未变化；如需重新分析，请关闭后使用详情页“重新整理”。</span>
                 </p>
               ) : null}
             </div>
@@ -474,6 +506,32 @@ export function NewRecordDialog({
       </div>
     </div>
   );
+}
+
+function processingOptionHelp(
+  processing: "automatic" | "review",
+  state: {
+    aiAvailable: boolean;
+    aiAvailabilityResolved: boolean;
+    editingRecord: boolean;
+    textChanged: boolean;
+  },
+): string {
+  if (!state.aiAvailabilityResolved) {
+    return "正在检查模型配置…";
+  }
+
+  if (!state.aiAvailable) {
+    return "配置模型后可用。";
+  }
+
+  if (state.editingRecord && !state.textChanged) {
+    return "修改原文后可选。";
+  }
+
+  return processing === "automatic"
+    ? "整理完成后自动采用 AI 结果。"
+    : "整理完成后逐项确认 AI 结果。";
 }
 
 function cleanTagName(value: string): string {
