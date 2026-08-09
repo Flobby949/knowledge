@@ -1,0 +1,5 @@
+BEGIN;
+
+ALTER TYPE semantic_source_type ADD VALUE 'OVERVIEW';
+
+COMMIT;
