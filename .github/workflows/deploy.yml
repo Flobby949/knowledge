@@ -1,10 +1,10 @@
 name: Test, build, and deploy
+run-name: Deploy ${{ github.ref_name }}
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: read
@@ -14,8 +14,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate_release:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release_tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Check out release history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Require a new, increasing version on main
+        id: release
+        env:
+          TAG_CREATED: ${{ github.event.created }}
+        shell: bash
+        run: |
+          release_tag="$GITHUB_REF_NAME"
+          version_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          if [[ "$TAG_CREATED" != "true" ]]; then
+            echo "Release tags must be newly created; updates to existing tags cannot deploy." >&2
+            exit 1
+          fi
+
+          if [[ ! "$release_tag" =~ $version_pattern ]]; then
+            echo "Release tag must use vMAJOR.MINOR.PATCH, for example v1.4.0." >&2
+            exit 1
+          fi
+
+          mapfile -t release_tags < <(
+            git tag --list |
+              grep -E "$version_pattern" |
+              sort -V
+          )
+          highest_index=$((${#release_tags[@]} - 1))
+          highest_tag="${release_tags[$highest_index]}"
+
+          if [[ "$release_tag" != "$highest_tag" ]]; then
+            echo "Release $release_tag must be higher than the existing maximum $highest_tag." >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tag $release_tag must point to a commit on main." >&2
+            exit 1
+          fi
+
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+
   test:
     name: Test
+    needs: validate_release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -67,8 +119,9 @@ jobs:
 
   build:
     name: Build amd64 images
-    needs: test
-    if: github.ref == 'refs/heads/main'
+    needs:
+      - validate_release
+      - test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -109,6 +162,7 @@ jobs:
           push: true
           tags: |
             ${{ steps.images.outputs.api }}:sha-${{ github.sha }}
+            ${{ steps.images.outputs.api }}:${{ needs.validate_release.outputs.release_tag }}
             ${{ steps.images.outputs.api }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -126,6 +180,7 @@ jobs:
           push: true
           tags: |
             ${{ steps.images.outputs.web }}:sha-${{ github.sha }}
+            ${{ steps.images.outputs.web }}:${{ needs.validate_release.outputs.release_tag }}
             ${{ steps.images.outputs.web }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

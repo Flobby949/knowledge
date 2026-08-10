@@ -72,7 +72,7 @@ pnpm run dev
 
 前端默认运行在 <http://127.0.0.1:5173>，API 默认运行在 <http://127.0.0.1:3001>。更完整的环境说明见 [本地开发文档](docs/DEVELOPMENT.md)。
 
-生产环境可以在 `main` 验收通过后由 GitHub Actions 构建 amd64 镜像并通过 SSH 部署，配置方法见 [GitHub Actions 自动部署](docs/GITHUB-DEPLOYMENT.md)。
+生产环境可以在 `main` 验收通过后通过严格递增的版本标签触发 GitHub Actions，由其构建 amd64 镜像并通过 SSH 部署，配置方法见 [GitHub Actions 自动部署](docs/GITHUB-DEPLOYMENT.md)。
 
 ## AI 整理边界
 

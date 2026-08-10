@@ -1,11 +1,12 @@
 # GitHub Actions 自动部署
 
-每次向 `main` 推送代码后，工作流会按以下顺序执行：
+普通分支和 `main` 的代码推送不会触发部署。只有向 GitHub 推送一个新的、严格递增的 `vMAJOR.MINOR.PATCH` 发布标签后，工作流才会按以下顺序执行：
 
-1. 类型检查、启动临时 PostgreSQL、执行迁移并运行 Vitest；
-2. 构建 `linux/amd64` 的 API 和 Web 镜像并推送到 GitHub Container Registry；
-3. 通过 SSH 将 Compose 文件和部署脚本传到服务器；
-4. 备份服务器 PostgreSQL，启动新 API 并自动迁移，健康后再切换 Web。
+1. 校验发布标签是新建的三段版本、版本高于所有既有发布标签，并且指向 `main` 上的提交；
+2. 类型检查、启动临时 PostgreSQL、执行迁移并运行 Vitest；
+3. 构建 `linux/amd64` 的 API 和 Web 镜像并推送到 GitHub Container Registry；
+4. 通过 SSH 将 Compose 文件和部署脚本传到服务器；
+5. 备份服务器 PostgreSQL，启动新 API 并自动迁移，健康后再切换 Web。
 
 PostgreSQL 镜像不会被构建或推送，服务器现有的 `postgres-data` 卷会继续使用。
 
@@ -66,14 +67,25 @@ ssh-keyscan -p 22 your-server.example.com
 
 如需每次部署前人工确认，可给 `production` Environment 增加 required reviewers。
 
-## 3. 首次运行
+## 3. 发布版本
 
-提交并推送工作流后，向 `main` 推送会自动触发部署，也可以在仓库的 `Actions` 页面从 `main` 手动运行 `Test, build, and deploy`。非 `main` 分支手动运行时只执行测试，不发布镜像或部署。
+先确保准备发布的提交已经位于 `main`，再创建并推送带注释的版本标签：
 
-镜像名称根据 GitHub 仓库 owner 自动生成，并同时发布两个标签：
+```bash
+git switch main
+git pull --ff-only
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin v0.1.0
+```
 
-- `ghcr.io/<owner>/knowledge-api:sha-<commit>` 与 `latest`；
-- `ghcr.io/<owner>/knowledge-web:sha-<commit>` 与 `latest`。
+标签必须严格使用 `vMAJOR.MINOR.PATCH`，三个部分都是不带前导零的非负整数。除第一个版本外，新版本必须高于仓库中所有既有的合法发布标签；例如 `v1.3.0` 之后可以发布 `v1.3.1` 或 `v2.0.0`，不能发布 `v1.2.9`。普通 `git push` 不会运行工作流，推送非法或回退版本只会让发布校验失败，不会进入测试、镜像构建或生产部署。
+
+为避免已发布版本被移动、删除后重新使用，建议在仓库 `Settings > Rules > Rulesets` 中为 `v*.*.*` 创建 Tag ruleset，并启用限制更新与限制删除。工作流会拒绝直接更新已有标签；Tag ruleset 进一步保护完整的版本历史。
+
+镜像名称根据 GitHub 仓库 owner 自动生成，并同时发布三个标签：
+
+- `ghcr.io/<owner>/knowledge-api:sha-<commit>`、`vMAJOR.MINOR.PATCH` 与 `latest`；
+- `ghcr.io/<owner>/knowledge-web:sha-<commit>`、`vMAJOR.MINOR.PATCH` 与 `latest`。
 
 服务器部署只使用 `sha-<commit>` 标签，避免 `latest` 在发布过程中变化。
 
