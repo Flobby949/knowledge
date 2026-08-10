@@ -30,6 +30,10 @@ pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Production deployment runtime state
+backups/
+compose.production.yaml
+
 # Editors
 .idea/
 .vscode/

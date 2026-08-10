@@ -72,6 +72,8 @@ pnpm run dev
 
 前端默认运行在 <http://127.0.0.1:5173>，API 默认运行在 <http://127.0.0.1:3001>。更完整的环境说明见 [本地开发文档](docs/DEVELOPMENT.md)。
 
+生产环境可以在 `main` 验收通过后由 GitHub Actions 构建 amd64 镜像并通过 SSH 部署，配置方法见 [GitHub Actions 自动部署](docs/GITHUB-DEPLOYMENT.md)。
+
 ## AI 整理边界
 
 当前版本采用“有据整理”而非自由扩写：AI 可以改写、归纳和按最小必要原则拆分原文，但不能混入原文没有提供的背景、例子、事实或新结论。知识扩展需要作为独立能力和数据层实现，不能冒充原文提炼。

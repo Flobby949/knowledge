@@ -1,3 +1,5 @@
+name: knowledge
+
 services:
   web:
     image: ${WEB_IMAGE:-knowledge-web:latest}
