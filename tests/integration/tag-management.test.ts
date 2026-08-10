@@ -408,6 +408,67 @@ describe("V1 tag management public HTTP contract", () => {
     ).not.toContainEqual(expect.objectContaining({ id: disposableTag.id }));
   });
 
+  it("batch deletes candidate tags atomically", async () => {
+    const marker = randomUUID().slice(0, 8);
+    const sourceText = `批量清理第一行 ${marker}\n批量清理第二行 ${marker}`;
+    const plan = registerAnalysis(sourceText, marker, "batch-delete");
+    const entryTagName = `批量清理入口 ${marker}`;
+    const record = await createOrganizedRecord(
+      app,
+      sourceText,
+      entryTagName,
+    );
+    const sharedTag = requiredOrganizedTag(record, plan.sharedTagName);
+    const disposableTag = requiredOrganizedTag(record, plan.disposableTagName);
+    const approvedTag = (await listTags(app, "user_approved", entryTagName))
+      .items[0];
+
+    if (!approvedTag) {
+      throw new Error("The organized record must keep its approved entry tag");
+    }
+
+    const mixedDelete = await app.inject({
+      method: "DELETE",
+      url: "/api/v1/tags",
+      payload: { ids: [approvedTag.id, sharedTag.id] },
+    });
+
+    expect(mixedDelete.statusCode).toBe(409);
+    expect(mixedDelete.json()).toMatchObject({
+      error: { code: "TAG_DELETE_NOT_ALLOWED" },
+    });
+    expect((await listTags(app, "candidate", marker)).items).toHaveLength(2);
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: "/api/v1/tags",
+      payload: { ids: [sharedTag.id, disposableTag.id] },
+    });
+
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toEqual({ deletedCount: 2 });
+    expect((await listTags(app, "candidate", marker)).items).toEqual([]);
+
+    const recordAfterDelete = await getRecord(app, record.id);
+    const remainingTagIds = recordAfterDelete.organizedItems.flatMap((item) =>
+      item.tags.map(({ id }) => id),
+    );
+
+    expect(remainingTagIds).not.toContain(sharedTag.id);
+    expect(remainingTagIds).not.toContain(disposableTag.id);
+
+    const emptyDelete = await app.inject({
+      method: "DELETE",
+      url: "/api/v1/tags",
+      payload: { ids: [] },
+    });
+
+    expect(emptyDelete.statusCode).toBe(422);
+    expect(emptyDelete.json()).toMatchObject({
+      error: { code: "TAG_BATCH_DELETE_INVALID" },
+    });
+  });
+
   it("suppresses and restores one AI knowledge-point relation while effective search changes immediately", async () => {
     const marker = randomUUID().slice(0, 8);
     const sourceText = `逐条屏蔽第一行 ${marker}\n逐条屏蔽第二行 ${marker}`;

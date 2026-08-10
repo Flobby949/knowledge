@@ -226,6 +226,109 @@ test.describe("tag atlas", () => {
       }),
     ).toHaveCount(0);
   });
+
+  test("user selects and batch cleans AI candidates", async ({
+    page,
+    request,
+  }) => {
+    const marker = `tag-batch-${randomUUID().slice(0, 8)}`;
+    const seeded = await seedCandidateRecord(request, marker);
+
+    for (const pointId of seeded.pointIds) {
+      const suppressed = await request.put(
+        appUrl(
+          `/api/v1/tags/${seeded.candidateId}/records/${seeded.recordId}` +
+            `/items/${pointId}/visibility`,
+        ),
+        { data: { status: "suppressed" } },
+      );
+
+      expect(suppressed.status()).toBe(204);
+    }
+
+    await page.goto(appUrl("/tags"));
+
+    const main = page.getByRole("main", { name: "标签图鉴" });
+
+    await main
+      .getByRole("tab", { name: "AI 候选", exact: true })
+      .click();
+    await main
+      .getByRole("searchbox", { name: "搜索标签" })
+      .fill(marker.slice(-8));
+
+    const atlas = main.getByRole("list", { name: "标签图鉴" });
+    const zeroCandidate = atlas.getByRole("button", {
+      name: seeded.candidateName,
+      exact: true,
+    });
+    const linkedCandidate = atlas.getByRole("button", {
+      name: seeded.manualCandidateName,
+      exact: true,
+    });
+    const zeroCheckbox = atlas.getByRole("checkbox", {
+      name: `选择 ${seeded.candidateName}`,
+      exact: true,
+    });
+    const linkedCheckbox = atlas.getByRole("checkbox", {
+      name: `选择 ${seeded.manualCandidateName}`,
+      exact: true,
+    });
+
+    await expect(zeroCandidate).toContainText("0 条记录");
+    await expect(linkedCandidate).toContainText("1 条记录");
+
+    const batchToolbar = main.getByRole("region", {
+      name: "批量清理 AI 候选",
+    });
+
+    await linkedCheckbox.check();
+    await expect(batchToolbar).toContainText("已选 1 个候选");
+
+    await batchToolbar
+      .getByRole("button", {
+        name: "选中当前结果的 0 关联（1）",
+        exact: true,
+      })
+      .click();
+
+    await expect(zeroCheckbox).toBeChecked();
+    await expect(linkedCheckbox).not.toBeChecked();
+
+    await linkedCheckbox.check();
+    await batchToolbar
+      .getByRole("button", { name: "清理已选（2）", exact: true })
+      .click();
+
+    const confirmation = batchToolbar.getByRole("group", {
+      name: "确认批量清理",
+    });
+
+    await expect(confirmation).toContainText("确认清理 2 个 AI 候选");
+    await expect(confirmation).toContainText("其中 1 个仍有有效记录关联");
+    await confirmation
+      .getByRole("button", { name: "确认清理", exact: true })
+      .click();
+
+    await expect(zeroCandidate).toHaveCount(0);
+    await expect(linkedCandidate).toHaveCount(0);
+    await expect(main.getByLabel("标签操作结果")).toContainText(
+      "已清理 2 个 AI 候选标签",
+    );
+
+    const remaining = await request.get(
+      appUrl(
+        `/api/v1/tags?${new URLSearchParams({
+          approval: "candidate",
+          q: marker.slice(-8),
+          sort: "name_asc",
+        }).toString()}`,
+      ),
+    );
+
+    expect(remaining.status()).toBe(200);
+    expect(((await remaining.json()) as { items: unknown[] }).items).toEqual([]);
+  });
 });
 
 async function seedApprovedTags(
@@ -285,6 +388,8 @@ async function seedCandidateRecord(
 ): Promise<{
   candidateId: string;
   candidateName: string;
+  manualCandidateName: string;
+  pointIds: [string, string];
   pointTitles: [string, string];
   recordId: string;
 }> {
@@ -332,14 +437,24 @@ async function seedCandidateRecord(
   const sharedCandidate = detail.organizedItems[1]?.tags.find((tag) =>
     firstPointTagIds.has(tag.id),
   );
+  const manualCandidate = detail.organizedItems[0]?.tags.find(
+    (tag) => tag.id !== sharedCandidate?.id,
+  );
 
-  if (!sharedCandidate || detail.organizedItems.length !== 2) {
-    throw new Error("The deterministic E2E analysis must expose the shared candidate");
+  if (
+    !sharedCandidate ||
+    !manualCandidate ||
+    !detail.organizedItems[0] ||
+    !detail.organizedItems[1]
+  ) {
+    throw new Error("The deterministic E2E analysis must expose two candidates");
   }
 
   return {
     candidateId: sharedCandidate.id,
     candidateName: sharedCandidate.name,
+    manualCandidateName: manualCandidate.name,
+    pointIds: [detail.organizedItems[0].id, detail.organizedItems[1].id],
     pointTitles: [
       detail.organizedItems[0]!.title,
       detail.organizedItems[1]!.title,

@@ -607,6 +607,17 @@ export async function deleteCandidateTag(tagId: string): Promise<void> {
   await ensureTagMutation(response);
 }
 
+export async function deleteCandidateTags(tagIds: string[]): Promise<number> {
+  const response = await fetch("/api/v1/tags", {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids: tagIds }),
+  });
+  const body = await parseTagResponse<{ deletedCount: number }>(response);
+
+  return body.deletedCount;
+}
+
 export async function putTagKnowledgePointVisibility(
   tagId: string,
   recordId: string,

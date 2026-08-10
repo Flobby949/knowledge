@@ -11,6 +11,7 @@ import {
   approveCandidateTag,
   createTag,
   deleteCandidateTag,
+  deleteCandidateTags,
   getTagDetail,
   listTags,
   putTagKnowledgePointVisibility,
@@ -41,6 +42,11 @@ export function TagsPage() {
   const [actionNotice, setActionNotice] = useState("");
   const [actionBusy, setActionBusy] = useState("");
   const [pageNotice, setPageNotice] = useState("");
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [batchDeleteConfirming, setBatchDeleteConfirming] = useState(false);
+  const [batchDeleteError, setBatchDeleteError] = useState("");
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [newTagError, setNewTagError] = useState("");
@@ -51,6 +57,8 @@ export function TagsPage() {
   const newTagInput = useRef<HTMLInputElement>(null);
   const approvedTab = useRef<HTMLButtonElement>(null);
   const candidateTab = useRef<HTMLButtonElement>(null);
+  const batchDeleteButton = useRef<HTMLButtonElement>(null);
+  const batchConfirmButton = useRef<HTMLButtonElement>(null);
   const detailRequest = useRef(0);
 
   useEffect(() => {
@@ -68,6 +76,14 @@ export function TagsPage() {
       .then((items) => {
         if (active) {
           setTags(items);
+          setSelectedCandidateIds((current) => {
+            const availableIds = new Set(items.map(({ id }) => id));
+            const next = new Set(
+              [...current].filter((id) => availableIds.has(id)),
+            );
+
+            return next.size === current.size ? current : next;
+          });
         }
       })
       .catch((error: unknown) => {
@@ -119,6 +135,65 @@ export function TagsPage() {
     setActionError("");
     setActionNotice("");
     setPageNotice("");
+    resetBatchSelection();
+  }
+
+  function resetBatchSelection() {
+    setSelectedCandidateIds(new Set());
+    setBatchDeleteConfirming(false);
+    setBatchDeleteError("");
+  }
+
+  function changeQuery(next: string) {
+    resetBatchSelection();
+    setQuery(next);
+  }
+
+  function changeSort(next: TagSort) {
+    resetBatchSelection();
+    setSort(next);
+  }
+
+  function toggleCandidateSelection(tagId: string) {
+    setSelectedCandidateIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(tagId)) {
+        next.delete(tagId);
+      } else {
+        next.add(tagId);
+      }
+
+      return next;
+    });
+    setBatchDeleteConfirming(false);
+    setBatchDeleteError("");
+    setPageNotice("");
+  }
+
+  function selectZeroAssociationCandidates() {
+    setSelectedCandidateIds(
+      new Set(tags.filter(({ recordCount }) => recordCount === 0).map(({ id }) => id)),
+    );
+    setBatchDeleteConfirming(false);
+    setBatchDeleteError("");
+    setPageNotice("");
+  }
+
+  function beginBatchDelete() {
+    if (selectedCandidateIds.size === 0) {
+      return;
+    }
+
+    setBatchDeleteConfirming(true);
+    setBatchDeleteError("");
+    window.requestAnimationFrame(() => batchConfirmButton.current?.focus());
+  }
+
+  function cancelBatchDelete() {
+    setBatchDeleteConfirming(false);
+    setBatchDeleteError("");
+    window.requestAnimationFrame(() => batchDeleteButton.current?.focus());
   }
 
   function selectTag(tag: TagListItem) {
@@ -237,6 +312,7 @@ export function TagsPage() {
       setTags([]);
       setListLoading(true);
       setSection("user_approved");
+      resetBatchSelection();
       setReloadVersion((current) => current + 1);
       setActionNotice("已认可为“我的标签”，历史关联保持不变。");
     } catch (error) {
@@ -316,12 +392,55 @@ export function TagsPage() {
 
     try {
       await deleteCandidateTag(selectedTag.id);
+      setSelectedCandidateIds((current) => {
+        const next = new Set(current);
+
+        next.delete(selectedTag.id);
+        return next;
+      });
+      setBatchDeleteConfirming(false);
+      setBatchDeleteError("");
       closeDrawer(false);
       setReloadVersion((current) => current + 1);
       setPageNotice(`AI 候选“${deletedName}”及其候选关联已删除。`);
       window.requestAnimationFrame(() => candidateTab.current?.focus());
     } catch (error) {
       setActionError(tagActionMessage(error, "AI 候选未能删除，请重试。"));
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function handleBatchDeleteCandidates() {
+    const tagIds = [...selectedCandidateIds];
+
+    if (tagIds.length === 0) {
+      return;
+    }
+
+    setActionBusy("batch-delete");
+    setActionError("");
+    setBatchDeleteError("");
+    setPageNotice("");
+
+    try {
+      const deletedCount = await deleteCandidateTags(tagIds);
+
+      if (selectedTag && selectedCandidateIds.has(selectedTag.id)) {
+        closeDrawer(false);
+      }
+
+      setTags((current) => current.filter(({ id }) => !selectedCandidateIds.has(id)));
+      resetBatchSelection();
+      setReloadVersion((current) => current + 1);
+      setPageNotice(
+        `已清理 ${deletedCount} 个 AI 候选标签及其候选关联。`,
+      );
+      window.requestAnimationFrame(() => candidateTab.current?.focus());
+    } catch (error) {
+      setBatchDeleteError(
+        tagActionMessage(error, "AI 候选未能批量清理，请刷新后重试。"),
+      );
     } finally {
       setActionBusy("");
     }
@@ -376,6 +495,15 @@ export function TagsPage() {
   }
 
   const sectionLabel = section === "user_approved" ? "我的标签" : "AI 候选";
+  const zeroAssociationCandidates = tags.filter(
+    ({ recordCount }) => recordCount === 0,
+  );
+  const selectedCandidates = tags.filter(({ id }) =>
+    selectedCandidateIds.has(id),
+  );
+  const selectedLinkedCount = selectedCandidates.filter(
+    ({ recordCount }) => recordCount > 0,
+  ).length;
 
   return (
     <div className="tags-shell">
@@ -439,7 +567,7 @@ export function TagsPage() {
               <span aria-hidden="true" className="search-icon" />
               <input
                 aria-label="搜索标签"
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => changeQuery(event.target.value)}
                 placeholder={`搜索${sectionLabel}`}
                 type="search"
                 value={query}
@@ -450,7 +578,7 @@ export function TagsPage() {
               <span>排序</span>
               <select
                 aria-label="标签排序"
-                onChange={(event) => setSort(event.target.value as TagSort)}
+                onChange={(event) => changeSort(event.target.value as TagSort)}
                 value={sort}
               >
                 <option value="name_asc">名称 A–Z</option>
@@ -500,6 +628,110 @@ export function TagsPage() {
             </p>
           ) : null}
 
+          {section === "candidate" ? (
+            <section
+              aria-label="批量清理 AI 候选"
+              className={
+                batchDeleteConfirming
+                  ? "tag-batch-toolbar is-confirming"
+                  : "tag-batch-toolbar"
+              }
+            >
+              {batchDeleteConfirming ? (
+                <div
+                  aria-label="确认批量清理"
+                  className="tag-batch-confirmation"
+                  role="group"
+                >
+                  <div>
+                    <strong>
+                      确认清理 {selectedCandidateIds.size} 个 AI 候选？
+                    </strong>
+                    <span>
+                      {selectedLinkedCount > 0
+                        ? `其中 ${selectedLinkedCount} 个仍有有效记录关联，相关 AI 标签关联也会一并移除。此操作无法撤销。`
+                        : "这些标签当前均无有效记录关联。此操作无法撤销。"}
+                    </span>
+                  </div>
+                  <div>
+                    <button
+                      className="danger-button"
+                      disabled={actionBusy === "batch-delete"}
+                      onClick={() => void handleBatchDeleteCandidates()}
+                      ref={batchConfirmButton}
+                      type="button"
+                    >
+                      {actionBusy === "batch-delete" ? "清理中…" : "确认清理"}
+                    </button>
+                    <button
+                      disabled={actionBusy === "batch-delete"}
+                      onClick={cancelBatchDelete}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="tag-batch-row">
+                  <div className="tag-batch-summary">
+                    <strong>批量清理</strong>
+                    <span role="status">
+                      {selectedCandidateIds.size > 0
+                        ? `已选 ${selectedCandidateIds.size} 个候选`
+                        : "勾选候选，或快速选择无关联标签"}
+                    </span>
+                  </div>
+                  <div className="tag-batch-actions">
+                    <button
+                      className="secondary-button"
+                      disabled={
+                        listLoading ||
+                        Boolean(loadError) ||
+                        Boolean(actionBusy) ||
+                        zeroAssociationCandidates.length === 0
+                      }
+                      onClick={selectZeroAssociationCandidates}
+                      type="button"
+                    >
+                      {query ? "选中当前结果的" : "选中全部"} 0 关联（
+                      {zeroAssociationCandidates.length}）
+                    </button>
+                    {selectedCandidateIds.size > 0 ? (
+                      <button
+                        disabled={Boolean(actionBusy)}
+                        onClick={resetBatchSelection}
+                        type="button"
+                      >
+                        清空选择
+                      </button>
+                    ) : null}
+                    <button
+                      className="danger-link"
+                      disabled={
+                        selectedCandidateIds.size === 0 || Boolean(actionBusy)
+                      }
+                      onClick={beginBatchDelete}
+                      ref={batchDeleteButton}
+                      type="button"
+                    >
+                      清理已选
+                      {selectedCandidateIds.size > 0
+                        ? `（${selectedCandidateIds.size}）`
+                        : ""}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {batchDeleteError ? (
+                <p className="tag-batch-error" role="alert">
+                  {batchDeleteError}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
           <div
             aria-labelledby={
               section === "user_approved" ? "approved-tags-tab" : "candidate-tags-tab"
@@ -521,13 +753,39 @@ export function TagsPage() {
 
             {listLoading ? <p className="tag-atlas-feedback" role="status">正在载入{sectionLabel}…</p> : null}
 
-            <ul aria-label="标签图鉴" className="tag-atlas-grid">
+            <ul
+              aria-busy={actionBusy === "batch-delete"}
+              aria-label="标签图鉴"
+              className="tag-atlas-grid"
+            >
               {tags.map((tag, index) => (
-                <li key={tag.id}>
+                <li
+                  className={
+                    selectedCandidateIds.has(tag.id) ? "is-batch-selected" : undefined
+                  }
+                  key={tag.id}
+                >
+                  {tag.approvalStatus === "candidate" ? (
+                    <label className="tag-card-selection">
+                      <input
+                        aria-label={`选择 ${tag.name}`}
+                        checked={selectedCandidateIds.has(tag.id)}
+                        disabled={Boolean(actionBusy)}
+                        onChange={() => toggleCandidateSelection(tag.id)}
+                        type="checkbox"
+                      />
+                    </label>
+                  ) : null}
                   <button
                     aria-label={tag.name}
                     aria-pressed={selectedTag?.id === tag.id}
+                    className={
+                      tag.approvalStatus === "candidate"
+                        ? "has-selection-control"
+                        : undefined
+                    }
                     data-tag-id={tag.id}
+                    disabled={actionBusy === "batch-delete"}
                     onClick={() => selectTag(tag)}
                     type="button"
                   >

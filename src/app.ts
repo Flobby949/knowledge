@@ -137,6 +137,10 @@ interface CreateTagBody {
   name: string;
 }
 
+interface DeleteCandidateTagsBody {
+  ids: string[];
+}
+
 interface TagChip {
   id: string;
   name: string;
@@ -1265,6 +1269,73 @@ export async function buildApp(
     },
   );
 
+  app.delete<{ Body: DeleteCandidateTagsBody }>(
+    "/api/v1/tags",
+    async (request, reply) => {
+      if (!isDeleteCandidateTagsBody(request.body)) {
+        return reply.code(422).send({
+          error: {
+            code: "TAG_BATCH_DELETE_INVALID",
+            message: "请选择至少一个有效的 AI 候选标签。",
+          },
+        });
+      }
+
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        const current = await client.query<{
+          approval_status: "ARCHIVED" | "CANDIDATE" | "USER_APPROVED";
+          id: string;
+        }>(
+          `SELECT id, approval_status
+             FROM tags
+            WHERE id = ANY($1::uuid[])
+            ORDER BY id
+            FOR UPDATE`,
+          [request.body.ids],
+        );
+
+        if (current.rows.length !== request.body.ids.length) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({
+            error: {
+              code: "TAG_NOT_FOUND",
+              message: "部分标签不存在，请刷新后重试。",
+            },
+          });
+        }
+
+        if (current.rows.some((tag) => tag.approval_status !== "CANDIDATE")) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({
+            error: {
+              code: "TAG_DELETE_NOT_ALLOWED",
+              message: "已认可标签不能删除，请使用归档。",
+            },
+          });
+        }
+
+        await client.query(
+          "DELETE FROM tag_assignments WHERE tag_id = ANY($1::uuid[])",
+          [request.body.ids],
+        );
+        await client.query("DELETE FROM tags WHERE id = ANY($1::uuid[])", [
+          request.body.ids,
+        ]);
+        await client.query("COMMIT");
+
+        return { deletedCount: request.body.ids.length };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
   app.delete<{ Params: TagParams }>(
     "/api/v1/tags/:id",
     async (request, reply) => {
@@ -2241,6 +2312,26 @@ function isTagPatchBody(value: unknown): value is TagPatchBody {
       keys[0] === "approvalStatus" &&
       (body.approvalStatus === "archived" ||
         body.approvalStatus === "user_approved"))
+  );
+}
+
+function isDeleteCandidateTagsBody(
+  value: unknown,
+): value is DeleteCandidateTagsBody {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  const keys = Object.keys(body);
+
+  return (
+    keys.length === 1 &&
+    keys[0] === "ids" &&
+    Array.isArray(body.ids) &&
+    body.ids.length > 0 &&
+    body.ids.every((id) => typeof id === "string" && isUuid(id)) &&
+    new Set(body.ids).size === body.ids.length
   );
 }
 

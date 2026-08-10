@@ -210,6 +210,89 @@
   border-radius: 6px;
 }
 
+.tag-batch-toolbar {
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px;
+  margin-top: 14px;
+  background: #f7f9fc;
+  border: 1px solid #d6e0eb;
+  border-radius: 7px;
+}
+
+.tag-batch-toolbar.is-confirming {
+  background: #fff8f8;
+  border-color: #e8cdd0;
+}
+
+.tag-batch-row,
+.tag-batch-confirmation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.tag-batch-summary,
+.tag-batch-confirmation > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tag-batch-summary strong,
+.tag-batch-confirmation strong {
+  color: #2c4261;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.tag-batch-summary span,
+.tag-batch-confirmation span {
+  color: #6c7b93;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tag-batch-confirmation strong,
+.tag-batch-confirmation span {
+  color: #713941;
+}
+
+.tag-batch-actions,
+.tag-batch-confirmation > div:last-child {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.tag-batch-toolbar button {
+  min-height: 36px;
+  padding-inline: 11px;
+  white-space: nowrap;
+}
+
+.tag-batch-actions .danger-link {
+  color: #a33c45;
+  background: transparent;
+  border-color: #d9b8bc;
+}
+
+.tag-batch-confirmation .danger-button {
+  color: #fff;
+  background: #a33c45;
+  border-color: #8f3039;
+}
+
+.tag-batch-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .tag-atlas-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -225,8 +308,42 @@
 }
 
 .tag-atlas-grid li {
+  position: relative;
   min-width: 0;
   height: 142px;
+}
+
+.tag-card-selection {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  background: rgb(255 255 255 / 92%);
+  border: 1px solid #d1dbe7;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.tag-card-selection:has(input:checked) {
+  background: #edf5ff;
+  border-color: #8daed5;
+}
+
+.tag-card-selection:has(input:disabled) {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+.tag-card-selection input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--signal);
+  cursor: inherit;
 }
 
 .tag-atlas-grid button {
@@ -248,18 +365,29 @@
     transform 140ms ease;
 }
 
-.tag-atlas-grid button:hover,
+.tag-atlas-grid button:not(:disabled):hover,
 .tag-atlas-grid button[aria-pressed="true"] {
   background: #fbfdff;
   border-color: #8eadd3;
 }
 
-.tag-atlas-grid button:hover {
+.tag-atlas-grid button:not(:disabled):hover {
   transform: translateY(-1px);
 }
 
 .tag-atlas-grid button[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px #b9cde5;
+}
+
+.tag-atlas-grid li.is-batch-selected > button {
+  background: #f7fbff;
+  border-color: #6794c7;
+  box-shadow: inset 0 0 0 1px #b8cde5;
+}
+
+.tag-atlas-grid button:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .tag-atlas-index {
@@ -268,6 +396,10 @@
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
+}
+
+.tag-atlas-grid button.has-selection-control .tag-atlas-index {
+  padding-inline-start: 32px;
 }
 
 .tag-atlas-state {
@@ -671,9 +803,11 @@
 
 .tag-atlas-toolbar input:focus-visible,
 .tag-atlas-toolbar select:focus-visible,
+.tag-batch-toolbar button:focus-visible,
 .new-tag-form input:focus-visible,
 .tag-rename-form input:focus-visible,
 .tag-section-tabs button:focus-visible,
+.tag-card-selection input:focus-visible,
 .tag-atlas-grid button:focus-visible,
 .tag-detail-drawer button:focus-visible,
 .tag-detail-drawer a:focus-visible {
@@ -697,6 +831,13 @@
   .new-tag-form {
     grid-template-columns: minmax(180px, 0.6fr) minmax(190px, 1fr) auto auto;
   }
+
+  .tag-batch-row,
+  .tag-batch-confirmation {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -712,7 +853,8 @@
 
 @media (forced-colors: active) {
   .tag-section-tabs button[aria-selected="true"],
-  .tag-atlas-grid button[aria-pressed="true"] {
+  .tag-atlas-grid button[aria-pressed="true"],
+  .tag-atlas-grid li.is-batch-selected > button {
     outline: 2px solid CanvasText;
   }
 }
