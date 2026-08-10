@@ -143,12 +143,22 @@ export function registerModelConfigRoutes(
       );
 
       if (existing) {
-        const previousTextFingerprint = endpointFingerprint(
-          endpointInput(existing, "text", credentialSecret),
+        const previousTextInput = tryEndpointInput(
+          existing,
+          "text",
+          credentialSecret,
         );
-        const previousEmbeddingFingerprint = endpointFingerprint(
-          endpointInput(existing, "embedding", credentialSecret),
+        const previousEmbeddingInput = tryEndpointInput(
+          existing,
+          "embedding",
+          credentialSecret,
         );
+        const previousTextFingerprint = previousTextInput
+          ? endpointFingerprint(previousTextInput)
+          : null;
+        const previousEmbeddingFingerprint = previousEmbeddingInput
+          ? endpointFingerprint(previousEmbeddingInput)
+          : null;
         const nextTextFingerprint = endpointFingerprint({
           baseUrl: text.baseUrl,
           model: text.model,
@@ -247,7 +257,15 @@ export function registerModelConfigRoutes(
           });
         }
 
-        const input = endpointInput(draft, kind, credentialSecret);
+        const input = tryEndpointInput(draft, kind, credentialSecret);
+
+        if (!input) {
+          return reply.code(422).send({
+            kind,
+            status: "failed",
+            draftVersion: draft.version,
+          });
+        }
 
         try {
           await testModelEndpoint(input);
@@ -322,16 +340,11 @@ export function registerModelConfigRoutes(
         });
       }
 
-      const textFingerprint = endpointFingerprint(
-        endpointInput(draft, "text", credentialSecret),
-      );
-      const embeddingFingerprint = endpointFingerprint(
-        endpointInput(draft, "embedding", credentialSecret),
-      );
+      const publicDraft = publicDraftConfiguration(draft, credentialSecret);
 
       if (
-        draft.text_test_fingerprint !== textFingerprint ||
-        draft.embedding_test_fingerprint !== embeddingFingerprint
+        publicDraft.text.testStatus !== "passed" ||
+        publicDraft.embedding.testStatus !== "passed"
       ) {
         await client.query("ROLLBACK");
         return reply.code(409).send({
@@ -382,7 +395,9 @@ export function registerModelConfigRoutes(
         throw new Error("Activated model configuration could not be read");
       }
 
-      return { active: publicActiveConfiguration(active) };
+      return {
+        active: publicActiveConfiguration(active, credentialSecret),
+      };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -492,11 +507,19 @@ async function readPublicConfiguration(pool: Pool, credentialSecret: string) {
     selectConfiguration(pool, "ACTIVE"),
     selectConfiguration(pool, "DRAFT"),
   ]);
+  const publicDraft = draft
+    ? publicDraftConfiguration(draft, credentialSecret)
+    : null;
 
   return {
-    active: active ? publicActiveConfiguration(active) : null,
-    draft: draft ? publicDraftConfiguration(draft, credentialSecret) : null,
-    canActivate: draft ? draftCanActivate(draft, credentialSecret) : false,
+    active: active
+      ? publicActiveConfiguration(active, credentialSecret)
+      : null,
+    draft: publicDraft,
+    canActivate:
+      publicDraft !== null &&
+      publicDraft.text.testStatus === "passed" &&
+      publicDraft.embedding.testStatus === "passed",
   };
 }
 
@@ -512,18 +535,25 @@ async function selectConfiguration(
   return result.rows[0];
 }
 
-function publicActiveConfiguration(row: ModelConfigRow) {
+function publicActiveConfiguration(
+  row: ModelConfigRow,
+  credentialSecret: string,
+) {
   return {
     version: row.version,
     text: {
       baseUrl: row.text_base_url,
       model: row.text_model,
-      credential: "configured" as const,
+      credential: tryEndpointInput(row, "text", credentialSecret)
+        ? ("configured" as const)
+        : ("invalid" as const),
     },
     embedding: {
       baseUrl: row.embedding_base_url,
       model: row.embedding_model,
-      credential: "configured" as const,
+      credential: tryEndpointInput(row, "embedding", credentialSecret)
+        ? ("configured" as const)
+        : ("invalid" as const),
     },
   };
 }
@@ -532,42 +562,36 @@ function publicDraftConfiguration(
   row: ModelConfigRow,
   credentialSecret: string,
 ) {
+  const textInput = tryEndpointInput(row, "text", credentialSecret);
+  const embeddingInput = tryEndpointInput(row, "embedding", credentialSecret);
   const textPassed =
-    row.text_test_fingerprint ===
-    endpointFingerprint(endpointInput(row, "text", credentialSecret));
+    textInput !== null &&
+    row.text_test_fingerprint === endpointFingerprint(textInput);
   const embeddingPassed =
-    row.embedding_test_fingerprint ===
-    endpointFingerprint(endpointInput(row, "embedding", credentialSecret));
+    embeddingInput !== null &&
+    row.embedding_test_fingerprint === endpointFingerprint(embeddingInput);
 
   return {
     version: row.version,
     text: {
       baseUrl: row.text_base_url,
       model: row.text_model,
-      credential: "configured" as const,
+      credential: textInput
+        ? ("configured" as const)
+        : ("invalid" as const),
       testStatus: textPassed ? ("passed" as const) : ("not_tested" as const),
     },
     embedding: {
       baseUrl: row.embedding_base_url,
       model: row.embedding_model,
-      credential: "configured" as const,
+      credential: embeddingInput
+        ? ("configured" as const)
+        : ("invalid" as const),
       testStatus: embeddingPassed
         ? ("passed" as const)
         : ("not_tested" as const),
     },
   };
-}
-
-function draftCanActivate(
-  row: ModelConfigRow,
-  credentialSecret: string,
-): boolean {
-  const publicDraft = publicDraftConfiguration(row, credentialSecret);
-
-  return (
-    publicDraft.text.testStatus === "passed" &&
-    publicDraft.embedding.testStatus === "passed"
-  );
 }
 
 function endpointInput(
@@ -588,6 +612,18 @@ function endpointInput(
   };
 }
 
+function tryEndpointInput(
+  row: ModelConfigRow,
+  kind: "text" | "embedding",
+  credentialSecret: string,
+): ModelEndpointTestInput | null {
+  try {
+    return endpointInput(row, kind, credentialSecret);
+  } catch {
+    return null;
+  }
+}
+
 function resolveCredential(
   submitted: string | undefined,
   existingCiphertext: string | undefined,
@@ -597,9 +633,15 @@ function resolveCredential(
     return submitted;
   }
 
-  return existingCiphertext
-    ? decryptCredential(existingCiphertext, credentialSecret)
-    : null;
+  if (!existingCiphertext) {
+    return null;
+  }
+
+  try {
+    return decryptCredential(existingCiphertext, credentialSecret);
+  } catch {
+    return null;
+  }
 }
 
 function validEndpoint(

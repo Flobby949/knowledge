@@ -186,6 +186,47 @@ describe("instance model configuration public HTTP flow", () => {
       text.apiKey,
       embedding.apiKey,
     );
+
+    const wrongTextApiKey = "definitely-wrong-text-key";
+    const savedWrongCredential = await app.inject({
+      method: "PUT",
+      url: "/api/v1/model-config/draft",
+      payload: {
+        text: { ...text, apiKey: wrongTextApiKey },
+        embedding,
+      },
+    });
+
+    expect(savedWrongCredential.statusCode).toBe(200);
+    expect(savedWrongCredential.json()).toMatchObject({
+      draft: {
+        version: 2,
+        text: { credential: "configured", testStatus: "not_tested" },
+        embedding: { credential: "configured", testStatus: "not_tested" },
+      },
+      canActivate: false,
+    });
+
+    testModelEndpoint.mockRejectedValueOnce(new Error("invalid credential"));
+
+    const failedWrongCredential = await app.inject({
+      method: "POST",
+      url: "/api/v1/model-config/draft/tests/text",
+    });
+
+    expect(failedWrongCredential.statusCode).toBe(422);
+    expect(failedWrongCredential.json()).toEqual({
+      kind: "text",
+      status: "failed",
+      draftVersion: 2,
+    });
+    expect(testModelEndpoint).toHaveBeenNthCalledWith(3, {
+      kind: "text",
+      baseUrl: text.baseUrl,
+      model: text.model,
+      apiKey: wrongTextApiKey,
+    });
+    expectNoCredentialLeak(savedWrongCredential.body, wrongTextApiKey);
   });
 });
 

@@ -1,5 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { buildApp } from "../../src/app.js";
 import {
@@ -34,6 +42,11 @@ describe("analysis validation retry integration", () => {
       generateAnalysis,
     });
     await app.ready();
+    await activateLocalModelConfiguration(app);
+  });
+
+  beforeEach(() => {
+    generateAnalysis.mockReset();
   });
 
   afterAll(async () => {
@@ -41,9 +54,92 @@ describe("analysis validation retry integration", () => {
     database?.dispose();
   });
 
-  it("fails the whole analysis after exactly one retry and publishes no valid subset", async () => {
-    const sourceText = "Redis 使用事件通知。";
+  it("repairs UTF-16 offsets when the exact evidence quote is unique", async () => {
+    const sourceText = "😀 Redis 使用事件通知。";
     const quote = "Redis 使用事件通知";
+    const expectedStart = sourceText.indexOf(quote);
+    const codePointStart = [...sourceText.slice(0, expectedStart)].length;
+
+    expect(codePointStart).toBe(expectedStart - 1);
+
+    generateAnalysis.mockResolvedValueOnce({
+      title: "Redis 事件通知",
+      summary: sourceText,
+      knowledgePoints: [
+        {
+          title: "Redis 的事件通知",
+          body: sourceText,
+          candidateTags: ["Redis", "事件通知"],
+          evidenceSpans: [
+            {
+              start: codePointStart,
+              end: codePointStart + quote.length,
+              quote,
+            },
+          ],
+        },
+      ],
+    });
+
+    const marker = `analysis-offset-repair-${crypto.randomUUID()}`;
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/records",
+      payload: {
+        text: sourceText,
+        myTags: [{ name: `分析标签 ${marker}` }],
+        processing: "save_only",
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+
+    const recordId = (created.json() as { record: { id: string } }).record.id;
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/v1/records/${recordId}/organize`,
+      payload: { handling: "automatic" },
+    });
+
+    expect(started.statusCode).toBe(202);
+
+    const taskId = (started.json() as { task: { id: string } }).task.id;
+    const task = await waitForTerminalTask(app, taskId);
+
+    expect(task).toMatchObject({ id: taskId, status: "succeeded" });
+    expect(generateAnalysis).toHaveBeenCalledTimes(1);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/api/v1/records/${recordId}`,
+    });
+    const itemId = (detail.json() as { organizedItems: Array<{ id: string }> })
+      .organizedItems[0]?.id;
+
+    expect(itemId).toEqual(expect.any(String));
+
+    const evidence = await app.inject({
+      method: "GET",
+      url: `/api/v1/records/${recordId}/organized-items/${itemId}/evidence`,
+    });
+
+    expect(evidence.statusCode).toBe(200);
+    expect(evidence.json()).toMatchObject({
+      items: [
+        {
+          start: expectedStart,
+          end: expectedStart + quote.length,
+          quote,
+        },
+      ],
+    });
+  });
+
+  it("fails the whole analysis after exactly one retry and publishes no valid subset", async () => {
+    const infoLog = vi.spyOn(app.log, "info");
+    const warnLog = vi.spyOn(app.log, "warn");
+    const quote = "Redis 使用事件通知";
+    const sourceText = `${quote}；${quote}。`;
     const validPoint = {
       title: "Redis 的事件通知",
       body: sourceText,
@@ -74,8 +170,6 @@ describe("analysis validation retry integration", () => {
           },
         ],
       });
-
-    await activateLocalModelConfiguration(app);
 
     const marker = `analysis-retry-${crypto.randomUUID()}`;
     const created = await app.inject({
@@ -116,6 +210,74 @@ describe("analysis validation retry integration", () => {
         message: expect.any(String),
       },
     });
+    expect(infoLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "ai_task.started",
+        recordId,
+        taskId: startedBody.task.id,
+      }),
+      "AI analysis task started",
+    );
+    expect(infoLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 1,
+        event: "ai_task.generation_started",
+        taskId: startedBody.task.id,
+      }),
+      "AI analysis generation attempt started",
+    );
+    expect(infoLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 2,
+        event: "ai_task.generation_started",
+        taskId: startedBody.task.id,
+      }),
+      "AI analysis generation attempt started",
+    );
+    expect(warnLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 1,
+        errors: [
+          expect.objectContaining({
+            code: "EVIDENCE_MISMATCH",
+            evidence: expect.objectContaining({
+              end: 12,
+              exactMatch: false,
+              firstMatchingEnd: 12,
+              firstMatchingStart: 0,
+              quoteFoundInSource: true,
+              start: 1,
+            }),
+            path: "knowledgePoints[1].evidence[0]",
+          }),
+        ],
+        event: "ai_task.validation_failed",
+        taskId: startedBody.task.id,
+      }),
+      "AI analysis output failed validation",
+    );
+    expect(warnLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 2,
+        errors: [
+          expect.objectContaining({
+            code: "EVIDENCE_MISMATCH",
+            evidence: expect.objectContaining({
+              end: 11,
+              exactMatch: false,
+              firstMatchingEnd: 12,
+              firstMatchingStart: 0,
+              quoteFoundInSource: true,
+              start: 0,
+            }),
+            path: "knowledgePoints[1].evidence[0]",
+          }),
+        ],
+        event: "ai_task.validation_failed",
+        taskId: startedBody.task.id,
+      }),
+      "AI analysis output failed validation",
+    );
 
     const detail = await app.inject({
       method: "GET",

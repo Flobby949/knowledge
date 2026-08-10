@@ -31,6 +31,7 @@ const bootstrapModelDraft =
     : undefined;
 const app = await buildApp({
   databaseUrl,
+  logger: true,
   ...(bootstrapModelDraft ? { bootstrapModelDraft } : {}),
   ...(useE2eFakeAi
     ? {

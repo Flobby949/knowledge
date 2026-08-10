@@ -168,6 +168,17 @@
   opacity: 0.72;
 }
 
+.settings-credential-warning {
+  padding: 11px 13px;
+  margin: 0 0 18px;
+  color: #8e2925;
+  background: #fff5f3;
+  border: 1px solid #ecc6c1;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .configuration-group {
   padding: 20px;
   margin-bottom: 18px;
@@ -306,6 +317,11 @@
   white-space: nowrap;
 }
 
+.current-endpoint-values dd.is-invalid {
+  color: var(--danger);
+  font-weight: 650;
+}
+
 .model-endpoint-card > label {
   display: grid;
   gap: 5px;
@@ -333,6 +349,10 @@
   box-shadow: 0 0 0 2px rgba(0, 95, 249, 0.1);
 }
 
+.model-endpoint-card input[aria-invalid="true"] {
+  border-color: #c95a52;
+}
+
 .credential-row {
   display: flex;
   align-items: center;
@@ -350,6 +370,10 @@
   color: #08724c;
   font-size: 12px;
   font-weight: 650;
+}
+
+.credential-row [role="status"].is-invalid {
+  color: var(--danger);
 }
 
 .credential-row .secondary-button {

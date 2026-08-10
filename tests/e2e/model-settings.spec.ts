@@ -143,6 +143,59 @@ test.describe("model settings initial workspace", () => {
       dataPanel.getByRole("heading", { name: "重建搜索索引" }),
     ).toBeVisible();
   });
+
+  test("user can open settings and sees credentials that can no longer be decrypted", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/model-config/draft", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          active: {
+            version: 2,
+            text: {
+              baseUrl: "https://old-text-provider.invalid/v1",
+              model: "old-text-model",
+              credential: "invalid",
+            },
+            embedding: {
+              baseUrl: "https://old-embedding-provider.invalid/v1",
+              model: "old-embedding-model",
+              credential: "invalid",
+            },
+          },
+          draft: null,
+          canActivate: false,
+        },
+        status: 200,
+      });
+    });
+
+    await page.goto(appUrl("/settings"));
+
+    const modelPanel = page.getByRole("region", { name: "AI 模型" });
+    const currentConfiguration = modelPanel.getByRole("group", {
+      name: "当前配置",
+    });
+    const candidateConfiguration = modelPanel.getByRole("group", {
+      name: "候选配置",
+    });
+
+    await expect(modelPanel.getByRole("alert")).toContainText(
+      "保存的模型凭据已失效",
+    );
+    await expect(
+      currentConfiguration.getByRole("status", { name: "凭据状态" }),
+    ).toHaveText(["凭据已失效", "凭据已失效"]);
+    await expect(
+      candidateConfiguration.getByRole("status", { name: "凭据状态" }),
+    ).toHaveText(["凭据已失效，请重新输入", "凭据已失效，请重新输入"]);
+    await expect(
+      candidateConfiguration.getByRole("button", {
+        name: "启用候选配置",
+      }),
+    ).toBeDisabled();
+  });
 });
 
 async function expectSameRow(left: Locator, right: Locator): Promise<void> {

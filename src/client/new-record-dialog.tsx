@@ -108,7 +108,9 @@ export function NewRecordDialog({
           return;
         }
 
-        const available = configuration.active !== null;
+        const available =
+          configuration.active?.text.credential === "configured" &&
+          configuration.active.embedding.credential === "configured";
 
         setAiAvailable(available);
         setAiAvailabilityResolved(true);

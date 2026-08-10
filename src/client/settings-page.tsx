@@ -116,16 +116,34 @@ function ModelSettingsPanel({
   configuration: ModelConfigurationState;
   onConfigurationChange: (configuration: ModelConfigurationState) => void;
 }) {
-  const candidateText = configuration.draft?.text ?? {
-    ...DEFAULT_TEXT_ENDPOINT,
-    credential: "configured" as const,
-    testStatus: "not_tested" as const,
-  };
-  const candidateEmbedding = configuration.draft?.embedding ?? {
-    ...DEFAULT_EMBEDDING_ENDPOINT,
-    credential: "configured" as const,
-    testStatus: "not_tested" as const,
-  };
+  const candidateText =
+    configuration.draft?.text ??
+    (configuration.active?.text.credential === "invalid"
+      ? { ...configuration.active.text, testStatus: "not_tested" as const }
+      : {
+          ...DEFAULT_TEXT_ENDPOINT,
+          credential: "configured" as const,
+          testStatus: "not_tested" as const,
+        });
+  const candidateEmbedding =
+    configuration.draft?.embedding ??
+    (configuration.active?.embedding.credential === "invalid"
+      ? {
+          ...configuration.active.embedding,
+          testStatus: "not_tested" as const,
+        }
+      : {
+          ...DEFAULT_EMBEDDING_ENDPOINT,
+          credential: "configured" as const,
+          testStatus: "not_tested" as const,
+        });
+  const activeCredentialInvalid =
+    configuration.active?.text.credential === "invalid" ||
+    configuration.active?.embedding.credential === "invalid";
+  const hasInvalidCredential =
+    activeCredentialInvalid ||
+    candidateText.credential === "invalid" ||
+    candidateEmbedding.credential === "invalid";
   const [draft, setDraft] = useState(() => ({
     text: {
       baseUrl: candidateText.baseUrl,
@@ -142,6 +160,15 @@ function ModelSettingsPanel({
     "save" | "text" | "embedding" | "activate" | null
   >(null);
   const [actionError, setActionError] = useState("");
+  const textDirty =
+    draft.text.baseUrl !== candidateText.baseUrl ||
+    draft.text.model !== candidateText.model ||
+    draft.text.apiKey.length > 0;
+  const embeddingDirty =
+    draft.embedding.baseUrl !== candidateEmbedding.baseUrl ||
+    draft.embedding.model !== candidateEmbedding.model ||
+    draft.embedding.apiKey.length > 0;
+  const hasUnsavedChanges = textDirty || embeddingDirty;
 
   function updateDraft(
     kind: "text" | "embedding",
@@ -155,8 +182,18 @@ function ModelSettingsPanel({
   }
 
   async function saveDraft() {
-    setBusyAction("save");
     setActionError("");
+
+    if (
+      (candidateText.credential === "invalid" && !draft.text.apiKey) ||
+      (candidateEmbedding.credential === "invalid" &&
+        !draft.embedding.apiKey)
+    ) {
+      setActionError("凭据已失效，请重新输入标记端点的 API Key 后再保存。");
+      return;
+    }
+
+    setBusyAction("save");
 
     try {
       const saved = await saveModelConfigurationDraft({
@@ -174,10 +211,19 @@ function ModelSettingsPanel({
         },
       });
 
-      setDraft((current) => ({
-        text: { ...current.text, apiKey: "" },
-        embedding: { ...current.embedding, apiKey: "" },
-      }));
+      setDraft({
+        text: {
+          baseUrl: saved.draft?.text.baseUrl ?? draft.text.baseUrl,
+          model: saved.draft?.text.model ?? draft.text.model,
+          apiKey: "",
+        },
+        embedding: {
+          baseUrl:
+            saved.draft?.embedding.baseUrl ?? draft.embedding.baseUrl,
+          model: saved.draft?.embedding.model ?? draft.embedding.model,
+          apiKey: "",
+        },
+      });
       onConfigurationChange(saved);
     } catch {
       setActionError("候选配置保存失败，请检查两个端点与凭据。 ");
@@ -224,6 +270,12 @@ function ModelSettingsPanel({
 
       <DefaultAiHandlingSetting />
 
+      {hasInvalidCredential ? (
+        <p className="settings-credential-warning" role="alert">
+          保存的模型凭据已失效，可能是配置加密密钥发生变化。请在候选配置中重新输入标记端点的 API Key，保存并重新测试后启用。
+        </p>
+      ) : null}
+
       <div aria-label="当前配置" className="configuration-group" role="group">
         <div className="configuration-group-heading">
           <div>
@@ -231,7 +283,9 @@ function ModelSettingsPanel({
             <p>后台任务实际使用的原子配置快照</p>
           </div>
           <span aria-label="配置状态" role="status">
-            {configuration.active ? `v${configuration.active.version} · 已启用` : "尚未启用"}
+            {configuration.active
+              ? `v${configuration.active.version} · ${activeCredentialInvalid ? "凭据失效" : "已启用"}`
+              : "尚未启用"}
           </span>
         </div>
         <div className="model-endpoint-grid">
@@ -250,7 +304,9 @@ function ModelSettingsPanel({
         <div className="configuration-group-heading">
           <div>
             <h2>候选配置</h2>
-            <p>两个端点分别测试通过后，整套配置才可一次启用</p>
+            <p id="candidate-configuration-help">
+              先保存候选配置，再分别测试两个端点；全部通过后才可一次启用
+            </p>
           </div>
           <div className="candidate-actions">
             <button
@@ -262,8 +318,13 @@ function ModelSettingsPanel({
               {busyAction === "save" ? "保存中…" : "保存候选配置"}
             </button>
             <button
+              aria-describedby="candidate-configuration-help"
               className="primary-button"
-              disabled={!configuration.canActivate || busyAction !== null}
+              disabled={
+                !configuration.canActivate ||
+                hasUnsavedChanges ||
+                busyAction !== null
+              }
               onClick={() => void activateDraft()}
               type="button"
             >
@@ -276,6 +337,7 @@ function ModelSettingsPanel({
             apiKey={draft.text.apiKey}
             baseUrl={draft.text.baseUrl}
             busy={busyAction !== null}
+            dirty={textDirty}
             endpoint={candidateText}
             kind="text"
             model={draft.text.model}
@@ -286,6 +348,7 @@ function ModelSettingsPanel({
             apiKey={draft.embedding.apiKey}
             baseUrl={draft.embedding.baseUrl}
             busy={busyAction !== null}
+            dirty={embeddingDirty}
             endpoint={candidateEmbedding}
             kind="embedding"
             model={draft.embedding.model}
@@ -412,9 +475,14 @@ function CurrentEndpointGroup({
   endpoint: ActiveModelEndpoint | null;
   kind: "text" | "embedding";
 }) {
+  const credentialInvalid = endpoint?.credential === "invalid";
+
   return (
     <section aria-label={endpointLabel(kind)} className="model-endpoint-card current" role="group">
-      <EndpointCardHeading kind={kind} status={endpoint ? "已配置" : "待配置"} />
+      <EndpointCardHeading
+        kind={kind}
+        status={credentialInvalid ? "凭据失效" : endpoint ? "已配置" : "待配置"}
+      />
       <dl className="current-endpoint-values">
         <div>
           <dt>Base URL</dt>
@@ -426,7 +494,17 @@ function CurrentEndpointGroup({
         </div>
         <div>
           <dt>凭据</dt>
-          <dd>{endpoint ? "已保存凭据" : "尚未保存"}</dd>
+          <dd
+            aria-label="凭据状态"
+            className={credentialInvalid ? "is-invalid" : undefined}
+            role="status"
+          >
+            {credentialInvalid
+              ? "凭据已失效"
+              : endpoint
+                ? "已保存凭据"
+                : "尚未保存"}
+          </dd>
         </div>
       </dl>
     </section>
@@ -437,6 +515,7 @@ function CandidateEndpointGroup({
   apiKey,
   baseUrl,
   busy,
+  dirty,
   endpoint,
   kind,
   model,
@@ -446,6 +525,7 @@ function CandidateEndpointGroup({
   apiKey: string;
   baseUrl: string;
   busy: boolean;
+  dirty: boolean;
   endpoint: DraftModelEndpoint;
   kind: "text" | "embedding";
   model: string;
@@ -457,12 +537,21 @@ function CandidateEndpointGroup({
   onTest: (kind: "text" | "embedding") => Promise<void>;
 }) {
   const idPrefix = `candidate-${kind}`;
+  const credentialInvalid = endpoint.credential === "invalid";
 
   return (
     <section aria-label={endpointLabel(kind)} className="model-endpoint-card" role="group">
       <EndpointCardHeading
         kind={kind}
-        status={endpoint.testStatus === "passed" ? "测试通过" : "尚未测试"}
+        status={
+          credentialInvalid
+            ? "凭据失效"
+            : dirty
+              ? "待保存"
+            : endpoint.testStatus === "passed"
+              ? "测试通过"
+              : "尚未测试"
+        }
       />
       <label htmlFor={`${idPrefix}-base-url`}>
         <span>Base URL</span>
@@ -485,21 +574,41 @@ function CandidateEndpointGroup({
       <label htmlFor={`${idPrefix}-api-key`}>
         <span>API Key</span>
         <input
+          aria-describedby={`${idPrefix}-credential-status`}
+          aria-invalid={credentialInvalid}
           autoComplete="new-password"
           id={`${idPrefix}-api-key`}
           onChange={(event) => onChange(kind, "apiKey", event.target.value)}
+          placeholder={credentialInvalid ? "请重新输入 API Key" : undefined}
+          required={credentialInvalid}
           type="password"
           value={apiKey}
         />
       </label>
       <div className="credential-row">
-        <span aria-label="凭据状态" role="status">已保存凭据</span>
-        <span aria-label="连接测试状态" role="status">
-          {endpoint.testStatus === "passed" ? "测试通过" : "尚未测试"}
+        <span
+          aria-label="凭据状态"
+          className={credentialInvalid ? "is-invalid" : undefined}
+          id={`${idPrefix}-credential-status`}
+          role="status"
+        >
+          {credentialInvalid ? "凭据已失效，请重新输入" : "已保存凭据"}
+        </span>
+        <span
+          aria-label="连接测试状态"
+          id={`${idPrefix}-test-status`}
+          role="status"
+        >
+          {dirty
+            ? "有未保存更改"
+            : endpoint.testStatus === "passed"
+              ? "测试通过"
+              : "尚未测试"}
         </span>
         <button
+          aria-describedby={`${idPrefix}-test-status`}
           className="secondary-button"
-          disabled={busy}
+          disabled={busy || credentialInvalid || dirty}
           onClick={() => void onTest(kind)}
           type="button"
         >

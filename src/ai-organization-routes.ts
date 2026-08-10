@@ -7,6 +7,7 @@ import type { AnalysisGenerator, GeneratedAnalysis } from "./analysis-generator.
 import {
   validateAnalysisOutput,
   type AnalysisOutput,
+  type AnalysisValidationError,
 } from "./domain/analysis-output.js";
 import { normalizeTagName } from "./domain/tag-name.js";
 import { decryptCredential } from "./model-credentials.js";
@@ -265,6 +266,7 @@ export function registerAiOrganizationRoutes(
             pool,
             credentialSecret,
             generateAnalysis,
+            log: app.log,
             ...(onTaskSettled ? { onTaskSettled } : {}),
             scheduleSemanticIndex,
             taskId: task.id,
@@ -495,6 +497,7 @@ export function registerAiOrganizationRoutes(
             pool,
             credentialSecret,
             generateAnalysis,
+            log: app.log,
             ...(onTaskSettled ? { onTaskSettled } : {}),
             scheduleSemanticIndex,
             taskId: retryTask.id,
@@ -1258,6 +1261,7 @@ async function processTask(options: {
   pool: Pool;
   credentialSecret: string;
   generateAnalysis: AnalysisGenerator;
+  log: FastifyInstance["log"];
   onTaskSettled?: (taskId: string) => void;
   scheduleSemanticIndex: () => void;
   taskId: string;
@@ -1266,6 +1270,7 @@ async function processTask(options: {
     pool,
     credentialSecret,
     generateAnalysis,
+    log,
     onTaskSettled,
     scheduleSemanticIndex,
     taskId,
@@ -1295,6 +1300,18 @@ async function processTask(options: {
       return;
     }
 
+    log.info(
+      {
+        event: "ai_task.started",
+        handling: task.handling,
+        model: task.text_model,
+        modelConfigurationVersion: task.model_config_version,
+        recordId: task.record_id,
+        taskId,
+      },
+      "AI analysis task started",
+    );
+
     const generationInput = {
       sourceText: task.source_text,
       baseUrl: task.text_base_url,
@@ -1311,6 +1328,15 @@ async function processTask(options: {
         "UPDATE ai_tasks SET generation_attempts = $2 WHERE id = $1",
         [taskId, attempt],
       );
+      log.info(
+        {
+          attempt,
+          event: "ai_task.generation_started",
+          recordId: task.record_id,
+          taskId,
+        },
+        "AI analysis generation attempt started",
+      );
       const generated = await generateAnalysis(generationInput);
       const validation = validateGeneratedAnalysis(task.source_text, generated);
 
@@ -1319,26 +1345,91 @@ async function processTask(options: {
 
         if (published) {
           scheduleSemanticIndex();
+          log.info(
+            {
+              attempt,
+              event: "ai_task.succeeded",
+              knowledgePointCount: validation.value.knowledgePoints.length,
+              recordId: task.record_id,
+              taskId,
+            },
+            "AI analysis task succeeded",
+          );
+        } else {
+          log.warn(
+            {
+              attempt,
+              event: "ai_task.result_discarded",
+              recordId: task.record_id,
+              taskId,
+            },
+            "AI analysis result was not published",
+          );
         }
 
         return;
       }
 
+      log.warn(
+        {
+          attempt,
+          errors: validationErrorsForLog(
+            task.source_text,
+            generated,
+            validation.errors,
+          ),
+          event: "ai_task.validation_failed",
+          recordId: task.record_id,
+          taskId,
+        },
+        "AI analysis output failed validation",
+      );
+
       if (attempt === 2) {
+        const failureMessage = validation.errors
+          .map((error) => error.path)
+          .join(", ");
+
         await failTask(
           pool,
           taskId,
           "ANALYSIS_VALIDATION_FAILED",
-          validation.errors.map((error) => error.path).join(", "),
+          failureMessage,
+        );
+        log.warn(
+          {
+            event: "ai_task.failed",
+            failureCode: "ANALYSIS_VALIDATION_FAILED",
+            failureMessage,
+            recordId: task.record_id,
+            taskId,
+          },
+          "AI analysis task failed",
         );
       }
     }
   } catch (error) {
+    const failureMessage =
+      error instanceof Error ? error.message : "Unknown model request failure";
+
+    log.error(
+      {
+        errorMessage:
+          error instanceof SyntaxError
+            ? "Model response was not valid JSON"
+            : failureMessage,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        event: "ai_task.failed",
+        failureCode: "MODEL_REQUEST_FAILED",
+        taskId,
+      },
+      "AI analysis task failed",
+    );
     await failTask(
       pool,
       taskId,
       "MODEL_REQUEST_FAILED",
-      error instanceof Error ? error.message : "Unknown model request failure",
+      failureMessage,
     );
   } finally {
     try {
@@ -1358,10 +1449,150 @@ function validateGeneratedAnalysis(sourceText: string, generated: GeneratedAnaly
           title: point.title,
           body: point.body,
           tags: point.candidateTags,
-          evidence: point.evidenceSpans,
+          evidence: repairUniqueEvidenceOffsets(
+            sourceText,
+            point.evidenceSpans,
+          ),
         }))
       : generated.knowledgePoints,
   });
+}
+
+function repairUniqueEvidenceOffsets(
+  sourceText: string,
+  evidenceSpans: unknown,
+): unknown {
+  if (!Array.isArray(evidenceSpans)) {
+    return evidenceSpans;
+  }
+
+  return evidenceSpans.map((evidence) => {
+    if (!isRecord(evidence)) {
+      return evidence;
+    }
+
+    const { start, end, quote } = evidence;
+
+    if (typeof quote !== "string" || quote.length === 0) {
+      return evidence;
+    }
+
+    if (
+      typeof start === "number" &&
+      typeof end === "number" &&
+      Number.isInteger(start) &&
+      Number.isInteger(end) &&
+      start >= 0 &&
+      end > start &&
+      end <= sourceText.length &&
+      sourceText.slice(start, end) === quote
+    ) {
+      return evidence;
+    }
+
+    const matchingStart = sourceText.indexOf(quote);
+    const hasMultipleMatches =
+      matchingStart >= 0 && sourceText.indexOf(quote, matchingStart + 1) >= 0;
+
+    if (matchingStart < 0 || hasMultipleMatches) {
+      return evidence;
+    }
+
+    return {
+      ...evidence,
+      start: matchingStart,
+      end: matchingStart + quote.length,
+    };
+  });
+}
+
+function validationErrorsForLog(
+  sourceText: string,
+  generated: GeneratedAnalysis,
+  errors: AnalysisValidationError[],
+) {
+  return errors.map((error) => {
+    if (error.code !== "EVIDENCE_MISMATCH") {
+      return error;
+    }
+
+    return {
+      ...error,
+      evidence: evidenceDiagnostics(
+        sourceText,
+        evidenceAtPath(generated, error.path),
+      ),
+    };
+  });
+}
+
+function evidenceAtPath(generated: unknown, path: string): unknown {
+  const match = /^knowledgePoints\[(\d+)\]\.evidence\[(\d+)\]$/u.exec(path);
+  const pointIndex = match?.[1];
+  const evidenceIndex = match?.[2];
+
+  if (pointIndex === undefined || evidenceIndex === undefined) {
+    return undefined;
+  }
+
+  const knowledgePoints = isRecord(generated)
+    ? generated.knowledgePoints
+    : undefined;
+  const point = Array.isArray(knowledgePoints)
+    ? knowledgePoints[Number.parseInt(pointIndex, 10)]
+    : undefined;
+  const evidenceSpans = isRecord(point) ? point.evidenceSpans : undefined;
+
+  return Array.isArray(evidenceSpans)
+    ? evidenceSpans[Number.parseInt(evidenceIndex, 10)]
+    : undefined;
+}
+
+function evidenceDiagnostics(sourceText: string, evidence: unknown) {
+  const span = isRecord(evidence) ? evidence : {};
+  const start = span.start;
+  const end = span.end;
+  const quote = span.quote;
+  const startIsInteger = typeof start === "number" && Number.isInteger(start);
+  const endIsInteger = typeof end === "number" && Number.isInteger(end);
+  const rangeInBounds =
+    startIsInteger &&
+    endIsInteger &&
+    start >= 0 &&
+    end > start &&
+    end <= sourceText.length;
+  const quoteIsString = typeof quote === "string";
+  const quoteUtf16Length = quoteIsString ? quote.length : null;
+  const exactMatch =
+    rangeInBounds && quoteIsString && sourceText.slice(start, end) === quote;
+  const firstMatchingStart =
+    quoteIsString && (quoteUtf16Length ?? 0) > 0
+      ? sourceText.indexOf(quote)
+      : -1;
+
+  return {
+    end: typeof end === "number" ? end : null,
+    endType: typeof end,
+    exactMatch,
+    ...(firstMatchingStart >= 0
+      ? {
+          firstMatchingEnd: firstMatchingStart + (quoteUtf16Length ?? 0),
+          firstMatchingStart,
+        }
+      : {}),
+    quoteFoundInSource: firstMatchingStart >= 0,
+    quoteType: typeof quote,
+    quoteUtf16Length,
+    rangeInBounds,
+    rangeUtf16Length: startIsInteger && endIsInteger ? end - start : null,
+    sourceUtf16Length: sourceText.length,
+    start: typeof start === "number" ? start : null,
+    startType: typeof start,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function publishAnalysis(

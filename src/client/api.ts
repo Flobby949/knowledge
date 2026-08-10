@@ -278,7 +278,7 @@ export interface SearchHealth {
 export interface ActiveModelEndpoint {
   baseUrl: string;
   model: string;
-  credential: "configured";
+  credential: "configured" | "invalid";
 }
 
 export interface DraftModelEndpoint extends ActiveModelEndpoint {

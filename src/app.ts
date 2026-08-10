@@ -42,6 +42,7 @@ export interface BuildAppOptions {
   databaseUrl: string;
   embedText?: EmbedText;
   generateAnalysis?: AnalysisGenerator;
+  logger?: boolean;
   onAiTaskSettled?: (taskId: string) => void;
   testModelEndpoint?: ModelEndpointTester;
 }
@@ -317,7 +318,7 @@ const LIBRARY_TAG_RECORDS_CTE = `library_tag_records AS (
 export async function buildApp(
   options: BuildAppOptions,
 ): Promise<FastifyInstance> {
-  const app = Fastify();
+  const app = Fastify({ logger: options.logger ?? false });
   const pool = new Pool({ connectionString: options.databaseUrl });
   const searchSnapshots = new Map<string, SearchSnapshot>();
 

@@ -7,6 +7,68 @@ const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 test.describe("model settings candidate activation", () => {
   test.use({ viewport: { width: 1_600, height: 1_000 } });
 
+  test("editing a tested endpoint invalidates its visible test status until saved", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/model-config/draft", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          active: null,
+          draft: {
+            version: 1,
+            text: {
+              baseUrl: "https://text-provider.invalid/v1",
+              model: "text-model",
+              credential: "configured",
+              testStatus: "passed",
+            },
+            embedding: {
+              baseUrl: "https://embedding-provider.invalid/v1",
+              model: "embedding-model",
+              credential: "configured",
+              testStatus: "passed",
+            },
+          },
+          canActivate: true,
+        },
+        status: 200,
+      });
+    });
+
+    await page.goto(appUrl("/settings"));
+
+    const candidate = page
+      .getByRole("region", { name: "AI 模型" })
+      .getByRole("group", { name: "候选配置" });
+    const text = candidate.getByRole("group", { name: "文本推理模型" });
+    const embedding = candidate.getByRole("group", { name: "嵌入模型" });
+    const activate = candidate.getByRole("button", {
+      name: "启用候选配置",
+    });
+
+    await expect(
+      text.getByRole("status", { name: "连接测试状态" }),
+    ).toHaveText("测试通过");
+    await expect(activate).toBeEnabled();
+
+    await text.getByLabel("API Key", { exact: true }).fill("wrong-api-key");
+
+    await expect(
+      text.getByRole("status", { name: "连接测试状态" }),
+    ).toHaveText("有未保存更改");
+    await expect(
+      text.getByRole("button", { name: "测试连接" }),
+    ).toBeDisabled();
+    await expect(activate).toBeDisabled();
+    await expect(
+      embedding.getByRole("status", { name: "连接测试状态" }),
+    ).toHaveText("测试通过");
+    await expect(
+      embedding.getByRole("button", { name: "测试连接" }),
+    ).toBeEnabled();
+  });
+
   test("user independently tests both endpoints before activating a credential-safe configuration", async ({
     page,
   }) => {
