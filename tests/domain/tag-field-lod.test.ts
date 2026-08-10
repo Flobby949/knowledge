@@ -10,7 +10,7 @@ describe("home tag-field render budget", () => {
       labelTarget: 96,
       level: "full",
       sphereSegments: { height: 12, width: 18 },
-      traceLimit: 4,
+      traceLimit: 64,
       traceSegments: 36,
     });
     expect(getTagFieldRenderBudget(301)).toEqual({
@@ -19,7 +19,7 @@ describe("home tag-field render budget", () => {
       labelTarget: 72,
       level: "balanced",
       sphereSegments: { height: 9, width: 14 },
-      traceLimit: 3,
+      traceLimit: 48,
       traceSegments: 28,
     });
     expect(getTagFieldRenderBudget(1_000)).toEqual({
@@ -28,7 +28,7 @@ describe("home tag-field render budget", () => {
       labelTarget: 48,
       level: "compact",
       sphereSegments: { height: 7, width: 10 },
-      traceLimit: 2,
+      traceLimit: 32,
       traceSegments: 20,
     });
     expect(getTagFieldRenderBudget(1_001)).toEqual({
@@ -37,7 +37,7 @@ describe("home tag-field render budget", () => {
       labelTarget: 32,
       level: "dense",
       sphereSegments: { height: 5, width: 8 },
-      traceLimit: 1,
+      traceLimit: 20,
       traceSegments: 12,
     });
   });

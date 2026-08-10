@@ -20,7 +20,7 @@ export function getTagFieldRenderBudget(
       labelTarget: 96,
       level: "full",
       sphereSegments: { height: 12, width: 18 },
-      traceLimit: 4,
+      traceLimit: 64,
       traceSegments: 36,
     };
   }
@@ -32,7 +32,7 @@ export function getTagFieldRenderBudget(
       labelTarget: 72,
       level: "balanced",
       sphereSegments: { height: 9, width: 14 },
-      traceLimit: 3,
+      traceLimit: 48,
       traceSegments: 28,
     };
   }
@@ -44,7 +44,7 @@ export function getTagFieldRenderBudget(
       labelTarget: 48,
       level: "compact",
       sphereSegments: { height: 7, width: 10 },
-      traceLimit: 2,
+      traceLimit: 32,
       traceSegments: 20,
     };
   }
@@ -55,7 +55,7 @@ export function getTagFieldRenderBudget(
     labelTarget: 32,
     level: "dense",
     sphereSegments: { height: 5, width: 8 },
-    traceLimit: 1,
+    traceLimit: 20,
     traceSegments: 12,
   };
 }

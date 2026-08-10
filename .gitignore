@@ -12,6 +12,7 @@ node_modules/
 .pnpm-store/
 
 # Build, test, and tooling output
+artifacts/
 dist/
 build/
 coverage/

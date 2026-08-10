@@ -1,0 +1,16 @@
+.git
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules
+.pnpm-store
+dist
+build
+coverage
+playwright-report
+test-results
+*.log
+docs
+design-previews
+tests

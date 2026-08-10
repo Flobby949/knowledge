@@ -1,9 +1,9 @@
 /*
  * THESIS: Home is a navigable signal field, not a decorative dashboard.
- * OWN-WORLD: Deep-space black, cyan orbital geometry, restrained spectral node accents, and a precise HUD.
+ * OWN-WORLD: Deep-space black, dendritic signal paths, restrained spectral node accents, and a precise HUD.
  * STORY: Every durable tag appears as a stable point; search pulls one signal forward and activation opens its record set.
  * FIRST VIEWPORT: A dark 60px navigation over one unbroken 940px field, with the search HUD low and reset control at right.
- * FORM: Brief-pinned Experience surface; depth-first orbital field, with no concept seed required.
+ * FORM: Brief-pinned Experience surface; depth-first neural field, with no concept seed required.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -16,9 +16,10 @@ import {
 import { getTagField, type TagFieldItem } from "./api.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
+import { createTagMembraneField } from "./tag-membrane-field.js";
 import "./home-page.css";
 
-const DEFAULT_CAMERA: CameraState = { distance: 8.2, pitch: -0.12, yaw: 0.3 };
+const DEFAULT_CAMERA: CameraState = { distance: 8.8, pitch: -0.28, yaw: 0.42 };
 const CAMERA_STORAGE_KEY = "knowledge.home.camera.v1";
 
 export function HomePage() {
@@ -43,6 +44,8 @@ export function HomePage() {
   const focusedIdRef = useRef<string | null>(null);
   const newRecordButton = useRef<HTMLButtonElement>(null);
   const pointerRef = useRef<PointerDrag | null>(null);
+  const cameraFrameRef = useRef<number | null>(null);
+  const pendingCameraRef = useRef<CameraState | null>(null);
   const tagNodeRefs = useRef(new Map<string, HTMLButtonElement>());
   const webGlFieldRef = useRef<WebGlTagField | null>(null);
   const renderBudget = useMemo(
@@ -73,7 +76,14 @@ export function HomePage() {
 
   useEffect(() => {
     focusedIdRef.current = focusedId;
+    webGlFieldRef.current?.setFocusedTag(focusedId);
   }, [focusedId]);
+
+  useEffect(() => () => {
+    if (cameraFrameRef.current !== null) {
+      window.cancelAnimationFrame(cameraFrameRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -169,9 +179,11 @@ export function HomePage() {
 
       item.style.left = `${position.x}%`;
       item.style.top = `${position.y}%`;
+      item.style.transform = "translate(-50%, -50%)";
       item.style.zIndex = "1";
       button.style.setProperty("--projection-scale", "1");
       button.style.setProperty("--depth-opacity", "1");
+      button.style.setProperty("--depth-blur", "0px");
       button.removeAttribute("data-behind-camera");
     }
   }, [renderMode, tags]);
@@ -228,8 +240,9 @@ export function HomePage() {
         continue;
       }
 
-      item.style.left = `${projection.x.toFixed(3)}%`;
-      item.style.top = `${projection.y.toFixed(3)}%`;
+      item.style.left = "0";
+      item.style.top = "0";
+      item.style.transform = `translate3d(${projection.x.toFixed(2)}px, ${projection.y.toFixed(2)}px, 0) translate(-50%, -50%)`;
       item.style.zIndex = String(projection.layer);
       button.style.setProperty(
         "--projection-scale",
@@ -239,7 +252,15 @@ export function HomePage() {
         "--depth-opacity",
         projection.opacity.toFixed(3),
       );
+      button.style.setProperty(
+        "--depth-blur",
+        `${Math.max(0, (1 - projection.opacity) * 0.82).toFixed(2)}px`,
+      );
       button.toggleAttribute("data-behind-camera", !projection.visible);
+    }
+
+    if (pointerRef.current) {
+      return;
     }
 
     const occupiedLabels: Array<{
@@ -290,12 +311,40 @@ export function HomePage() {
     }
   }
 
-  function updateCamera(next: CameraState, persist = true) {
+  function updateCamera(
+    next: CameraState,
+    persist = true,
+    deferUntilFrame = true,
+  ) {
     const camera = clampCamera(next);
 
     cameraRef.current = camera;
-    publishCamera(camera);
-    webGlFieldRef.current?.setCamera(camera);
+    pendingCameraRef.current = camera;
+
+    if (!deferUntilFrame) {
+      if (cameraFrameRef.current !== null) {
+        window.cancelAnimationFrame(cameraFrameRef.current);
+        cameraFrameRef.current = null;
+      }
+
+      pendingCameraRef.current = null;
+      publishCamera(camera);
+      webGlFieldRef.current?.setCamera(camera);
+    } else if (cameraFrameRef.current === null) {
+      cameraFrameRef.current = window.requestAnimationFrame(() => {
+        cameraFrameRef.current = null;
+
+        const pendingCamera = pendingCameraRef.current;
+
+        if (!pendingCamera) {
+          return;
+        }
+
+        pendingCameraRef.current = null;
+        publishCamera(pendingCamera);
+        webGlFieldRef.current?.setCamera(pendingCamera);
+      });
+    }
 
     if (persist) {
       storeCamera(camera);
@@ -315,6 +364,7 @@ export function HomePage() {
       x: event.clientX,
       y: event.clientY,
     };
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     event.currentTarget.dataset.interaction = "dragging";
   }
@@ -360,7 +410,7 @@ export function HomePage() {
     updateCamera({
       ...cameraRef.current,
       distance: cameraRef.current.distance + event.deltaY * 0.006,
-    });
+    }, true, false);
   }
 
   function handleSaved() {
@@ -453,16 +503,17 @@ export function HomePage() {
                       className="tag-node-energy"
                       data-energy-core=""
                     >
-                      <span className="tag-node-shell" />
-                      <span className="tag-node-core" />
+                      <span className="tag-node-branch tag-node-branch-primary" />
+                      <span className="tag-node-branch tag-node-branch-secondary" />
+                      <span className="tag-node-branch tag-node-branch-tertiary" />
                       <span
-                        className="tag-node-orbit tag-node-orbit-primary"
-                        data-orbit-ring=""
+                        className="tag-node-shell"
+                        data-node-ring=""
                         data-ring={
                           tag.approval === "approved" ? "complete" : "dashed"
                         }
                       />
-                      <span className="tag-node-orbit tag-node-orbit-secondary" />
+                      <span className="tag-node-core" />
                     </span>
                     <strong>{tag.name}</strong>
                   </button>
@@ -512,6 +563,9 @@ export function HomePage() {
               ? `${focused.name} · ${focused.approval === "candidate" ? "AI 候选" : "已认可"} · ${focused.recordCount} 条记录`
               : "选择一个标签以查看信号信息"}
           </p>
+          <p className="tag-field-legend">
+            WebGL 空间场 · 拖拽旋转 · 动态连线不表示标签关系
+          </p>
           <output
             aria-label="镜头状态"
             className="camera-status visually-hidden"
@@ -524,7 +578,7 @@ export function HomePage() {
             onClick={() => {
               setFocusedId(null);
               setQuery("");
-              updateCamera(DEFAULT_CAMERA);
+              updateCamera(DEFAULT_CAMERA, true, false);
             }}
             type="button"
           >
@@ -636,6 +690,7 @@ type WebGlTagField = {
   focusTag: (id: string) => void;
   getCamera: () => CameraState;
   setCamera: (camera: CameraState) => void;
+  setFocusedTag: (id: string | null) => void;
 };
 
 type WebGlTagFieldOptions = {
@@ -666,8 +721,8 @@ function cameraSignature(camera: CameraState): string {
 
 function clampCamera(camera: CameraState): CameraState {
   return {
-    distance: THREE.MathUtils.clamp(camera.distance, 4.8, 11.2),
-    pitch: THREE.MathUtils.clamp(camera.pitch, -0.68, 0.68),
+    distance: THREE.MathUtils.clamp(camera.distance, 6.2, 12.8),
+    pitch: THREE.MathUtils.clamp(camera.pitch, -0.72, 0.72),
     yaw: camera.yaw,
   };
 }
@@ -723,7 +778,21 @@ function nodeStyle(tag: TagFieldItem): NodeCustomProperties {
 }
 
 function nodeDiameter(recordCount: number): number {
-  return Math.min(112, Math.round(48 + Math.log2(recordCount + 1) * 16));
+  return Math.min(90, Math.round(44 + Math.log2(recordCount + 1) * 12));
+}
+
+function membraneDiameter(
+  recordCount: number,
+  renderBudget: TagFieldRenderBudget,
+): number {
+  const scale = {
+    balanced: 0.86,
+    compact: 0.72,
+    dense: 0.58,
+    full: 1,
+  }[renderBudget.level];
+
+  return Math.round((nodeDiameter(recordCount) + 18) * scale);
 }
 
 function shouldHideNodeLabel(
@@ -825,17 +894,32 @@ function createWebGlTagField(
 
   const starField = createStarField(options.renderBudget.glowTextureSize);
   const dustField = createDustField(options.renderBudget.glowTextureSize);
+  const membraneField = createTagMembraneField(
+    tags.map((tag) => ({
+      candidate: tag.approval === "candidate",
+      color: stableNodeColor(tag.id),
+      diameter: membraneDiameter(tag.recordCount, options.renderBudget),
+      id: tag.id,
+      opacity:
+        tag.recordCount === 0
+          ? 0.5
+          : tag.approval === "candidate"
+            ? 0.82
+            : 1,
+      phase: stableUnit(`${tag.id}:membrane-phase`) * Math.PI * 2,
+      position: stableWorldPosition(tag.id),
+    })),
+    runtimeCamera.distance,
+    Math.min(window.devicePixelRatio || 1, 2),
+  );
 
   staticLayer.add(starField, dustField);
-
-  for (const mesh of createInstancedTagEnergy(tags, options.renderBudget)) {
-    nodeGroup.add(mesh);
-  }
+  nodeGroup.add(membraneField.points);
 
   const signalTraces = createSignalTraces(tags, options.renderBudget);
 
   for (const trace of signalTraces) {
-    staticLayer.add(trace.line, trace.pulse);
+    nodeGroup.add(trace.line, trace.pulse);
   }
 
   function resizeRendererIfNeeded() {
@@ -850,6 +934,10 @@ function createWebGlTagField(
     height = nextHeight;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height, false);
+    membraneField.setViewport(
+      runtimeCamera.distance,
+      Math.min(window.devicePixelRatio || 1, 2),
+    );
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
   }
@@ -877,14 +965,14 @@ function createWebGlTagField(
         projectedPosition.z >= -1 &&
         projectedPosition.z <= 1;
       const x = THREE.MathUtils.clamp(
-        (projectedPosition.x * 0.5 + 0.5) * 100,
-        8,
-        92,
+        (projectedPosition.x * 0.5 + 0.5) * width,
+        width * 0.08,
+        width * 0.92,
       );
       const y = THREE.MathUtils.clamp(
-        (-projectedPosition.y * 0.5 + 0.5) * 100,
-        8,
-        90,
+        (-projectedPosition.y * 0.5 + 0.5) * height,
+        height * 0.08,
+        height * 0.9,
       );
 
       projections.push({
@@ -907,6 +995,10 @@ function createWebGlTagField(
     nodeGroup.rotation.set(runtimeCamera.pitch, runtimeCamera.yaw, 0.02);
     camera.position.z = runtimeCamera.distance;
     camera.updateProjectionMatrix();
+    membraneField.setViewport(
+      runtimeCamera.distance,
+      Math.min(window.devicePixelRatio || 1, 2),
+    );
   }
 
   function render(now: number, scheduleNextFrame: boolean) {
@@ -917,6 +1009,8 @@ function createWebGlTagField(
     const deltaSeconds = Math.min(0.05, Math.max(0, now - lastFrameAt) / 1_000);
 
     lastFrameAt = now;
+
+    const shouldAnimateField = !options.reducedMotion && options.shouldAutoRotate();
 
     if (focusAnimation) {
       const elapsed = now - focusAnimation.startedAt;
@@ -946,7 +1040,7 @@ function createWebGlTagField(
       if (progress === 1) {
         focusAnimation = null;
       }
-    } else if (!options.reducedMotion && options.shouldAutoRotate()) {
+    } else if (shouldAnimateField) {
       runtimeCamera = {
         ...runtimeCamera,
         yaw: runtimeCamera.yaw + deltaSeconds * 0.018,
@@ -956,28 +1050,36 @@ function createWebGlTagField(
     if (!options.reducedMotion) {
       starField.rotation.y -= deltaSeconds * 0.0025;
       dustField.rotation.y += deltaSeconds * 0.004;
-      signalTraces.forEach((trace, index) => {
-        const material = trace.line.material as THREE.LineBasicMaterial;
-        const phase = (now / 8_000 + index * 0.27) % 1;
-        const active = phase < 0.68;
 
-        material.opacity = active
-          ? Math.sin((phase / 0.68) * Math.PI) * 0.2
-          : 0;
-        trace.pulse.visible = active;
+      if (shouldAnimateField) {
+        signalTraces.forEach((trace, index) => {
+          const material = trace.line.material as THREE.LineBasicMaterial;
+          const phase = (now / 8_000 + index * 0.27) % 1;
+          const active = phase < 0.68;
 
-        if (active) {
-          const point = trace.curve.getPoint(phase / 0.68);
-          const position = trace.pulse.geometry.getAttribute("position");
+          material.opacity = active
+            ? 0.12 + Math.sin((phase / 0.68) * Math.PI) * 0.3
+            : 0.08;
+          trace.pulse.visible = active;
 
-          position.setXYZ(0, point.x, point.y, point.z);
-          position.needsUpdate = true;
+          if (active) {
+            const point = trace.curve.getPoint(phase / 0.68);
+            const position = trace.pulse.geometry.getAttribute("position");
+
+            position.setXYZ(0, point.x, point.y, point.z);
+            position.needsUpdate = true;
+          }
+        });
+      } else {
+        for (const trace of signalTraces) {
+          trace.pulse.visible = false;
+          (trace.line.material as THREE.LineBasicMaterial).opacity = 0.22;
         }
-      });
+      }
     } else {
       for (const trace of signalTraces) {
         trace.pulse.visible = false;
-        (trace.line.material as THREE.LineBasicMaterial).opacity = 0.055;
+        (trace.line.material as THREE.LineBasicMaterial).opacity = 0.22;
       }
     }
 
@@ -1020,6 +1122,7 @@ function createWebGlTagField(
       renderer.dispose();
     },
     focusTag(id) {
+      membraneField.setFocusedTag(id);
       const point = stableWorldPosition(id);
       const horizontal = Math.hypot(point.x, point.z);
       const target = clampCamera({
@@ -1045,7 +1148,13 @@ function createWebGlTagField(
     setCamera(nextCamera) {
       runtimeCamera = clampCamera(nextCamera);
       focusAnimation = null;
-      render(window.performance.now(), false);
+
+      if (options.reducedMotion) {
+        render(window.performance.now(), false);
+      }
+    },
+    setFocusedTag(id) {
+      membraneField.setFocusedTag(id);
     },
   };
 }
@@ -1165,78 +1274,6 @@ function createGlowTexture(size: number): THREE.CanvasTexture {
   return texture;
 }
 
-function createInstancedTagEnergy(
-  tags: TagFieldItem[],
-  renderBudget: TagFieldRenderBudget,
-): THREE.InstancedMesh[] {
-  if (tags.length === 0) {
-    return [];
-  }
-
-  const { height: heightSegments, width: widthSegments } =
-    renderBudget.sphereSegments;
-  const shell = new THREE.InstancedMesh(
-    new THREE.SphereGeometry(1, widthSegments, heightSegments),
-    new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: renderBudget.energyOpacity.shell,
-      wireframe: false,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-    tags.length,
-  );
-  const core = new THREE.InstancedMesh(
-    new THREE.SphereGeometry(1, widthSegments, heightSegments),
-    new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: renderBudget.energyOpacity.core,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-    tags.length,
-  );
-  const matrix = new THREE.Matrix4();
-  const quaternion = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
-  const color = new THREE.Color();
-
-  tags.forEach((tag, index) => {
-    const radius = 0.12 + (nodeDiameter(tag.recordCount) - 42) / 240;
-    const brightness = tag.recordCount === 0
-      ? 0.46
-      : tag.approval === "candidate"
-        ? 0.72
-        : 1;
-
-    color.set(stableNodeColor(tag.id)).multiplyScalar(brightness);
-    scale.setScalar(radius);
-    matrix.compose(stableWorldPosition(tag.id), quaternion, scale);
-    shell.setMatrixAt(index, matrix);
-    shell.setColorAt(index, color);
-
-    scale.setScalar(radius * 0.44);
-    matrix.compose(stableWorldPosition(tag.id), quaternion, scale);
-    core.setMatrixAt(index, matrix);
-    core.setColorAt(index, color);
-  });
-
-  shell.instanceMatrix.needsUpdate = true;
-  core.instanceMatrix.needsUpdate = true;
-
-  if (shell.instanceColor) {
-    shell.instanceColor.needsUpdate = true;
-  }
-
-  if (core.instanceColor) {
-    core.instanceColor.needsUpdate = true;
-  }
-
-  return [shell, core];
-}
-
 function createSignalTraces(
   tags: TagFieldItem[],
   renderBudget: TagFieldRenderBudget,
@@ -1245,28 +1282,27 @@ function createSignalTraces(
     return [];
   }
 
-  const curveCount = Math.min(
-    renderBudget.traceLimit,
-    Math.max(1, Math.floor(tags.length / 3)),
+  const orderedTags = [...tags].sort(
+    (left, right) => stableHash(left.id) - stableHash(right.id),
   );
+  const curveCount = tags.length === 2
+    ? 1
+    : Math.min(renderBudget.traceLimit, tags.length * 2);
   const traces: SignalTrace[] = [];
+  const pulseTexture = createGlowTexture(renderBudget.glowTextureSize);
 
   for (let index = 0; index < curveCount; index += 1) {
-    const from = new THREE.Vector3(
-      (stableUnit(`signal:${index}:x`) - 0.5) * 6.2,
-      (stableUnit(`signal:${index}:y`) - 0.5) * 4.1,
-      (stableUnit(`signal:${index}:z`) - 0.5) * 4.2,
-    );
-    const to = from.clone().add(
-      new THREE.Vector3(
-        (stableUnit(`signal:${index}:dx`) - 0.5) * 2.2,
-        (stableUnit(`signal:${index}:dy`) - 0.5) * 1.5,
-        (stableUnit(`signal:${index}:dz`) - 0.5) * 1.8,
-      ),
-    );
+    const fromTag = orderedTags[index % orderedTags.length]!;
+    const offset = index < orderedTags.length
+      ? 1
+      : 2 + stableHash(`${fromTag.id}:neural-edge:${index}`) % Math.max(1, orderedTags.length - 2);
+    const toTag = orderedTags[(index + offset) % orderedTags.length]!;
+    const from = stableWorldPosition(fromTag.id);
+    const to = stableWorldPosition(toTag.id);
     const middle = from.clone().lerp(to, 0.5);
 
-    middle.y += (stableUnit(`signal:${index}:bend`) - 0.5) * 1.1;
+    middle.y += (stableUnit(`signal:${index}:bend`) - 0.5) * 0.48;
+    middle.z += (stableUnit(`signal:${index}:depth`) - 0.5) * 0.36;
     const curve = new THREE.QuadraticBezierCurve3(from, middle, to);
     const geometry = new THREE.BufferGeometry().setFromPoints(
       curve.getPoints(renderBudget.traceSegments),
@@ -1274,9 +1310,9 @@ function createSignalTraces(
     const line = new THREE.Line(
       geometry,
       new THREE.LineBasicMaterial({
-        color: index % 2 === 0 ? 0x268bdc : 0x765cf4,
+        color: index % 3 === 0 ? 0x5b6cff : 0x1da9d8,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.28,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
@@ -1284,16 +1320,19 @@ function createSignalTraces(
     const pulse = new THREE.Points(
       new THREE.BufferGeometry().setFromPoints([from]),
       new THREE.PointsMaterial({
-        color: index % 2 === 0 ? 0x6bd8ff : 0x9b83ff,
-        size: 0.11,
+        color: index % 3 === 0 ? 0x9b8cff : 0x75e6ff,
+        size: 0.085,
         sizeAttenuation: true,
         transparent: true,
         opacity: 0.8,
-        map: createGlowTexture(renderBudget.glowTextureSize),
+        map: pulseTexture,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
     );
+
+    line.renderOrder = 2;
+    pulse.renderOrder = 3;
 
     traces.push({ curve, line, pulse });
   }

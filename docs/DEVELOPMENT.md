@@ -36,3 +36,23 @@ docker compose down
 ```
 
 默认数据库只绑定到本机回环地址 `127.0.0.1:5432`。默认凭据仅供本地开发使用；远程部署必须通过环境变量覆盖，并遵循产品的外部认证与网络访问控制要求。
+
+## 容器化运行整套应用
+
+复制并按需修改环境变量后构建、启动：
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+docker compose ps
+```
+
+浏览器访问 <http://127.0.0.1:18080>。API 容器启动时会自动执行尚未应用的数据库迁移。
+
+停止应用：
+
+```bash
+docker compose down
+```
+
+生产或远程部署前，必须修改 `POSTGRES_PASSWORD` 与 `MODEL_CONFIG_ENCRYPTION_KEY`，并在应用前方配置认证和 TLS。

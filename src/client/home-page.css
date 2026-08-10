@@ -16,6 +16,10 @@
   height: 100%;
   overflow: hidden;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  contain: layout paint style;
   background:
     radial-gradient(ellipse at 52% 50%, rgba(17, 77, 130, 0.22), transparent 34%),
     radial-gradient(circle at 17% 30%, rgba(44, 83, 154, 0.13), transparent 28%),
@@ -28,6 +32,10 @@
   cursor: grabbing;
 }
 
+.tag-field[data-interaction="dragging"] .tag-node-energy {
+  filter: none;
+}
+
 .tag-field::before,
 .tag-field::after {
   position: absolute;
@@ -37,6 +45,7 @@
 }
 
 .tag-field::before {
+  z-index: 0;
   opacity: 0.72;
   background-image:
     radial-gradient(circle, rgba(117, 204, 255, 0.72) 0 1px, transparent 1.4px),
@@ -46,13 +55,14 @@
 }
 
 .tag-field::after {
-  inset: 8% 18%;
-  border: 1px solid rgba(52, 191, 251, 0.09);
-  border-radius: 50%;
-  transform: rotate(-8deg);
-  box-shadow:
-    0 0 80px rgba(20, 157, 238, 0.05),
-    inset 0 0 80px rgba(20, 157, 238, 0.04);
+  z-index: 3;
+  background:
+    radial-gradient(ellipse at 51% 47%, transparent 42%, rgba(0, 3, 11, 0.2) 70%, rgba(0, 3, 11, 0.72) 100%),
+    linear-gradient(180deg, rgba(0, 3, 11, 0.04), rgba(0, 3, 11, 0.16));
+}
+
+.tag-field[data-state~="webgl2"]::before {
+  opacity: 0;
 }
 
 .tag-field-canvas {
@@ -115,7 +125,28 @@
   text-shadow: 0 1px 8px rgba(0, 5, 16, 0.95);
   text-overflow: ellipsis;
   white-space: nowrap;
+  filter: blur(var(--depth-blur, 0));
   pointer-events: auto;
+  transition: color 160ms ease-out, filter 160ms ease-out, text-shadow 160ms ease-out;
+}
+
+.tag-field[data-state~="webgl2"] .tag-node-energy {
+  filter: none;
+  opacity: 0;
+}
+
+.tag-field[data-state~="webgl2"] .tag-node-list strong {
+  margin-top: 14px;
+}
+
+.tag-field[data-state~="webgl2"] .tag-node-list button:hover strong,
+.tag-field[data-state~="webgl2"] .tag-node-list button:focus-visible strong,
+.tag-field[data-state~="webgl2"] .tag-node-list button[data-state~="focused"] strong {
+  color: #ffffff;
+  filter: blur(0);
+  text-shadow:
+    0 2px 8px #00030b,
+    0 0 12px color-mix(in srgb, var(--node-color) 72%, transparent);
 }
 
 .tag-node-energy {
@@ -126,36 +157,37 @@
   width: var(--node-diameter);
   height: var(--node-diameter);
   border-radius: 50%;
-  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--node-color) 38%, transparent));
+  filter: drop-shadow(0 5px 15px color-mix(in srgb, var(--node-color) 34%, transparent));
   transform: scale(var(--projection-scale, 1));
   pointer-events: auto;
 }
 
 .tag-node-shell,
 .tag-node-core,
-.tag-node-orbit {
+.tag-node-branch {
   position: absolute;
   pointer-events: none;
 }
 
 .tag-node-shell {
-  inset: 0;
-  border-radius: 50%;
+  z-index: 2;
+  inset: 14%;
+  border-radius: 48% 52% 45% 55% / 55% 46% 54% 45%;
   background:
     radial-gradient(circle at 34% 29%, rgba(255, 255, 255, 0.72) 0 2%, transparent 10%),
     radial-gradient(
       circle at 50% 52%,
       color-mix(in srgb, var(--node-color) 66%, white) 0 5%,
       color-mix(in srgb, var(--node-color) 44%, transparent) 16%,
-      color-mix(in srgb, var(--node-color) 22%, #020817) 52%,
-      rgba(1, 7, 22, 0.76) 76%,
+      color-mix(in srgb, var(--node-color) 20%, #020817) 48%,
+      rgba(1, 7, 22, 0.82) 74%,
       color-mix(in srgb, var(--node-color) 23%, transparent) 100%
     );
   border: 1px solid color-mix(in srgb, var(--node-color) 62%, transparent);
   box-shadow:
-    inset -10px -11px 20px rgba(0, 5, 20, 0.72),
-    inset 7px 6px 19px color-mix(in srgb, var(--node-color) 28%, transparent),
-    0 0 22px color-mix(in srgb, var(--node-color) 34%, transparent);
+    inset -7px -8px 16px rgba(0, 5, 20, 0.72),
+    inset 5px 4px 15px color-mix(in srgb, var(--node-color) 28%, transparent),
+    0 6px 18px color-mix(in srgb, var(--node-color) 30%, transparent);
 }
 
 .tag-node-shell::before,
@@ -166,18 +198,22 @@
 }
 
 .tag-node-shell::before {
-  inset: 13%;
+  inset: 12%;
   border: 1px solid color-mix(in srgb, var(--node-color) 24%, transparent);
 }
 
 .tag-node-shell::after {
-  inset: 29%;
-  border: 1px dashed color-mix(in srgb, var(--node-color) 22%, transparent);
+  inset: 31%;
+  background: var(--node-color);
+  border-radius: 50%;
+  box-shadow: 0 0 9px color-mix(in srgb, var(--node-color) 72%, transparent);
+  opacity: 0.62;
 }
 
 .tag-node-core {
-  width: 26%;
-  height: 26%;
+  z-index: 3;
+  width: 20%;
+  height: 20%;
   background: radial-gradient(circle, #f6fdff 0 12%, var(--node-color) 38%, transparent 74%);
   border-radius: 50%;
   box-shadow:
@@ -185,26 +221,54 @@
     0 0 22px 6px color-mix(in srgb, var(--node-color) 48%, transparent);
 }
 
-.tag-node-orbit {
+.tag-node-branch {
+  z-index: 1;
   top: 50%;
   left: 50%;
-  width: 148%;
-  height: 42%;
-  transform: translate(-50%, -50%) rotate(-8deg);
-  border: 1px solid color-mix(in srgb, var(--node-color) 72%, transparent);
+  width: 142%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0 4%,
+    color-mix(in srgb, var(--node-color) 44%, transparent) 16% 40%,
+    transparent 48% 52%,
+    color-mix(in srgb, var(--node-color) 44%, transparent) 60% 84%,
+    transparent 96% 100%
+  );
+  transform: translate(-50%, -50%) rotate(8deg);
+  transform-origin: center;
+}
+
+.tag-node-branch::before,
+.tag-node-branch::after {
+  position: absolute;
+  top: -2px;
+  width: 5px;
+  height: 5px;
+  background: var(--node-color);
   border-radius: 50%;
-  box-shadow: 0 0 7px color-mix(in srgb, var(--node-color) 22%, transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--node-color) 60%, transparent);
+  content: "";
 }
 
-.tag-node-orbit-secondary {
-  width: 122%;
-  height: 56%;
-  transform: translate(-50%, -50%) rotate(62deg);
-  border-color: color-mix(in srgb, var(--node-color) 34%, transparent);
+.tag-node-branch::before {
+  left: 10%;
 }
 
-.tag-node-list button[data-state~="candidate"] .tag-node-orbit-primary {
-  border-style: dashed;
+.tag-node-branch::after {
+  right: 10%;
+}
+
+.tag-node-branch-secondary {
+  width: 128%;
+  opacity: 0.72;
+  transform: translate(-50%, -50%) rotate(126deg);
+}
+
+.tag-node-branch-tertiary {
+  width: 116%;
+  opacity: 0.48;
+  transform: translate(-50%, -50%) rotate(238deg);
 }
 
 .tag-node-list button[data-state~="candidate"] .tag-node-shell {
@@ -214,9 +278,20 @@
 .tag-node-list button[data-state~="focused"] .tag-node-energy,
 .tag-node-list button:hover .tag-node-energy {
   filter:
-    drop-shadow(0 0 7px rgba(220, 248, 255, 0.58))
-    drop-shadow(0 0 24px color-mix(in srgb, var(--node-color) 62%, transparent));
+    drop-shadow(0 3px 7px rgba(220, 248, 255, 0.38))
+    drop-shadow(0 8px 22px color-mix(in srgb, var(--node-color) 58%, transparent));
   transform: scale(calc(var(--projection-scale, 1) * 1.08));
+}
+
+.tag-node-list button:focus-visible {
+  outline: 0;
+}
+
+.tag-node-list button:focus-visible .tag-node-shell {
+  border-color: #dff8ff;
+  box-shadow:
+    0 0 0 2px rgba(45, 157, 255, 0.78),
+    0 7px 22px color-mix(in srgb, var(--node-color) 48%, transparent);
 }
 
 .tag-node-list button[data-behind-camera] {
@@ -243,9 +318,10 @@
   pointer-events: auto;
 }
 
-.tag-field[data-lod="balanced"] .tag-node-orbit-secondary,
-.tag-field[data-lod="compact"] .tag-node-orbit-secondary,
-.tag-field[data-lod="dense"] .tag-node-orbit-secondary,
+.tag-field[data-lod="balanced"] .tag-node-branch-tertiary,
+.tag-field[data-lod="compact"] .tag-node-branch-tertiary,
+.tag-field[data-lod="dense"] .tag-node-branch-secondary,
+.tag-field[data-lod="dense"] .tag-node-branch-tertiary,
 .tag-field[data-lod="compact"] .tag-node-shell::after,
 .tag-field[data-lod="dense"] .tag-node-shell::before,
 .tag-field[data-lod="dense"] .tag-node-shell::after {
@@ -461,6 +537,17 @@
   letter-spacing: 0.06em;
 }
 
+.tag-field-legend {
+  position: absolute;
+  z-index: 8;
+  top: 43px;
+  left: 30px;
+  margin: 0;
+  color: #6f91ad;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .tag-focus-status[data-active="false"] {
   opacity: 0;
 }
@@ -476,17 +563,9 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .tag-field[data-state~="live-motion"] .tag-node-orbit-primary {
-    animation: home-orbit 18s linear infinite;
-  }
-
   .tag-field[data-state~="live-motion"] .tag-node-core {
     animation: home-pulse 2.8s ease-in-out infinite;
   }
-}
-
-@keyframes home-orbit {
-  to { transform: translate(-50%, -50%) rotate(352deg); }
 }
 
 @keyframes home-pulse {

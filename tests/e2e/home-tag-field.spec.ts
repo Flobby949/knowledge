@@ -188,6 +188,8 @@ test.describe("home neural tag field", () => {
 
     expect(cameraAfterDrag.yaw).not.toBe(cameraBeforeInteraction.yaw);
     expect(cameraAfterDrag.pitch).not.toBe(cameraBeforeInteraction.pitch);
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? ""))
+      .toBe("");
 
     await scene.dispatchEvent("wheel", { deltaY: -360 });
 
@@ -236,7 +238,7 @@ test.describe("home neural tag field", () => {
     await restoredScene
       .getByRole("button", { name: "重置视角", exact: true })
       .click();
-    await expect(restoredScene).toHaveAttribute("data-camera", "0.300|-0.120|8.200");
+    await expect(restoredScene).toHaveAttribute("data-camera", "0.420|-0.280|8.800");
     await expect(page).toHaveURL(appUrl("/"));
 
     const searchRecordsQuery = `事务日志如何保持顺序 ${marker}`;
@@ -537,12 +539,12 @@ async function expectEnergyNode(
   ring: "complete" | "dashed",
 ): Promise<void> {
   const energy = node.locator("[data-energy-core]");
-  const orbit = node.locator("[data-orbit-ring]");
+  const stateRing = node.locator("[data-node-ring]");
 
   await expect(energy).toBeVisible();
-  await expect(orbit).toBeVisible();
+  await expect(stateRing).toBeVisible();
   await expect(energy).toHaveCSS("border-radius", "50%");
-  await expect(orbit).toHaveAttribute("data-ring", ring);
+  await expect(stateRing).toHaveAttribute("data-ring", ring);
 
   const energyBox = await energy.boundingBox();
   const buttonBox = await node.boundingBox();

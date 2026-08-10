@@ -5,6 +5,7 @@ import type { ModelEndpointTester } from "./model-endpoint-tester.js";
 const databaseUrl =
   process.env.DATABASE_URL ??
   "postgresql://knowledge:knowledge_dev@127.0.0.1:5432/knowledge";
+const host = process.env.SERVER_HOST ?? "127.0.0.1";
 const port = Number.parseInt(process.env.SERVER_PORT ?? "3001", 10);
 const textApiKey = process.env.DEEPSEEK_API_KEY;
 const embeddingApiKey = process.env.KNOELEDGE_API_KEY;
@@ -70,7 +71,7 @@ if (useE2eFakeAi) {
   );
 }
 
-await app.listen({ host: "127.0.0.1", port });
+await app.listen({ host, port });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, async () => {
