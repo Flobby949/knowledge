@@ -4,6 +4,7 @@
   "packageManager": "pnpm@11.20.0",
   "type": "module",
   "scripts": {
+    "dev": "pnpm run --parallel \"/^dev:(api|web)$/\"",
     "db:migrate": "tsx scripts/migrate.ts",
     "dev:api": "tsx watch src/server.ts",
     "dev:web": "vite",
