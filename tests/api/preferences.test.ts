@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../../src/app.js";
+import { DEFAULT_ANALYSIS_PROMPT } from "../../src/domain/analysis-prompt.js";
 import {
   prepareTestDatabase,
   type PreparedTestDatabase,
@@ -22,7 +23,7 @@ describe("instance preferences public HTTP flow", () => {
     testDatabase?.dispose();
   }, 30_000);
 
-  it("defaults to automatic publishing and persists a user-selected review default", async () => {
+  it("persists independently updated AI preferences", async () => {
     const initial = await app.inject({
       method: "GET",
       url: "/api/v1/preferences",
@@ -30,7 +31,10 @@ describe("instance preferences public HTTP flow", () => {
 
     expect(initial.statusCode).toBe(200);
     expect(initial.json()).toEqual({
-      preferences: { defaultAiHandling: "automatic" },
+      preferences: {
+        defaultAiHandling: "automatic",
+        analysisPrompt: DEFAULT_ANALYSIS_PROMPT,
+      },
     });
 
     const updated = await app.inject({
@@ -41,7 +45,25 @@ describe("instance preferences public HTTP flow", () => {
 
     expect(updated.statusCode).toBe(200);
     expect(updated.json()).toEqual({
-      preferences: { defaultAiHandling: "review" },
+      preferences: {
+        defaultAiHandling: "review",
+        analysisPrompt: DEFAULT_ANALYSIS_PROMPT,
+      },
+    });
+
+    const customPrompt = "只提取原文中的关键知识，并为每个知识点保留至多两个核心标签。";
+    const promptUpdated = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/preferences",
+      payload: { analysisPrompt: `  ${customPrompt}  ` },
+    });
+
+    expect(promptUpdated.statusCode).toBe(200);
+    expect(promptUpdated.json()).toEqual({
+      preferences: {
+        defaultAiHandling: "review",
+        analysisPrompt: customPrompt,
+      },
     });
 
     await app.close();
@@ -55,7 +77,10 @@ describe("instance preferences public HTTP flow", () => {
 
     expect(afterRestart.statusCode).toBe(200);
     expect(afterRestart.json()).toEqual({
-      preferences: { defaultAiHandling: "review" },
+      preferences: {
+        defaultAiHandling: "review",
+        analysisPrompt: customPrompt,
+      },
     });
 
     const invalid = await app.inject({
@@ -66,6 +91,20 @@ describe("instance preferences public HTTP flow", () => {
 
     expect(invalid.statusCode).toBe(422);
     expect(invalid.json()).toEqual({
+      error: {
+        code: "PREFERENCE_INVALID",
+        message: expect.any(String),
+      },
+    });
+
+    const emptyPrompt = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/preferences",
+      payload: { analysisPrompt: "   " },
+    });
+
+    expect(emptyPrompt.statusCode).toBe(422);
+    expect(emptyPrompt.json()).toEqual({
       error: {
         code: "PREFERENCE_INVALID",
         message: expect.any(String),

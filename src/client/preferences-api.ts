@@ -2,6 +2,7 @@ export type DefaultAiHandling = "automatic" | "review";
 
 export interface InstancePreferences {
   defaultAiHandling: DefaultAiHandling;
+  analysisPrompt: string;
 }
 
 export async function getPreferences(): Promise<InstancePreferences> {
@@ -11,12 +12,12 @@ export async function getPreferences(): Promise<InstancePreferences> {
 }
 
 export async function updatePreferences(
-  defaultAiHandling: DefaultAiHandling,
+  preferences: Partial<InstancePreferences>,
 ): Promise<InstancePreferences> {
   const response = await fetch("/api/v1/preferences", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ defaultAiHandling }),
+    body: JSON.stringify(preferences),
   });
 
   return readPreferences(response);

@@ -13,7 +13,7 @@ direction image and the documents disagree, `DESIGN.md` and
 | Review | queue, evidence highlight, workspace and flow bar | 58/42 workspace plus queue/flow geometry |
 | Search | deterministic result with push drawer open | 480 px drawer that pushes the result stage |
 | Tags | equal-size atlas cards with aggregate record drawer | responsive atlas and 480 px push drawer |
-| Settings | single-page model/data console and review default | full-width console with equal model columns |
+| Settings | single-page model/data console, review default and analysis Prompt | full-width console with equal model columns |
 
 The fixture enters through the public restore and settings APIs and stubs only
 the external model boundary with `E2E_FAKE_AI=1`. It never reads or writes a

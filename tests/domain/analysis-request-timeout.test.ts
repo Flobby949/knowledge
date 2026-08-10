@@ -4,6 +4,7 @@ import {
   analysisRequestTimeoutMs,
   generateOpenAICompatibleAnalysis,
 } from "../../src/analysis-generator.js";
+import { FIXED_ANALYSIS_OUTPUT_SCHEMA_PROMPT } from "../../src/domain/analysis-prompt.js";
 
 describe("AI analysis request timeout policy", () => {
   it("increases by grapheme-count tier and caps every request at ten minutes", () => {
@@ -35,39 +36,48 @@ describe("AI analysis request timeout policy", () => {
   it("applies the selected tier to the external chat completion request", async () => {
     const signal = new AbortController().signal;
     const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: JSON.stringify({
-                    title: "标题",
-                    summary: "摘要",
-                    knowledgePoints: [],
-                  }),
-                },
+    const fetchRequest = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: "标题",
+                  summary: "摘要",
+                  knowledgePoints: [],
+                }),
               },
-            ],
-          }),
-          { status: 200 },
-        ),
+            },
+          ],
+        }),
+        { status: 200 },
       ),
     );
 
+    vi.stubGlobal("fetch", fetchRequest);
+
     try {
+      const analysisPrompt = "只保留真正关键的知识和标签。";
+
       await generateOpenAICompatibleAnalysis({
         sourceText: "👨‍👩‍👧‍👦".repeat(501),
         baseUrl: "https://text-provider.invalid/v1",
         model: "deepseek-v4-flash",
         apiKey: "test-only-key",
         configurationVersion: 1,
+        analysisPrompt,
       });
 
       expect(timeout).toHaveBeenCalledWith(420_000);
+      const requestBody = JSON.parse(
+        String(fetchRequest.mock.calls[0]?.[1]?.body),
+      ) as { messages: Array<{ role: string; content: string }> };
+
+      expect(requestBody.messages[0]).toEqual({
+        role: "system",
+        content: `${analysisPrompt}${FIXED_ANALYSIS_OUTPUT_SCHEMA_PROMPT}`,
+      });
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();

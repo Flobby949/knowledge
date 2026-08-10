@@ -1,13 +1,17 @@
 import { expect, test, type APIRequestContext } from "./fixture.js";
+import { DEFAULT_ANALYSIS_PROMPT } from "../../src/domain/analysis-prompt.js";
 
 const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 
-test.describe("default AI handling preference", () => {
+test.describe("AI preferences", () => {
   test.use({ viewport: { width: 1_600, height: 1_000 } });
 
   test.afterEach(async ({ request }) => {
     await request.patch(appUrl("/api/v1/preferences"), {
-      data: { defaultAiHandling: "automatic" },
+      data: {
+        defaultAiHandling: "automatic",
+        analysisPrompt: DEFAULT_ANALYSIS_PROMPT,
+      },
     });
   });
 
@@ -86,6 +90,68 @@ test.describe("default AI handling preference", () => {
         name: /^AI 整理并自动采用/u,
       }),
     ).not.toBeChecked();
+  });
+
+  test("user edits the analysis prompt without changing the fixed JSON contract", async ({
+    page,
+    request,
+  }) => {
+    const resetPreference = await request.patch(appUrl("/api/v1/preferences"), {
+      data: { analysisPrompt: DEFAULT_ANALYSIS_PROMPT },
+    });
+
+    expect(resetPreference.status()).toBe(200);
+    await page.goto(appUrl("/settings"));
+
+    const promptSetting = page.getByRole("form", {
+      name: "AI 整理提示词",
+      exact: true,
+    });
+    const prompt = promptSetting.getByRole("textbox", {
+      name: /可编辑 Prompt/u,
+    });
+    const customPrompt =
+      "你是中文知识整理器。只提取原文中真正关键的知识，每个知识点默认生成一个、最多两个核心标签。";
+
+    await expect(prompt).toHaveValue(DEFAULT_ANALYSIS_PROMPT);
+    await expect(promptSetting).toContainText(
+      "固定 JSON 输出结构由系统自动追加，不能在设置中修改",
+    );
+
+    await prompt.fill(customPrompt);
+    await expect(
+      promptSetting.getByRole("status", { name: "提示词设置状态" }),
+    ).toHaveText("有未保存更改");
+
+    const updatePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        new URL(response.url()).pathname === "/api/v1/preferences",
+    );
+
+    await promptSetting.getByRole("button", { name: "保存提示词" }).click();
+    expect((await updatePromise).status()).toBe(200);
+    await expect(
+      promptSetting.getByRole("status", { name: "提示词设置状态" }),
+    ).toHaveText("提示词已保存");
+
+    await page.reload();
+    await expect(
+      page.getByRole("textbox", { name: /可编辑 Prompt/u }),
+    ).toHaveValue(customPrompt);
+
+    const reloadedSetting = page.getByRole("form", {
+      name: "AI 整理提示词",
+      exact: true,
+    });
+
+    await reloadedSetting.getByRole("button", { name: "恢复默认" }).click();
+    await expect(
+      reloadedSetting.getByRole("textbox", { name: /可编辑 Prompt/u }),
+    ).toHaveValue(DEFAULT_ANALYSIS_PROMPT);
+    await expect(
+      reloadedSetting.getByRole("status", { name: "提示词设置状态" }),
+    ).toHaveText("有未保存更改");
   });
 });
 

@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
+import { DEFAULT_ANALYSIS_PROMPT } from "../domain/analysis-prompt.js";
 import {
   activateModelConfiguration,
   getModelConfiguration,
@@ -269,6 +270,7 @@ function ModelSettingsPanel({
       />
 
       <DefaultAiHandlingSetting />
+      <AnalysisPromptSetting />
 
       {hasInvalidCredential ? (
         <p className="settings-credential-warning" role="alert">
@@ -397,7 +399,7 @@ function DefaultAiHandlingSetting() {
     setStatus("saving");
 
     try {
-      const preferences = await updatePreferences(next);
+      const preferences = await updatePreferences({ defaultAiHandling: next });
 
       setValue(preferences.defaultAiHandling);
       setStatus("saved");
@@ -465,6 +467,157 @@ function DefaultAiHandlingSetting() {
         {statusCopy}
       </output>
     </div>
+  );
+}
+
+function AnalysisPromptSetting() {
+  const [draft, setDraft] = useState("");
+  const [savedValue, setSavedValue] = useState<string | null>(null);
+  const [status, setStatus] = useState<
+    "error" | "loading" | "ready" | "saved" | "saving"
+  >("loading");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    void getPreferences()
+      .then((preferences) => {
+        if (active) {
+          setDraft(preferences.analysisPrompt);
+          setSavedValue(preferences.analysisPrompt);
+          setStatus("ready");
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setErrorMessage("AI 整理提示词暂时无法载入，请稍后重试。");
+          setStatus("error");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const dirty = savedValue !== null && draft !== savedValue;
+  const busy = status === "loading" || status === "saving";
+  const statusCopy =
+    status === "loading"
+      ? "正在载入提示词…"
+      : status === "saving"
+        ? "正在保存…"
+        : status === "saved"
+          ? "提示词已保存"
+          : status === "error"
+            ? errorMessage
+            : dirty
+              ? "有未保存更改"
+              : "当前设置已生效";
+
+  function updateDraft(value: string) {
+    setDraft(value);
+
+    if (status === "error" || status === "saved") {
+      setErrorMessage("");
+      setStatus("ready");
+    }
+  }
+
+  function restoreDefault() {
+    updateDraft(DEFAULT_ANALYSIS_PROMPT);
+  }
+
+  async function savePrompt() {
+    if (savedValue === null || status === "saving") {
+      return;
+    }
+
+    if (!draft.trim()) {
+      setErrorMessage("AI 整理提示词不能为空。");
+      setStatus("error");
+      return;
+    }
+
+    setErrorMessage("");
+    setStatus("saving");
+
+    try {
+      const preferences = await updatePreferences({ analysisPrompt: draft });
+
+      setDraft(preferences.analysisPrompt);
+      setSavedValue(preferences.analysisPrompt);
+      setStatus("saved");
+    } catch {
+      setErrorMessage("AI 整理提示词保存失败，请重试。");
+      setStatus("error");
+    }
+  }
+
+  return (
+    <form
+      aria-labelledby="analysis-prompt-title"
+      className="configuration-group analysis-prompt-setting"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void savePrompt();
+      }}
+    >
+      <div className="analysis-prompt-heading">
+        <div>
+          <h3 id="analysis-prompt-title">AI 整理提示词</h3>
+          <p>控制标题、摘要、知识点和候选标签的整理规则</p>
+        </div>
+        <output
+          aria-label="提示词设置状态"
+          className={status === "error" ? "is-error" : undefined}
+          role={status === "error" ? "alert" : "status"}
+        >
+          {statusCopy}
+        </output>
+      </div>
+
+      <label className="analysis-prompt-field" htmlFor="analysis-prompt">
+        <span>可编辑 Prompt（固定 JSON 结构之前）</span>
+        <textarea
+          aria-describedby="analysis-prompt-help"
+          disabled={savedValue === null || status === "saving"}
+          id="analysis-prompt"
+          onChange={(event) => updateDraft(event.target.value)}
+          rows={7}
+          spellCheck={false}
+          value={draft}
+        />
+      </label>
+
+      <div className="analysis-prompt-footer">
+        <p id="analysis-prompt-help">
+          固定 JSON 输出结构由系统自动追加，不能在设置中修改。更改只影响之后创建的 AI 整理任务。
+        </p>
+        <div className="analysis-prompt-actions">
+          <button
+            className="secondary-button"
+            disabled={
+              busy ||
+              savedValue === null ||
+              draft === DEFAULT_ANALYSIS_PROMPT
+            }
+            onClick={restoreDefault}
+            type="button"
+          >
+            恢复默认
+          </button>
+          <button
+            className="primary-button"
+            disabled={busy || !dirty || !draft.trim()}
+            type="submit"
+          >
+            {status === "saving" ? "保存中…" : "保存提示词"}
+          </button>
+        </div>
+      </div>
+    </form>
   );
 }
 

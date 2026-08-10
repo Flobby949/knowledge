@@ -55,6 +55,7 @@ interface AiTaskRow {
   record_id: string;
   fragment_revision_id: string;
   model_config_version: number;
+  analysis_prompt: string;
   retry_of_task_id: string | null;
   handling: "AUTOMATIC" | "REVIEW";
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
@@ -244,8 +245,14 @@ export function registerAiOrganizationRoutes(
 
         const taskResult = await client.query<AiTaskRow>(
           `INSERT INTO ai_tasks
-             (record_id, fragment_revision_id, model_config_version, handling)
-           VALUES ($1, $2, $3, $4)
+             (record_id,
+              fragment_revision_id,
+              model_config_version,
+              handling,
+              analysis_prompt)
+           SELECT $1, $2, $3, $4, preference.analysis_prompt
+             FROM instance_preferences AS preference
+            WHERE preference.singleton = true
            RETURNING *`,
           [
             record.id,
@@ -474,14 +481,16 @@ export function registerAiOrganizationRoutes(
               fragment_revision_id,
               model_config_version,
               handling,
+              analysis_prompt,
               retry_of_task_id)
-           VALUES ($1, $2, $3, $4, $5)
+           VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING *`,
           [
             failedTask.record_id,
             failedTask.fragment_revision_id,
             failedTask.model_config_version,
             failedTask.handling,
+            failedTask.analysis_prompt,
             failedTask.id,
           ],
         );
@@ -1321,6 +1330,7 @@ async function processTask(options: {
         credentialSecret,
       ),
       configurationVersion: task.model_config_version,
+      analysisPrompt: task.analysis_prompt,
     };
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {

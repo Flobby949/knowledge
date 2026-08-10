@@ -17,6 +17,7 @@ try {
   await pool.query(
     `UPDATE instance_preferences
         SET default_ai_handling = 'AUTOMATIC',
+            analysis_prompt = DEFAULT,
             updated_at = clock_timestamp()
       WHERE singleton = true`,
   );

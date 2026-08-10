@@ -168,6 +168,108 @@
   opacity: 0.72;
 }
 
+.analysis-prompt-setting {
+  border-color: #c4d5ec;
+}
+
+.analysis-prompt-heading,
+.analysis-prompt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.analysis-prompt-heading {
+  padding-bottom: 14px;
+}
+
+.analysis-prompt-heading h3 {
+  margin: 0;
+  color: #1b2a45;
+  font-size: 16px;
+  font-weight: 680;
+}
+
+.analysis-prompt-heading p {
+  margin: 3px 0 0;
+  color: #687895;
+  font-size: 12px;
+}
+
+.analysis-prompt-heading output {
+  flex: 0 0 auto;
+  color: #58708f;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.analysis-prompt-heading output.is-error {
+  color: var(--danger);
+}
+
+.analysis-prompt-field {
+  display: grid;
+  gap: 6px;
+}
+
+.analysis-prompt-field > span {
+  color: #53647f;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.analysis-prompt-field textarea {
+  width: 100%;
+  min-height: 176px;
+  padding: 12px 13px;
+  resize: vertical;
+  color: #243653;
+  background: #fbfcfe;
+  border: 1px solid #becce0;
+  border-radius: 6px;
+  outline: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.analysis-prompt-field textarea:focus {
+  background: #fff;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px rgba(0, 95, 249, 0.1);
+}
+
+.analysis-prompt-field textarea:disabled {
+  color: #7b899f;
+  background: #f1f4f8;
+  cursor: not-allowed;
+}
+
+.analysis-prompt-footer {
+  align-items: flex-end;
+  padding-top: 12px;
+}
+
+.analysis-prompt-footer > p {
+  max-width: 75ch;
+  margin: 0;
+  color: #65758e;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.analysis-prompt-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.analysis-prompt-actions button {
+  min-height: 38px;
+  padding-inline: 14px;
+}
+
 .settings-credential-warning {
   padding: 11px 13px;
   margin: 0 0 18px;

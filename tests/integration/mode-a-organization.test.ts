@@ -15,6 +15,7 @@ type GenerateAnalysisInput = {
   model: string;
   apiKey: string;
   configurationVersion: number;
+  analysisPrompt?: string;
 };
 
 type GeneratedAnalysis = {
@@ -62,6 +63,7 @@ describe("automatic AI organization public flow", () => {
   }> = [];
   const sourceText =
     "CDC 读取数据库事务日志。\n事务日志记录增量变更并保留顺序。";
+  const analysisPrompt = "只整理原文直接支持的关键知识，每个知识点仅保留核心标签。";
   const firstQuote = "CDC 读取数据库事务日志。";
   const secondQuote = "事务日志记录增量变更并保留顺序。";
   const generatedAnalysis: GeneratedAnalysis = {
@@ -161,6 +163,14 @@ describe("automatic AI organization public flow", () => {
       },
     ]);
 
+    const promptUpdated = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/preferences",
+      payload: { analysisPrompt },
+    });
+
+    expect(promptUpdated.statusCode).toBe(200);
+
     const created = await app.inject({
       method: "POST",
       url: "/api/v1/records",
@@ -205,6 +215,7 @@ describe("automatic AI organization public flow", () => {
         sourceText,
         model: "deepseek-v4-flash",
         configurationVersion,
+        analysisPrompt,
       }),
     );
     expect(endpointChecks).toHaveLength(2);

@@ -10,6 +10,7 @@ import type {
   ModelEndpointTester,
   ModelEndpointTestInput,
 } from "./model-endpoint-tester.js";
+import { DEFAULT_ANALYSIS_PROMPT } from "./domain/analysis-prompt.js";
 
 interface ModelConfigEndpointBody {
   baseUrl: string;
@@ -24,6 +25,12 @@ interface ModelConfigDraftBody {
 
 interface PreferenceBody {
   defaultAiHandling?: string;
+  analysisPrompt?: string;
+}
+
+interface PreferenceRow {
+  default_ai_handling: string;
+  analysis_prompt: string;
 }
 
 export interface BootstrapModelDraft {
@@ -72,8 +79,24 @@ export function registerModelConfigRoutes(
     "/api/v1/preferences",
     async (request, reply) => {
       const handling = request.body?.defaultAiHandling;
+      const analysisPrompt = request.body?.analysisPrompt;
+      const handlingProvided = handling !== undefined;
+      const promptProvided = analysisPrompt !== undefined;
 
-      if (handling !== "automatic" && handling !== "review") {
+      if (!handlingProvided && !promptProvided) {
+        return reply.code(422).send({
+          error: {
+            code: "PREFERENCE_INVALID",
+            message: "请提供需要更新的设置。",
+          },
+        });
+      }
+
+      if (
+        handlingProvided &&
+        handling !== "automatic" &&
+        handling !== "review"
+      ) {
         return reply.code(422).send({
           error: {
             code: "PREFERENCE_INVALID",
@@ -82,17 +105,37 @@ export function registerModelConfigRoutes(
         });
       }
 
-      const result = await pool.query<{ default_ai_handling: string }>(
+      const normalizedPrompt =
+        typeof analysisPrompt === "string" ? analysisPrompt.trim() : "";
+
+      if (promptProvided && !normalizedPrompt) {
+        return reply.code(422).send({
+          error: {
+            code: "PREFERENCE_INVALID",
+            message: "AI 整理提示词不能为空。",
+          },
+        });
+      }
+
+      const result = await pool.query<PreferenceRow>(
         `UPDATE instance_preferences
-            SET default_ai_handling = $1,
+            SET default_ai_handling = COALESCE($1, default_ai_handling),
+                analysis_prompt = COALESCE($2, analysis_prompt),
                 updated_at = clock_timestamp()
           WHERE singleton = true
-        RETURNING default_ai_handling`,
-        [handling === "automatic" ? "AUTOMATIC" : "REVIEW"],
+        RETURNING default_ai_handling, analysis_prompt`,
+        [
+          handlingProvided
+            ? handling === "automatic"
+              ? "AUTOMATIC"
+              : "REVIEW"
+            : null,
+          promptProvided ? normalizedPrompt : null,
+        ],
       );
 
       return {
-        preferences: publicPreferences(result.rows[0]?.default_ai_handling),
+        preferences: publicPreferences(result.rows[0]),
       };
     },
   );
@@ -456,20 +499,23 @@ async function reuseSemanticIndex(
 }
 
 async function readPreferences(pool: Pool) {
-  const result = await pool.query<{ default_ai_handling: string }>(
-    `SELECT default_ai_handling
+  const result = await pool.query<PreferenceRow>(
+    `SELECT default_ai_handling, analysis_prompt
        FROM instance_preferences
       WHERE singleton = true`,
   );
 
-  return publicPreferences(result.rows[0]?.default_ai_handling);
+  return publicPreferences(result.rows[0]);
 }
 
-function publicPreferences(value: string | undefined): {
+function publicPreferences(value: PreferenceRow | undefined): {
   defaultAiHandling: "automatic" | "review";
+  analysisPrompt: string;
 } {
   return {
-    defaultAiHandling: value === "REVIEW" ? "review" : "automatic",
+    defaultAiHandling:
+      value?.default_ai_handling === "REVIEW" ? "review" : "automatic",
+    analysisPrompt: value?.analysis_prompt ?? DEFAULT_ANALYSIS_PROMPT,
   };
 }
 

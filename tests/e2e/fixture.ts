@@ -115,6 +115,7 @@ async function resetKnowledgeInstance(pool: Pool): Promise<void> {
        VALUES (true, 'AUTOMATIC', clock_timestamp())
        ON CONFLICT (singleton) DO UPDATE
              SET default_ai_handling = 'AUTOMATIC',
+                 analysis_prompt = DEFAULT,
                  updated_at = clock_timestamp()`,
     );
     await pool.query("COMMIT");

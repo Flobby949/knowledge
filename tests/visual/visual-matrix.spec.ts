@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { DEFAULT_ANALYSIS_PROMPT } from "../../src/domain/analysis-prompt.js";
 import {
   expectBox,
   expectHorizontalSplit,
@@ -393,6 +394,10 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
     name: "新记录默认处理",
     exact: true,
   });
+  const analysisPrompt = modelPanel.getByRole("form", {
+    name: "AI 整理提示词",
+    exact: true,
+  });
   const current = modelPanel.getByRole("group", {
     name: "当前配置",
     exact: true,
@@ -409,6 +414,10 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
   await expect(preference.getByRole("status", {
     name: "默认处理状态",
   })).toHaveText("当前默认：由我确认");
+  await expect(analysisPrompt.getByRole("textbox", {
+    name: /可编辑 Prompt/u,
+  })).toHaveValue(DEFAULT_ANALYSIS_PROMPT);
+  await expect(analysisPrompt).toContainText("固定 JSON 输出结构由系统自动追加");
   await expect(current.getByRole("status", { name: "配置状态" }))
     .toContainText("已启用");
   await expect(candidate.getByRole("button", { name: "启用候选配置" }))
@@ -418,6 +427,7 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
   await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
   await expectBox(main, { x: 32, y: 60, width: 1_536 });
   await expectBox(preference, { x: 32, width: 1_536 });
+  await expectBox(analysisPrompt, { x: 32, width: 1_536 });
   await expectHorizontalSplit(
     current.getByRole("group", { name: "文本推理模型" }),
     current.getByRole("group", { name: "嵌入模型" }),
@@ -450,6 +460,7 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
   await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
   await expectBox(main, { x: 24, y: 60, width: 1_232 });
   await expectBox(preference, { x: 24, width: 1_232 });
+  await expectBox(analysisPrompt, { x: 24, width: 1_232 });
   await expectHorizontalSplit(
     current.getByRole("group", { name: "文本推理模型" }),
     current.getByRole("group", { name: "嵌入模型" }),
