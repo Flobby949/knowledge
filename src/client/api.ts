@@ -455,6 +455,47 @@ export interface ConceptSource {
   title: string;
 }
 
+export interface ConceptCandidateScan {
+  attemptCount: number;
+  canRetry: boolean;
+  candidate: null | {
+    acceptedConceptId: string | null;
+    canConfirm: boolean;
+    confirmedDescription: string | null;
+    confirmedName: string | null;
+    createdAt: string;
+    decidedAt: string | null;
+    description: string;
+    id: string;
+    memberIds: string[];
+    name: string;
+    reason: string;
+    reviewStatus: "accepted" | "pending" | "rejected";
+  };
+  completedAt: string | null;
+  createdAt: string;
+  failure: null | { code: string; message: string };
+  id: string;
+  inputs: Array<
+    ConceptSource & {
+      evidence: Array<{
+        endOffset: number;
+        fragmentRevisionId: string;
+        id: string;
+        position: number;
+        quote: string;
+        startOffset: number;
+      }>;
+    }
+  >;
+  model: { configurationVersion: number; name: string };
+  outcome: "candidate" | "duplicate" | "no_suggestion" | null;
+  outcomeReason: string | null;
+  stale: boolean;
+  startedAt: string | null;
+  status: "failed" | "queued" | "running" | "succeeded";
+}
+
 export interface ConceptDetail {
   activity: Array<{
     kind:
@@ -533,6 +574,90 @@ export async function listConceptSources(
   const body = await parseConceptResponse<{ items: ConceptSource[] }>(response);
 
   return body.items;
+}
+
+export async function listConceptCandidateScans(
+  scope: "all" | "attention" = "attention",
+  signal?: AbortSignal,
+): Promise<ConceptCandidateScan[]> {
+  const response = await fetch(
+    `/api/v1/concept-candidate-scans?scope=${scope}`,
+    signal ? { signal } : undefined,
+  );
+  const body = await parseConceptResponse<{ items: ConceptCandidateScan[] }>(
+    response,
+  );
+
+  return body.items;
+}
+
+export async function createConceptCandidateScan(
+  knowledgePointIds: string[],
+): Promise<ConceptCandidateScan> {
+  const response = await fetch("/api/v1/concept-candidate-scans", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ knowledgePointIds }),
+  });
+  const body = await parseConceptResponse<{ scan: ConceptCandidateScan }>(
+    response,
+  );
+
+  return body.scan;
+}
+
+export async function retryConceptCandidateScan(
+  id: string,
+): Promise<ConceptCandidateScan> {
+  const response = await fetch(
+    `/api/v1/concept-candidate-scans/${encodeURIComponent(id)}/retry`,
+    { method: "POST" },
+  );
+  const body = await parseConceptResponse<{ scan: ConceptCandidateScan }>(
+    response,
+  );
+
+  return body.scan;
+}
+
+export async function acceptConceptCandidate(
+  id: string,
+  input: {
+    description: string;
+    knowledgePointIds: string[];
+    name: string;
+  },
+): Promise<{ candidate: NonNullable<ConceptCandidateScan["candidate"]>; concept: ConceptDetail }> {
+  const response = await fetch(
+    `/api/v1/concept-candidates/${encodeURIComponent(id)}/accept`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await parseConceptResponse<{
+    detail: {
+      candidate: NonNullable<ConceptCandidateScan["candidate"]>;
+      concept: ConceptDetail;
+    };
+  }>(response);
+
+  return body.detail;
+}
+
+export async function rejectConceptCandidate(
+  id: string,
+): Promise<ConceptCandidateScan> {
+  const response = await fetch(
+    `/api/v1/concept-candidates/${encodeURIComponent(id)}/reject`,
+    { method: "POST" },
+  );
+  const body = await parseConceptResponse<{ scan: ConceptCandidateScan }>(
+    response,
+  );
+
+  return body.scan;
 }
 
 export async function getConceptDetail(id: string): Promise<ConceptDetail> {

@@ -12,7 +12,12 @@ const pool = new Pool({ connectionString: databaseUrl });
 
 try {
   await pool.query(
-    "TRUNCATE data_restores, restore_inspections, data_exports, model_configurations, concept_activity, concept_memberships, concept_revisions, concepts, records, tags RESTART IDENTITY CASCADE",
+    `TRUNCATE data_restores, restore_inspections, data_exports,
+       model_configurations, concept_candidate_decision_members,
+       concept_candidate_members, concept_candidates,
+       concept_candidate_inputs, concept_candidate_scans, concept_activity,
+       concept_memberships, concept_revisions, concepts, records, tags
+       RESTART IDENTITY CASCADE`,
   );
   await pool.query(
     `UPDATE instance_preferences

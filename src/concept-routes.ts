@@ -906,7 +906,7 @@ async function readConceptByNormalizedName(
   return row ? { id: row.id, name: row.display_name } : null;
 }
 
-async function readConceptDetail(pool: Pool, conceptId: string) {
+export async function readConceptDetail(pool: Pool, conceptId: string) {
   const [conceptResult, revisionResult, membershipResult, activityResult] =
     await Promise.all([
       pool.query<ConceptRow>(

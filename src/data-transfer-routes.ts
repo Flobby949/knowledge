@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 5,
+  formatVersion: 6,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -309,8 +309,76 @@ interface ConceptActivitySnapshotRow extends DomainRow {
   occurred_at: Timestamp;
 }
 
+interface CandidateEvidenceSnapshotRow extends DomainRow {
+  id: string;
+  fragmentRevisionId: string;
+  position: number;
+  startOffset: number;
+  endOffset: number;
+  quote: string;
+}
+
+interface ConceptCandidateScanSnapshotRow extends DomainRow {
+  id: string;
+  input_fingerprint: string;
+  input_count: number;
+  model_configuration_version: number;
+  text_model: string;
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  outcome: "CANDIDATE" | "NO_SUGGESTION" | "DUPLICATE" | null;
+  outcome_reason: string | null;
+  attempt_count: number;
+  failure_code: string | null;
+  failure_message: string | null;
+  created_at: Timestamp;
+  started_at: Timestamp | null;
+  completed_at: Timestamp | null;
+}
+
+interface ConceptCandidateInputSnapshotRow extends DomainRow {
+  id: string;
+  scan_id: string;
+  knowledge_point_id: string;
+  record_id: string;
+  position: number;
+  record_title_snapshot: string;
+  title_snapshot: string;
+  body_snapshot: string;
+  evidence_snapshot: CandidateEvidenceSnapshotRow[];
+  content_fingerprint: string;
+}
+
+interface ConceptCandidateSnapshotRow extends DomainRow {
+  id: string;
+  scan_id: string;
+  candidate_fingerprint: string;
+  suggested_name: string;
+  normalized_name: string;
+  suggested_description: string;
+  reason: string;
+  review_status: "PENDING" | "ACCEPTED" | "REJECTED";
+  accepted_concept_id: string | null;
+  confirmed_name: string | null;
+  confirmed_description: string | null;
+  decided_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+interface ConceptCandidateMemberSnapshotRow extends DomainRow {
+  candidate_id: string;
+  input_id: string;
+  position: number;
+}
+
+interface ConceptCandidateDecisionMemberSnapshotRow extends DomainRow {
+  candidate_id: string;
+  input_id: string;
+  concept_membership_id: string;
+  position: number;
+}
+
 interface DomainSnapshot {
-  formatVersion: 5;
+  formatVersion: 6;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
@@ -337,11 +405,16 @@ interface DomainSnapshot {
   conceptRevisions: ConceptRevisionSnapshotRow[];
   conceptMemberships: ConceptMembershipSnapshotRow[];
   conceptActivity: ConceptActivitySnapshotRow[];
+  conceptCandidateScans: ConceptCandidateScanSnapshotRow[];
+  conceptCandidateInputs: ConceptCandidateInputSnapshotRow[];
+  conceptCandidates: ConceptCandidateSnapshotRow[];
+  conceptCandidateMembers: ConceptCandidateMemberSnapshotRow[];
+  conceptCandidateDecisionMembers: ConceptCandidateDecisionMemberSnapshotRow[];
 }
 
 interface ParsedSnapshot {
   snapshot: DomainSnapshot;
-  sourceFormatVersion: 4 | 5;
+  sourceFormatVersion: 4 | 5 | 6;
 }
 
 interface ExportRow {
@@ -724,8 +797,44 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
     const conceptActivity = await client.query(
       "SELECT * FROM concept_activity ORDER BY concept_id, sequence_number",
     );
+    const conceptCandidateScans = await client.query(
+      `SELECT *
+         FROM concept_candidate_scans
+        WHERE status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY created_at, id`,
+    );
+    const conceptCandidateInputs = await client.query(
+      `SELECT input.*
+         FROM concept_candidate_inputs AS input
+         INNER JOIN concept_candidate_scans AS scan ON scan.id = input.scan_id
+        WHERE scan.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY input.scan_id, input.position`,
+    );
+    const conceptCandidates = await client.query(
+      `SELECT candidate.*
+         FROM concept_candidates AS candidate
+         INNER JOIN concept_candidate_scans AS scan ON scan.id = candidate.scan_id
+        WHERE scan.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY candidate.created_at, candidate.id`,
+    );
+    const conceptCandidateMembers = await client.query(
+      `SELECT member.*
+         FROM concept_candidate_members AS member
+         INNER JOIN concept_candidates AS candidate ON candidate.id = member.candidate_id
+         INNER JOIN concept_candidate_scans AS scan ON scan.id = candidate.scan_id
+        WHERE scan.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY member.candidate_id, member.position`,
+    );
+    const conceptCandidateDecisionMembers = await client.query(
+      `SELECT member.*
+         FROM concept_candidate_decision_members AS member
+         INNER JOIN concept_candidates AS candidate ON candidate.id = member.candidate_id
+         INNER JOIN concept_candidate_scans AS scan ON scan.id = candidate.scan_id
+        WHERE scan.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY member.candidate_id, member.position`,
+    );
     const snapshot: DomainSnapshot = {
-      formatVersion: 5,
+      formatVersion: 6,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
@@ -752,6 +861,11 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       conceptRevisions: conceptRevisions.rows,
       conceptMemberships: conceptMemberships.rows,
       conceptActivity: conceptActivity.rows,
+      conceptCandidateScans: conceptCandidateScans.rows,
+      conceptCandidateInputs: conceptCandidateInputs.rows,
+      conceptCandidates: conceptCandidates.rows,
+      conceptCandidateMembers: conceptCandidateMembers.rows,
+      conceptCandidateDecisionMembers: conceptCandidateDecisionMembers.rows,
     };
 
     await client.query("COMMIT");
@@ -783,7 +897,9 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
 
   if (
     !isDomainRow(publicManifest) ||
-    (publicManifest.formatVersion !== 4 && publicManifest.formatVersion !== 5) ||
+    (publicManifest.formatVersion !== 4 &&
+      publicManifest.formatVersion !== 5 &&
+      publicManifest.formatVersion !== 6) ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -834,7 +950,11 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     throw new Error("domain snapshot must be an object");
   }
 
-  if (value.formatVersion !== 4 && value.formatVersion !== 5) {
+  if (
+    value.formatVersion !== 4 &&
+    value.formatVersion !== 5 &&
+    value.formatVersion !== 6
+  ) {
     throw new Error("domain snapshot version is unsupported");
   }
 
@@ -869,23 +989,49 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     "conceptMemberships",
     "conceptActivity",
   ];
+  const candidateKeys = [
+    "conceptCandidateScans",
+    "conceptCandidateInputs",
+    "conceptCandidates",
+    "conceptCandidateMembers",
+    "conceptCandidateDecisionMembers",
+  ];
 
   requireExactKeys(
     value,
-    value.formatVersion === 5 ? [...baseKeys, ...conceptKeys] : baseKeys,
+    value.formatVersion === 4
+      ? baseKeys
+      : value.formatVersion === 5
+        ? [...baseKeys, ...conceptKeys]
+        : [...baseKeys, ...conceptKeys, ...candidateKeys],
   );
 
   const normalizedValue: DomainRow =
     value.formatVersion === 4
       ? {
           ...value,
-          formatVersion: 5,
+          formatVersion: 6,
           concepts: [],
           conceptRevisions: [],
           conceptMemberships: [],
           conceptActivity: [],
+          conceptCandidateScans: [],
+          conceptCandidateInputs: [],
+          conceptCandidates: [],
+          conceptCandidateMembers: [],
+          conceptCandidateDecisionMembers: [],
         }
-      : value;
+      : value.formatVersion === 5
+        ? {
+            ...value,
+            formatVersion: 6,
+            conceptCandidateScans: [],
+            conceptCandidateInputs: [],
+            conceptCandidates: [],
+            conceptCandidateMembers: [],
+            conceptCandidateDecisionMembers: [],
+          }
+        : value;
 
   const records = requireRows(normalizedValue.records, "records");
   const fragmentRevisions = requireRows(
@@ -970,6 +1116,26 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     normalizedValue.conceptActivity,
     "conceptActivity",
   );
+  const conceptCandidateScans = requireRows(
+    normalizedValue.conceptCandidateScans,
+    "conceptCandidateScans",
+  );
+  const conceptCandidateInputs = requireRows(
+    normalizedValue.conceptCandidateInputs,
+    "conceptCandidateInputs",
+  );
+  const conceptCandidates = requireRows(
+    normalizedValue.conceptCandidates,
+    "conceptCandidates",
+  );
+  const conceptCandidateMembers = requireRows(
+    normalizedValue.conceptCandidateMembers,
+    "conceptCandidateMembers",
+  );
+  const conceptCandidateDecisionMembers = requireRows(
+    normalizedValue.conceptCandidateDecisionMembers,
+    "conceptCandidateDecisionMembers",
+  );
 
   records.forEach(validateRecordRow);
   fragmentRevisions.forEach(validateFragmentRevisionRow);
@@ -997,6 +1163,13 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
   conceptRevisions.forEach(validateConceptRevisionRow);
   conceptMemberships.forEach(validateConceptMembershipRow);
   conceptActivity.forEach(validateConceptActivityRow);
+  conceptCandidateScans.forEach(validateConceptCandidateScanRow);
+  conceptCandidateInputs.forEach(validateConceptCandidateInputRow);
+  conceptCandidates.forEach(validateConceptCandidateRow);
+  conceptCandidateMembers.forEach(validateConceptCandidateMemberRow);
+  conceptCandidateDecisionMembers.forEach(
+    validateConceptCandidateDecisionMemberRow,
+  );
 
   const snapshot = normalizedValue as unknown as DomainSnapshot;
 
@@ -1696,6 +1869,227 @@ function validateConceptActivityRow(row: DomainRow): void {
   }
 }
 
+function validateConceptCandidateScanRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "input_fingerprint",
+    "input_count",
+    "model_configuration_version",
+    "text_model",
+    "status",
+    "outcome",
+    "outcome_reason",
+    "attempt_count",
+    "failure_code",
+    "failure_message",
+    "created_at",
+    "started_at",
+    "completed_at",
+  ]);
+  requireUuid(row, "id");
+  requireFingerprint(row, "input_fingerprint");
+  requireInteger(row, "input_count", 2, 12);
+  requireInteger(row, "model_configuration_version", 1);
+  requireNonEmptyString(row, "text_model");
+  requireEnum(row, "status", ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]);
+  if (row.outcome !== null) {
+    requireEnum(row, "outcome", ["CANDIDATE", "NO_SUGGESTION", "DUPLICATE"]);
+  }
+  if (row.outcome_reason !== null) {
+    requireNonEmptyString(row, "outcome_reason");
+  }
+  requireInteger(row, "attempt_count", 1, 2);
+  if (row.failure_code !== null) {
+    requireNonEmptyString(row, "failure_code");
+  }
+  if (row.failure_message !== null) {
+    requireNonEmptyString(row, "failure_message");
+  }
+  requireTimestamp(row, "created_at");
+  requireNullableTimestamp(row, "started_at");
+  requireNullableTimestamp(row, "completed_at");
+
+  const waiting =
+    row.status === "QUEUED" &&
+    row.started_at === null &&
+    row.completed_at === null &&
+    row.outcome === null &&
+    row.outcome_reason === null &&
+    row.failure_code === null &&
+    row.failure_message === null;
+  const running =
+    row.status === "RUNNING" &&
+    row.started_at !== null &&
+    row.completed_at === null &&
+    row.outcome === null &&
+    row.outcome_reason === null &&
+    row.failure_code === null &&
+    row.failure_message === null;
+  const succeeded =
+    row.status === "SUCCEEDED" &&
+    row.started_at !== null &&
+    row.completed_at !== null &&
+    row.outcome !== null &&
+    row.failure_code === null &&
+    row.failure_message === null &&
+    ((row.outcome === "CANDIDATE" && row.outcome_reason === null) ||
+      ((row.outcome === "NO_SUGGESTION" || row.outcome === "DUPLICATE") &&
+        row.outcome_reason !== null));
+  const failed =
+    row.status === "FAILED" &&
+    row.started_at !== null &&
+    row.completed_at !== null &&
+    row.outcome === null &&
+    row.outcome_reason === null &&
+    row.failure_code !== null &&
+    row.failure_message !== null;
+
+  if (
+    (!waiting && !running && !succeeded && !failed) ||
+    (row.started_at !== null &&
+      timestampValue(row.started_at) < timestampValue(row.created_at)) ||
+    (row.completed_at !== null &&
+      row.started_at !== null &&
+      timestampValue(row.completed_at) < timestampValue(row.started_at))
+  ) {
+    throw new Error("concept candidate scan lifecycle is invalid");
+  }
+}
+
+function validateConceptCandidateInputRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "scan_id",
+    "knowledge_point_id",
+    "record_id",
+    "position",
+    "record_title_snapshot",
+    "title_snapshot",
+    "body_snapshot",
+    "evidence_snapshot",
+    "content_fingerprint",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "scan_id");
+  requireUuid(row, "knowledge_point_id");
+  requireUuid(row, "record_id");
+  requireInteger(row, "position", 1, 12);
+  requireNonEmptyString(row, "record_title_snapshot");
+  requireNonEmptyString(row, "title_snapshot");
+  requireNonEmptyString(row, "body_snapshot");
+  requireFingerprint(row, "content_fingerprint");
+
+  if (!Array.isArray(row.evidence_snapshot) || row.evidence_snapshot.length === 0) {
+    throw new Error("candidate input evidence must be a non-empty array");
+  }
+
+  for (const evidence of row.evidence_snapshot) {
+    if (!isDomainRow(evidence)) {
+      throw new Error("candidate input evidence must contain objects");
+    }
+    requireExactKeys(evidence, [
+      "id",
+      "fragmentRevisionId",
+      "position",
+      "startOffset",
+      "endOffset",
+      "quote",
+    ]);
+    requireUuid(evidence, "id");
+    requireUuid(evidence, "fragmentRevisionId");
+    requireInteger(evidence, "position", 1);
+    requireInteger(evidence, "startOffset", 0);
+    requireInteger(evidence, "endOffset", 1);
+    requireNonEmptyString(evidence, "quote");
+
+    if ((evidence.endOffset as number) <= (evidence.startOffset as number)) {
+      throw new Error("candidate input evidence offsets are invalid");
+    }
+  }
+}
+
+function validateConceptCandidateRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "scan_id",
+    "candidate_fingerprint",
+    "suggested_name",
+    "normalized_name",
+    "suggested_description",
+    "reason",
+    "review_status",
+    "accepted_concept_id",
+    "confirmed_name",
+    "confirmed_description",
+    "decided_at",
+    "created_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "scan_id");
+  requireFingerprint(row, "candidate_fingerprint");
+  requireNonEmptyString(row, "suggested_name");
+  requireNonEmptyString(row, "normalized_name");
+  requireNonEmptyString(row, "suggested_description");
+  requireNonEmptyString(row, "reason");
+  requireEnum(row, "review_status", ["PENDING", "ACCEPTED", "REJECTED"]);
+  requireNullableUuid(row, "accepted_concept_id");
+  if (row.confirmed_name !== null) {
+    requireNonEmptyString(row, "confirmed_name");
+  }
+  if (row.confirmed_description !== null) {
+    requireNonEmptyString(row, "confirmed_description");
+  }
+  requireNullableTimestamp(row, "decided_at");
+  requireTimestamp(row, "created_at");
+
+  const pending =
+    row.review_status === "PENDING" &&
+    row.accepted_concept_id === null &&
+    row.confirmed_name === null &&
+    row.confirmed_description === null &&
+    row.decided_at === null;
+  const accepted =
+    row.review_status === "ACCEPTED" &&
+    row.accepted_concept_id !== null &&
+    row.confirmed_name !== null &&
+    row.confirmed_description !== null &&
+    row.decided_at !== null;
+  const rejected =
+    row.review_status === "REJECTED" &&
+    row.accepted_concept_id === null &&
+    row.confirmed_name === null &&
+    row.confirmed_description === null &&
+    row.decided_at !== null;
+
+  if (
+    (!pending && !accepted && !rejected) ||
+    (row.decided_at !== null &&
+      timestampValue(row.decided_at) < timestampValue(row.created_at))
+  ) {
+    throw new Error("concept candidate review lifecycle is invalid");
+  }
+}
+
+function validateConceptCandidateMemberRow(row: DomainRow): void {
+  requireExactKeys(row, ["candidate_id", "input_id", "position"]);
+  requireUuid(row, "candidate_id");
+  requireUuid(row, "input_id");
+  requireInteger(row, "position", 1, 12);
+}
+
+function validateConceptCandidateDecisionMemberRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "candidate_id",
+    "input_id",
+    "concept_membership_id",
+    "position",
+  ]);
+  requireUuid(row, "candidate_id");
+  requireUuid(row, "input_id");
+  requireUuid(row, "concept_membership_id");
+  requireInteger(row, "position", 1, 12);
+}
+
 function requireRelationType(row: DomainRow, key: string): void {
   requireEnum(row, key, [
     "SIMILAR",
@@ -1875,6 +2269,61 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     (row) => `${row.concept_id}:${row.sequence_number}`,
     "concept activity sequence",
   );
+  assertUnique(
+    snapshot.conceptCandidateScans,
+    (row) => row.id,
+    "concept candidate scan id",
+  );
+  assertUnique(
+    snapshot.conceptCandidateInputs,
+    (row) => row.id,
+    "concept candidate input id",
+  );
+  assertUnique(
+    snapshot.conceptCandidateInputs,
+    (row) => `${row.scan_id}:${row.knowledge_point_id}`,
+    "concept candidate input point",
+  );
+  assertUnique(
+    snapshot.conceptCandidateInputs,
+    (row) => `${row.scan_id}:${row.position}`,
+    "concept candidate input position",
+  );
+  assertUnique(
+    snapshot.conceptCandidates,
+    (row) => row.id,
+    "concept candidate id",
+  );
+  assertUnique(
+    snapshot.conceptCandidates,
+    (row) => row.scan_id,
+    "concept candidate scan",
+  );
+  assertUnique(
+    snapshot.conceptCandidateMembers,
+    (row) => `${row.candidate_id}:${row.input_id}`,
+    "concept candidate member",
+  );
+  assertUnique(
+    snapshot.conceptCandidateMembers,
+    (row) => `${row.candidate_id}:${row.position}`,
+    "concept candidate member position",
+  );
+  assertUnique(
+    snapshot.conceptCandidateDecisionMembers,
+    (row) => `${row.candidate_id}:${row.input_id}`,
+    "concept candidate decision member",
+  );
+  assertUnique(
+    snapshot.conceptCandidateDecisionMembers,
+    (row) => `${row.candidate_id}:${row.position}`,
+    "concept candidate decision member position",
+  );
+  assertUnique(
+    snapshot.conceptCandidateDecisionMembers,
+    (row) => row.concept_membership_id,
+    "concept candidate decision membership",
+  );
 
   const records = new Map(snapshot.records.map((row) => [row.id, row]));
   const revisions = new Map(
@@ -1904,6 +2353,15 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   );
   const conceptMemberships = new Map(
     snapshot.conceptMemberships.map((row) => [row.id, row]),
+  );
+  const candidateScans = new Map(
+    snapshot.conceptCandidateScans.map((row) => [row.id, row]),
+  );
+  const candidateInputs = new Map(
+    snapshot.conceptCandidateInputs.map((row) => [row.id, row]),
+  );
+  const conceptCandidates = new Map(
+    snapshot.conceptCandidates.map((row) => [row.id, row]),
   );
 
   for (const revision of snapshot.conceptRevisions) {
@@ -2014,6 +2472,125 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
         membershipActivity.at(-1)?.kind !== "MEMBER_REMOVED")
     ) {
       throw new Error("concept membership activity is invalid");
+    }
+  }
+
+  for (const scan of snapshot.conceptCandidateScans) {
+    const inputs = snapshot.conceptCandidateInputs
+      .filter((input) => input.scan_id === scan.id)
+      .sort((left, right) => left.position - right.position);
+    const candidates = snapshot.conceptCandidates.filter(
+      (candidate) => candidate.scan_id === scan.id,
+    );
+
+    if (
+      inputs.length !== scan.input_count ||
+      inputs.some((input, index) => input.position !== index + 1) ||
+      (scan.outcome === "CANDIDATE" && candidates.length !== 1) ||
+      (scan.outcome !== "CANDIDATE" && candidates.length !== 0)
+    ) {
+      throw new Error("concept candidate scan result is invalid");
+    }
+  }
+
+  for (const input of snapshot.conceptCandidateInputs) {
+    const scan = candidateScans.get(input.scan_id);
+    const point = points.get(input.knowledge_point_id);
+    const record = records.get(input.record_id);
+    const evidence = input.evidence_snapshot
+      .slice()
+      .sort((left, right) => left.position - right.position);
+
+    if (
+      !scan ||
+      !point ||
+      !record ||
+      point.record_id !== record.id ||
+      evidence.some((item, index) => item.position !== index + 1)
+    ) {
+      throw new Error("concept candidate input reference is invalid");
+    }
+
+    for (const item of evidence) {
+      const source = evidenceSpans.get(item.id);
+
+      if (
+        !source ||
+        source.knowledge_point_id !== point.id ||
+        source.fragment_revision_id !== item.fragmentRevisionId ||
+        source.position !== item.position ||
+        source.start_offset !== item.startOffset ||
+        source.end_offset !== item.endOffset ||
+        source.quote !== item.quote
+      ) {
+        throw new Error("concept candidate input evidence is invalid");
+      }
+    }
+  }
+
+  for (const candidate of snapshot.conceptCandidates) {
+    const scan = candidateScans.get(candidate.scan_id);
+    const members = snapshot.conceptCandidateMembers
+      .filter((member) => member.candidate_id === candidate.id)
+      .sort((left, right) => left.position - right.position);
+    const decisionMembers = snapshot.conceptCandidateDecisionMembers
+      .filter((member) => member.candidate_id === candidate.id)
+      .sort((left, right) => left.position - right.position);
+
+    if (
+      scan?.status !== "SUCCEEDED" ||
+      scan.outcome !== "CANDIDATE" ||
+      members.length < 2 ||
+      members.some((member, index) => member.position !== index + 1)
+    ) {
+      throw new Error("concept candidate result reference is invalid");
+    }
+
+    for (const member of members) {
+      if (candidateInputs.get(member.input_id)?.scan_id !== scan.id) {
+        throw new Error("concept candidate member reference is invalid");
+      }
+    }
+
+    if (
+      (candidate.review_status === "ACCEPTED" && decisionMembers.length < 2) ||
+      (candidate.review_status !== "ACCEPTED" && decisionMembers.length !== 0) ||
+      decisionMembers.some((member, index) => member.position !== index + 1)
+    ) {
+      throw new Error("concept candidate decision is invalid");
+    }
+
+    for (const member of decisionMembers) {
+      const input = candidateInputs.get(member.input_id);
+      const membership = conceptMemberships.get(member.concept_membership_id);
+
+      if (
+        input?.scan_id !== scan.id ||
+        !membership ||
+        membership.concept_id !== candidate.accepted_concept_id ||
+        membership.knowledge_point_id !== input.knowledge_point_id
+      ) {
+        throw new Error("concept candidate decision reference is invalid");
+      }
+    }
+
+    if (
+      candidate.accepted_concept_id !== null &&
+      !concepts.has(candidate.accepted_concept_id)
+    ) {
+      throw new Error("concept candidate accepted concept is invalid");
+    }
+  }
+
+  for (const member of snapshot.conceptCandidateMembers) {
+    if (!conceptCandidates.has(member.candidate_id)) {
+      throw new Error("concept candidate member candidate is invalid");
+    }
+  }
+
+  for (const member of snapshot.conceptCandidateDecisionMembers) {
+    if (!conceptCandidates.has(member.candidate_id)) {
+      throw new Error("concept candidate decision candidate is invalid");
     }
   }
 
@@ -2688,6 +3265,63 @@ async function restoreSnapshot(
     "membership_id",
     "occurred_at",
   ], snapshot.conceptActivity);
+  await insertRows(client, "concept_candidate_scans", [
+    "id",
+    "input_fingerprint",
+    "input_count",
+    "model_configuration_version",
+    "text_model",
+    "status",
+    "outcome",
+    "outcome_reason",
+    "attempt_count",
+    "failure_code",
+    "failure_message",
+    "created_at",
+    "started_at",
+    "completed_at",
+  ], snapshot.conceptCandidateScans);
+  await insertRows(client, "concept_candidate_inputs", [
+    "id",
+    "scan_id",
+    "knowledge_point_id",
+    "record_id",
+    "position",
+    "record_title_snapshot",
+    "title_snapshot",
+    "body_snapshot",
+    "evidence_snapshot",
+    "content_fingerprint",
+  ], snapshot.conceptCandidateInputs.map((row) => ({
+    ...row,
+    evidence_snapshot: JSON.stringify(row.evidence_snapshot),
+  })));
+  await insertRows(client, "concept_candidates", [
+    "id",
+    "scan_id",
+    "candidate_fingerprint",
+    "suggested_name",
+    "normalized_name",
+    "suggested_description",
+    "reason",
+    "review_status",
+    "accepted_concept_id",
+    "confirmed_name",
+    "confirmed_description",
+    "decided_at",
+    "created_at",
+  ], snapshot.conceptCandidates);
+  await insertRows(client, "concept_candidate_members", [
+    "candidate_id",
+    "input_id",
+    "position",
+  ], snapshot.conceptCandidateMembers);
+  await insertRows(client, "concept_candidate_decision_members", [
+    "candidate_id",
+    "input_id",
+    "concept_membership_id",
+    "position",
+  ], snapshot.conceptCandidateDecisionMembers);
   await insertRows(client, "duplicate_suggestions", [
     "id",
     "source_a_type",

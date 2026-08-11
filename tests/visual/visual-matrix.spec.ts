@@ -478,6 +478,101 @@ test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", asyn
   ).toBe(1_280);
 });
 
+test("Concept Candidates / AI 候选 · 1600×1000 审查台与 1280×800 几何", async ({
+  page,
+  request,
+}) => {
+  const knowledgePointIds =
+    theme === "macaron"
+      ? visualFixture.candidatePointIds.slice(0, 2)
+      : visualFixture.candidatePointIds.slice(1, 3);
+  const created = await request.post(
+    `${appBaseUrl}/api/v1/concept-candidate-scans`,
+    { data: { knowledgePointIds } },
+  );
+
+  expect(created.status()).toBe(202);
+  const scanId = ((await created.json()) as { scan: { id: string } }).scan.id;
+  let candidateId = "";
+
+  try {
+    await expect
+      .poll(async () => {
+        const response = await request.get(
+          `${appBaseUrl}/api/v1/concept-candidate-scans/${scanId}`,
+        );
+        const body = (await response.json()) as {
+          scan: { status: string };
+        };
+
+        return body.scan.status;
+      })
+      .toBe("succeeded");
+
+    const scanResponse = await request.get(
+      `${appBaseUrl}/api/v1/concept-candidate-scans/${scanId}`,
+    );
+    const scan = (await scanResponse.json()) as {
+      scan: { candidate: { id: string } };
+    };
+
+    candidateId = scan.scan.candidate.id;
+    await page.goto(
+      `${appBaseUrl}/concepts?view=candidates&scan=${encodeURIComponent(scanId)}`,
+    );
+
+    const navigation = page.getByRole("navigation", { name: "主导航" });
+    const main = page.getByRole("main", { name: "知识概念" });
+    const workbench = page.locator(".candidate-workbench");
+    const catalog = page.getByRole("complementary", {
+      name: "Concept Candidate 扫描记录",
+    });
+    const stage = page.locator(".candidate-stage");
+
+    await expect(main.getByRole("heading", { name: /共同机制/u })).toBeVisible();
+    await expect(main.getByText("等待人工确认", { exact: true })).toBeVisible();
+    await expect(main.locator(".candidate-input-grid article")).toHaveCount(2);
+    await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+    await expectBox(main, { x: 116, y: 72, width: 1_444 });
+    await expectBox(workbench, { x: 116, width: 1_444 });
+    await expectBox(catalog, { x: 117, width: 324 });
+    await expectBox(stage, { x: 441, width: 1_118 });
+    await expect(page).toHaveScreenshot(
+      snapshotName(theme, "concept-candidates"),
+      {
+        animations: "disabled",
+        caret: "hide",
+        fullPage: false,
+        mask: [
+          page.locator(".candidate-catalog-entry small"),
+          page.locator(".candidate-detail > header time"),
+        ],
+        maxDiffPixels: 500,
+      },
+    );
+
+    await page.setViewportSize({ width: 1_280, height: 800 });
+    await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+    await expectBox(main, { x: 116, y: 72, width: 1_124 });
+    await expectBox(workbench, { x: 116, width: 1_124 });
+    await expectBox(catalog, { x: 117, width: 292 });
+    await expectBox(stage, { x: 409, width: 830 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBe(1_280);
+  } finally {
+    if (candidateId) {
+      expect(
+        (
+          await request.post(
+            `${appBaseUrl}/api/v1/concept-candidates/${candidateId}/reject`,
+          )
+        ).status(),
+      ).toBe(200);
+    }
+  }
+});
+
 test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制台", async ({
   page,
 }) => {

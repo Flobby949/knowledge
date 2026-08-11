@@ -156,6 +156,12 @@
   box-shadow: inset 0 0 0 2px #ffffff;
 }
 
+.ai-task-state-mark.is-review {
+  color: var(--workspace-accent);
+  background: var(--workspace-accent-soft);
+  border-radius: 2px;
+}
+
 .ai-task-record-link {
   min-width: 0;
   overflow: hidden;
@@ -191,6 +197,10 @@
 
 .ai-task-status.is-succeeded {
   color: var(--success);
+}
+
+.ai-task-status.is-review {
+  color: var(--workspace-accent);
 }
 
 .ai-task-failure,
@@ -234,6 +244,10 @@
 }
 
 .ai-task-popover footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
   padding: 11px 18px;
   text-align: right;
 }

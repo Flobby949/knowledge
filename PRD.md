@@ -291,6 +291,9 @@ Concept 是用户确认后的长期认知节点，用于聚合多个知识点。
 - AI 可以提出 Concept Candidate，但不能直接创建正式 Concept；
 - 用户也可以主动创建 Concept；
 - Concept Candidate、Concept 确认和知识点归属都属于 V3；
+- V3.1 的 Concept Candidate Scan 只能由用户从 2–12 个当前生效且未排除的 Knowledge Point 主动发起，一次扫描最多返回一个候选或明确的无建议结果，不进行静默后台聚类；
+- Candidate 必须冻结输入知识点的有效标题、正文、证据、内容指纹与模型信息；输入表达或生效状态后来变化时结果标记过期并禁止确认；
+- 用户确认 Candidate 时可以修改名称、描述，并从冻结输入范围内选择至少两个成员；确认在同一事务中创建正式 Concept、初始 Membership 和审查决定，拒绝也保留不可变历史；
 - V3.0 的 Concept 必须具有用户确认的名称和自足描述，名称在独立于 Tag 的 Concept 命名空间内按 NFKC、空白归一和拉丁字母大小写无关规则唯一；
 - 用户主动创建 Concept 时必须选择至少两个当前生效且未排除的知识点，后续成员减少不会自动删除或归档 Concept；
 - Concept 名称和描述的每次修改都保留不可变版本；Concept 只支持可恢复归档，V3.0 不提供永久删除；
@@ -680,6 +683,13 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-CON-08` Concept 可以归档和恢复；归档保留全部版本、Membership 与操作历史并退出默认列表，V3.0 不提供永久删除；
 - `FR-CON-09` Concept 名称使用与 Tag 相同的 NFKC、Unicode 空白和拉丁字母大小写归一规则，但 Concept 与 Tag 使用独立命名空间；
 - `FR-CON-10` V3.0 不创建 Concept Candidate、Concept Relation、图谱或路径 API，也不改变 V2 Knowledge Relation 类型集合。
+- `FR-CON-11` V3.1 用户可以从 2–12 个当前生效且未排除的 Knowledge Point 主动发起 Concept Candidate Scan；系统不得在没有用户动作时持续扫描或聚类；
+- `FR-CON-12` Scan 必须保存确切输入知识点、有效标题与正文、证据、内容指纹、模型标识和配置版本，并公开排队、运行、成功、失败及一次显式重试状态；
+- `FR-CON-13` AI 每次 Scan 最多提出一个包含名称、描述、建议成员和理由的 Candidate，也可以返回明确的无建议结果；Candidate 不能直接创建 Concept；
+- `FR-CON-14` 用户可以稍后处理、拒绝，或修改名称、描述和冻结输入范围内的成员后确认 Candidate；确认成员不得少于两个；
+- `FR-CON-15` 确认操作必须在同一事务中创建 Concept、初始 Concept Revision、Concept Membership、活动历史和不可变 Candidate 审查决定；任何一步失败不得留下部分正式数据；
+- `FR-CON-16` Candidate 任一输入的有效表达或生效状态变化后必须显示过期并阻止确认；迟到任务可以保留结果供解释，但不能产生可确认的正式候选；
+- `FR-CON-17` 同一输入内容指纹下已经待处理、确认或拒绝的等价 Candidate 不得再次进入审查队列；Candidate、输入快照和全部审查决定必须进入完整导出恢复。
 
 ### 10.7 完整导出与恢复
 
@@ -1265,7 +1275,7 @@ PC Web 全局采用横向顶部导航，不使用常驻或可折叠侧边栏。�
 
 ### 16.2 V2 完成标准
 
-- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；V2 以完整导出格式 4 完成无损往返，V3.0 当前格式 5 在此基础上增加全部 Concept 事实，并继续把格式 4 适配为空 Concept 集合。格式 4 是首个承诺长期恢复兼容的导出格式，格式 1–3 不属于兼容范围；
+- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；V2 以完整导出格式 4 完成无损往返，V3.0 格式 5 增加全部 Concept 事实，V3.1 当前格式 6 再增加全部终态 Concept Candidate、冻结输入与审查决定，并把格式 4、5 缺少的集合严格适配为空集合。格式 4 是首个承诺长期恢复兼容的导出格式，格式 1–3 不属于兼容范围；
 - 用户能为已认可标签维护别名，并能把一个或多个同义标签合并到主标签后撤销；合并前后的 Tag 身份、Assignment 来源和历史版本均不丢失，有效展示与检索按主标签聚合；
 - 系统能提示重复知识并提供不丢来源的合并建议；
 - 系统能生成带理由、证据和置信度的关系建议；

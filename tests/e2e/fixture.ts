@@ -67,6 +67,8 @@ async function settlePreviousBackgroundWork(
             WHERE status IN ('QUEUED', 'RUNNING'))
           + (SELECT COUNT(*) FROM data_exports
               WHERE status IN ('QUEUED', 'RUNNING'))
+          + (SELECT COUNT(*) FROM concept_candidate_scans
+              WHERE status IN ('QUEUED', 'RUNNING'))
         )::integer AS busy_count`,
     );
     const busyCount = result.rows[0]?.busy_count ?? 0;
@@ -106,6 +108,11 @@ async function resetKnowledgeInstance(pool: Pool): Promise<void> {
          data_exports,
          coverage_analyses,
          model_configurations,
+         concept_candidate_decision_members,
+         concept_candidate_members,
+         concept_candidates,
+         concept_candidate_inputs,
+         concept_candidate_scans,
          concept_activity,
          concept_memberships,
          concept_revisions,

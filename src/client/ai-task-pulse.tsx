@@ -6,12 +6,17 @@ import {
   retryAiTask,
   type AiTaskListItem,
 } from "./ai-task-api.js";
+import {
+  listConceptCandidateScans,
+  type ConceptCandidateScan,
+} from "./api.js";
 import "./ai-task-pulse.css";
 
 const REFRESH_INTERVAL_MS = 1_000;
 
 export function AiTaskPulse() {
   const [tasks, setTasks] = useState<AiTaskListItem[]>([]);
+  const [candidateScans, setCandidateScans] = useState<ConceptCandidateScan[]>([]);
   const [open, setOpen] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState("");
   const [actionError, setActionError] = useState("");
@@ -19,10 +24,14 @@ export function AiTaskPulse() {
   const root = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const items = await listAiTasks("attention", signal);
+    const [items, scans] = await Promise.all([
+      listAiTasks("attention", signal),
+      listConceptCandidateScans("attention", signal),
+    ]);
 
     setTasks(items);
-    if (items.length === 0) {
+    setCandidateScans(scans);
+    if (items.length + scans.length === 0) {
       setOpen(false);
     }
   }, []);
@@ -107,18 +116,21 @@ export function AiTaskPulse() {
     }
   }
 
-  if (tasks.length === 0) {
+  const attentionCount = tasks.length + candidateScans.length;
+
+  if (attentionCount === 0) {
     return null;
   }
 
-  const visibleTasks = tasks.slice(0, 5);
+  const visibleTasks = tasks.slice(0, 4);
+  const visibleCandidateScans = candidateScans.slice(0, 5 - visibleTasks.length);
 
   return (
     <div className="ai-task-pulse" ref={root}>
       <button
         aria-controls="ai-task-status-popover"
         aria-expanded={open}
-        aria-label={`AI 任务：${tasks.length} 项需关注`}
+        aria-label={`AI 任务：${attentionCount} 项需关注`}
         className="ai-task-pulse-button"
         onClick={() => {
           setActionError("");
@@ -129,7 +141,7 @@ export function AiTaskPulse() {
       >
         <span aria-hidden="true" className="ai-task-pulse-signal" />
         <span>AI</span>
-        <strong>{tasks.length}</strong>
+        <strong>{attentionCount}</strong>
       </button>
 
       {open ? (
@@ -142,7 +154,7 @@ export function AiTaskPulse() {
           <header>
             <div>
               <h2>AI 任务</h2>
-              <p>{tasks.length} 项正在处理或需要恢复</p>
+              <p>{attentionCount} 项正在处理、待确认或需要恢复</p>
             </div>
             <span aria-hidden="true" className="ai-task-popover-index">
               LIVE
@@ -191,6 +203,35 @@ export function AiTaskPulse() {
                 ) : null}
               </li>
             ))}
+            {visibleCandidateScans.map((scan) => {
+              const status = candidateStatus(scan);
+
+              return (
+                <li key={`candidate-${scan.id}`}>
+                  <div className="ai-task-popover-row">
+                    <span
+                      aria-hidden="true"
+                      className={`ai-task-state-mark is-${status}`}
+                    />
+                    <Link
+                      aria-label={`打开 Concept Candidate：${candidateTitle(scan)}`}
+                      className="ai-task-record-link"
+                      title={candidateTitle(scan)}
+                      to={`/concepts?view=candidates&scan=${scan.id}`}
+                    >
+                      {candidateTitle(scan)}
+                    </Link>
+                    <span className={`ai-task-status is-${status}`}>
+                      {candidateStatusLabel(scan)}
+                    </span>
+                  </div>
+                  <p className={scan.failure ? "ai-task-failure" : "ai-task-progress-copy"}>
+                    {scan.failure?.message ??
+                      `${scan.inputs.length} 个知识点 · Concept 候选扫描`}
+                  </p>
+                </li>
+              );
+            })}
           </ol>
 
           {actionError ? (
@@ -201,10 +242,37 @@ export function AiTaskPulse() {
 
           <footer>
             <Link to="/ai-tasks">查看全部任务</Link>
+            <Link to="/concepts?view=candidates">Concept 候选</Link>
           </footer>
         </section>
       ) : null}
     </div>
+  );
+}
+
+function candidateStatus(
+  scan: ConceptCandidateScan,
+): "failed" | "queued" | "review" | "running" {
+  if (scan.candidate?.reviewStatus === "pending") {
+    return "review";
+  }
+
+  return scan.status === "succeeded" ? "review" : scan.status;
+}
+
+function candidateStatusLabel(scan: ConceptCandidateScan): string {
+  if (scan.candidate?.reviewStatus === "pending") {
+    return "待确认";
+  }
+
+  return statusLabel(scan.status);
+}
+
+function candidateTitle(scan: ConceptCandidateScan): string {
+  return (
+    scan.candidate?.name ??
+    scan.inputs.slice(0, 2).map((input) => input.title).join(" · ") ??
+    "Concept Candidate"
   );
 }
 

@@ -9,32 +9,47 @@ import {
   type PreparedTestDatabase,
 } from "../support/prepare-test-database.js";
 
-const CONCEPT_TABLES = [
+const V3_TABLES = [
   "concepts",
   "concept_revisions",
   "concept_memberships",
   "concept_activity",
+  "concept_candidate_scans",
+  "concept_candidate_inputs",
+  "concept_candidates",
+  "concept_candidate_members",
+  "concept_candidate_decision_members",
 ] as const;
 
-describe("V3.0 Concept export and restore", () => {
+describe("V3 Concept and Candidate export and restore", () => {
   let sourceApp: FastifyInstance;
+  let currentTargetApp: FastifyInstance;
   let format5TargetApp: FastifyInstance;
   let format4TargetApp: FastifyInstance;
   let sourceDatabase: PreparedTestDatabase;
+  let currentTargetDatabase: PreparedTestDatabase;
   let format5TargetDatabase: PreparedTestDatabase;
   let format4TargetDatabase: PreparedTestDatabase;
   let sourcePool: Pool;
+  let currentTargetPool: Pool;
   let format5TargetPool: Pool;
 
   beforeAll(async () => {
     sourceDatabase = prepareTestDatabase();
+    currentTargetDatabase = prepareTestDatabase();
     format5TargetDatabase = prepareTestDatabase();
     format4TargetDatabase = prepareTestDatabase();
     sourcePool = new Pool({ connectionString: sourceDatabase.databaseUrl });
+    currentTargetPool = new Pool({
+      connectionString: currentTargetDatabase.databaseUrl,
+    });
     format5TargetPool = new Pool({
       connectionString: format5TargetDatabase.databaseUrl,
     });
     sourceApp = await buildApp({ databaseUrl: sourceDatabase.databaseUrl });
+    currentTargetApp = await buildApp({
+      databaseUrl: currentTargetDatabase.databaseUrl,
+    });
     format5TargetApp = await buildApp({
       databaseUrl: format5TargetDatabase.databaseUrl,
     });
@@ -43,6 +58,7 @@ describe("V3.0 Concept export and restore", () => {
     });
     await Promise.all([
       sourceApp.ready(),
+      currentTargetApp.ready(),
       format5TargetApp.ready(),
       format4TargetApp.ready(),
     ]);
@@ -51,18 +67,24 @@ describe("V3.0 Concept export and restore", () => {
   afterAll(async () => {
     await Promise.all([
       sourceApp?.close(),
+      currentTargetApp?.close(),
       format5TargetApp?.close(),
       format4TargetApp?.close(),
     ]);
-    await Promise.all([sourcePool?.end(), format5TargetPool?.end()]);
+    await Promise.all([
+      sourcePool?.end(),
+      currentTargetPool?.end(),
+      format5TargetPool?.end(),
+    ]);
     sourceDatabase?.dispose();
+    currentTargetDatabase?.dispose();
     format5TargetDatabase?.dispose();
     format4TargetDatabase?.dispose();
   }, 30_000);
 
-  it("round-trips Concept history in format 5 and adapts format 4 to empty Concept collections", async () => {
+  it("round-trips Concept Candidate decisions in format 6 and adapts format 4 to empty V3 collections", async () => {
     const ids = await seedConceptDomain(sourcePool);
-    const before = await snapshotTables(sourcePool, [...CONCEPT_TABLES]);
+    const before = await snapshotTables(sourcePool, [...V3_TABLES]);
     const requested = await sourceApp.inject({
       method: "POST",
       url: "/api/v1/exports",
@@ -74,7 +96,7 @@ describe("V3.0 Concept export and restore", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
-      manifest: { formatVersion: 5, recordCount: 2 },
+      manifest: { formatVersion: 6, recordCount: 2 },
     });
 
     const downloaded = await sourceApp.inject({
@@ -96,7 +118,7 @@ describe("V3.0 Concept export and restore", () => {
     >;
 
     expect(domain).toMatchObject({
-      formatVersion: 5,
+      formatVersion: 6,
       concepts: [expect.objectContaining({ id: ids.conceptId })],
       conceptRevisions: expect.arrayContaining([
         expect.objectContaining({ id: ids.firstConceptRevisionId }),
@@ -112,21 +134,43 @@ describe("V3.0 Concept export and restore", () => {
       conceptActivity: expect.arrayContaining([
         expect.objectContaining({ concept_id: ids.conceptId, sequence_number: 6 }),
       ]),
+      conceptCandidateScans: [
+        expect.objectContaining({
+          id: ids.candidateScanId,
+          status: "SUCCEEDED",
+          outcome: "CANDIDATE",
+        }),
+      ],
+      conceptCandidateInputs: expect.arrayContaining([
+        expect.objectContaining({ id: ids.firstCandidateInputId }),
+        expect.objectContaining({ id: ids.secondCandidateInputId }),
+      ]),
+      conceptCandidates: [
+        expect.objectContaining({
+          id: ids.candidateId,
+          review_status: "ACCEPTED",
+          accepted_concept_id: ids.conceptId,
+        }),
+      ],
+      conceptCandidateDecisionMembers: expect.arrayContaining([
+        expect.objectContaining({ concept_membership_id: ids.firstMembershipId }),
+        expect.objectContaining({ concept_membership_id: ids.secondMembershipId }),
+      ]),
     });
 
-    const format5Inspection = await inspect(format5TargetApp, format5Archive);
+    const currentInspection = await inspect(currentTargetApp, format5Archive);
 
-    expect(format5Inspection).toMatchObject({
+    expect(currentInspection).toMatchObject({
       canRestore: true,
-      formatVersion: 5,
+      formatVersion: 6,
       recordCount: 2,
     });
-    await restore(format5TargetApp, format5Inspection.id);
-    expect(await snapshotTables(format5TargetPool, [...CONCEPT_TABLES])).toEqual(
+    await restore(currentTargetApp, currentInspection.id);
+    expect(await snapshotTables(currentTargetPool, [...V3_TABLES])).toEqual(
       before,
     );
 
-    const restoredDetail = await format5TargetApp.inject({
+    const restoredDetail = await currentTargetApp.inject({
       method: "GET",
       url: `/api/v1/concepts/${ids.conceptId}`,
     });
@@ -147,6 +191,33 @@ describe("V3.0 Concept export and restore", () => {
         ]),
       },
     });
+
+    const legacyFormat5Archive = downgradeToFormat5(format5Archive);
+    const format5Inspection = await inspect(
+      format5TargetApp,
+      legacyFormat5Archive,
+    );
+
+    expect(format5Inspection).toMatchObject({
+      canRestore: true,
+      formatVersion: 5,
+      recordCount: 2,
+    });
+    await restore(format5TargetApp, format5Inspection.id);
+
+    const format5Concepts = await format5TargetApp.inject({
+      method: "GET",
+      url: "/api/v1/concepts?archive=all",
+    });
+    const format5Candidates = await format5TargetApp.inject({
+      method: "GET",
+      url: "/api/v1/concept-candidate-scans?scope=all",
+    });
+
+    expect(
+      (format5Concepts.json() as { items: unknown[] }).items,
+    ).toHaveLength(1);
+    expect(format5Candidates.json()).toEqual({ items: [] });
 
     const format4Archive = downgradeToFormat4(format5Archive);
     const format4Inspection = await inspect(format4TargetApp, format4Archive);
@@ -185,11 +256,17 @@ async function seedConceptDomain(pool: Pool) {
     secondAnalysisId: crypto.randomUUID(),
     firstPointId: crypto.randomUUID(),
     secondPointId: crypto.randomUUID(),
+    firstEvidenceId: crypto.randomUUID(),
+    secondEvidenceId: crypto.randomUUID(),
     conceptId: crypto.randomUUID(),
     firstConceptRevisionId: crypto.randomUUID(),
     secondConceptRevisionId: crypto.randomUUID(),
     firstMembershipId: crypto.randomUUID(),
     secondMembershipId: crypto.randomUUID(),
+    candidateScanId: crypto.randomUUID(),
+    firstCandidateInputId: crypto.randomUUID(),
+    secondCandidateInputId: crypto.randomUUID(),
+    candidateId: crypto.randomUUID(),
   };
   const client = await pool.connect();
 
@@ -204,12 +281,13 @@ async function seedConceptDomain(pool: Pool) {
       [ids.tagId],
     );
 
-    for (const [recordId, revisionId, analysisId, pointId, source, title] of [
+    for (const [recordId, revisionId, analysisId, pointId, evidenceId, source, title] of [
       [
         ids.firstRecordId,
         ids.firstRevisionId,
         ids.firstAnalysisId,
         ids.firstPointId,
+        ids.firstEvidenceId,
         "event producer",
         "事件生产者",
       ],
@@ -218,6 +296,7 @@ async function seedConceptDomain(pool: Pool) {
         ids.secondRevisionId,
         ids.secondAnalysisId,
         ids.secondPointId,
+        ids.secondEvidenceId,
         "event consumer",
         "事件消费者",
       ],
@@ -250,10 +329,10 @@ async function seedConceptDomain(pool: Pool) {
       );
       await client.query(
         `INSERT INTO evidence_spans
-           (knowledge_point_id, fragment_revision_id, position,
+           (id, knowledge_point_id, fragment_revision_id, position,
             start_offset, end_offset, quote)
-         VALUES ($1, $2, 1, 0, $3, $4)`,
-        [pointId, revisionId, source.length, source],
+         VALUES ($1, $2, $3, 1, 0, $4, $5)`,
+        [evidenceId, pointId, revisionId, source.length, source],
       );
       await client.query(
         "INSERT INTO tag_assignments (record_id, tag_id) VALUES ($1, $2)",
@@ -306,6 +385,88 @@ async function seedConceptDomain(pool: Pool) {
         ids.secondConceptRevisionId,
       ],
     );
+    await client.query(
+      `INSERT INTO concept_candidate_scans
+         (id, input_fingerprint, input_count, model_configuration_version,
+          text_model, status, outcome, attempt_count, started_at, completed_at)
+       VALUES ($1, $2, 2, 7, 'v3-candidate-model', 'SUCCEEDED',
+               'CANDIDATE', 1, now(), now())`,
+      [ids.candidateScanId, "a".repeat(64)],
+    );
+    await client.query(
+      `INSERT INTO concept_candidate_inputs
+         (id, scan_id, knowledge_point_id, record_id, position,
+          record_title_snapshot, title_snapshot, body_snapshot,
+          evidence_snapshot, content_fingerprint)
+       VALUES
+         ($1, $3, $4, $5, 1, '事件生产者', '事件生产者', '事件生产者知识正文',
+          $6::jsonb, $7),
+         ($2, $3, $8, $9, 2, '事件消费者', '事件消费者', '事件消费者知识正文',
+          $10::jsonb, $11)`,
+      [
+        ids.firstCandidateInputId,
+        ids.secondCandidateInputId,
+        ids.candidateScanId,
+        ids.firstPointId,
+        ids.firstRecordId,
+        JSON.stringify([
+          {
+            id: ids.firstEvidenceId,
+            fragmentRevisionId: ids.firstRevisionId,
+            position: 1,
+            startOffset: 0,
+            endOffset: "event producer".length,
+            quote: "event producer",
+          },
+        ]),
+        "b".repeat(64),
+        ids.secondPointId,
+        ids.secondRecordId,
+        JSON.stringify([
+          {
+            id: ids.secondEvidenceId,
+            fragmentRevisionId: ids.secondRevisionId,
+            position: 1,
+            startOffset: 0,
+            endOffset: "event consumer".length,
+            quote: "event consumer",
+          },
+        ]),
+        "c".repeat(64),
+      ],
+    );
+    await client.query(
+      `INSERT INTO concept_candidates
+         (id, scan_id, candidate_fingerprint, suggested_name,
+          normalized_name, suggested_description, reason, review_status,
+          accepted_concept_id, confirmed_name, confirmed_description,
+          decided_at)
+       VALUES ($1, $2, $3, '事件机制候选', '事件机制候选',
+               '事件通过生产与消费形成协作。', '两个知识点共同描述事件协作。',
+               'ACCEPTED', $4, '事件机制', '事件传递机制。', now())`,
+      [ids.candidateId, ids.candidateScanId, "d".repeat(64), ids.conceptId],
+    );
+    await client.query(
+      `INSERT INTO concept_candidate_members (candidate_id, input_id, position)
+       VALUES ($1, $2, 1), ($1, $3, 2)`,
+      [
+        ids.candidateId,
+        ids.firstCandidateInputId,
+        ids.secondCandidateInputId,
+      ],
+    );
+    await client.query(
+      `INSERT INTO concept_candidate_decision_members
+         (candidate_id, input_id, concept_membership_id, position)
+       VALUES ($1, $2, $3, 1), ($1, $4, $5, 2)`,
+      [
+        ids.candidateId,
+        ids.firstCandidateInputId,
+        ids.firstMembershipId,
+        ids.secondCandidateInputId,
+        ids.secondMembershipId,
+      ],
+    );
     await client.query("COMMIT");
     return ids;
   } catch (error) {
@@ -316,8 +477,39 @@ async function seedConceptDomain(pool: Pool) {
   }
 }
 
-function downgradeToFormat4(archive: Buffer): Buffer {
+function downgradeToFormat5(archive: Buffer): Buffer {
   const entries = readStoredZip(archive);
+  const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8")) as {
+    formatVersion: number;
+  };
+  const domain = JSON.parse(entries.get("domain.json")!.toString("utf8")) as Record<
+    string,
+    unknown
+  >;
+
+  manifest.formatVersion = 5;
+  domain.formatVersion = 5;
+  delete domain.conceptCandidateScans;
+  delete domain.conceptCandidateInputs;
+  delete domain.conceptCandidates;
+  delete domain.conceptCandidateMembers;
+  delete domain.conceptCandidateDecisionMembers;
+
+  return createZip(
+    [...entries].map(([name, data]) => ({
+      name,
+      data:
+        name === "manifest.json"
+          ? Buffer.from(JSON.stringify(manifest), "utf8")
+          : name === "domain.json"
+            ? Buffer.from(JSON.stringify(domain), "utf8")
+            : data,
+    })),
+  );
+}
+
+function downgradeToFormat4(archive: Buffer): Buffer {
+  const entries = readStoredZip(downgradeToFormat5(archive));
   const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8")) as {
     formatVersion: number;
   };
@@ -372,7 +564,7 @@ async function restore(app: FastifyInstance, inspectionId: string) {
     payload: { inspectionId },
   });
 
-  expect(response.statusCode).toBe(201);
+  expect(response.statusCode, response.body).toBe(201);
 }
 
 async function waitForExport(app: FastifyInstance, exportId: string) {

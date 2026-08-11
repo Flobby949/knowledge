@@ -52,9 +52,65 @@
   line-height: 1.75;
 }
 
-.concepts-heading > .primary-button {
+.concepts-heading-actions .primary-button {
   min-width: 132px;
   min-height: 42px;
+}
+
+.concept-view-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin-top: 20px;
+  border-bottom: 1px solid var(--workspace-line-strong);
+}
+
+.concept-view-tabs button {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  min-width: 210px;
+  padding: 10px 14px 11px;
+  color: var(--workspace-muted);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.concept-view-tabs button::after {
+  position: absolute;
+  right: 14px;
+  bottom: -1px;
+  left: 14px;
+  height: 2px;
+  background: transparent;
+  content: "";
+}
+
+.concept-view-tabs button:hover,
+.concept-view-tabs button[aria-current="page"] {
+  color: var(--workspace-ink);
+  background: var(--workspace-panel);
+}
+
+.concept-view-tabs button[aria-current="page"]::after {
+  background: var(--workspace-accent);
+}
+
+.concept-view-tabs button:focus-visible {
+  outline: 2px solid var(--workspace-accent);
+  outline-offset: -3px;
+}
+
+.concept-view-tabs button > span {
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.concept-view-tabs + .concept-workbench,
+.concept-view-tabs + .candidate-workbench {
+  margin-top: 10px;
 }
 
 .concept-feedback {

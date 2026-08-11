@@ -6,7 +6,7 @@
  * FORM: Catalog-and-assembly staging, ranked fourth and carried in the established knowledge workbench identity; direction seed b4e0c450.
  */
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
   addConceptMembership,
@@ -22,6 +22,7 @@ import {
   type ConceptSource,
   type ConceptSummary,
 } from "./api.js";
+import { ConceptCandidatesPanel } from "./concept-candidates-panel.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
 import "./concepts-page.css";
@@ -30,11 +31,15 @@ type ArchiveScope = "active" | "all" | "archived";
 type WorkspaceMode = "add" | "create" | "edit" | "view";
 
 export function ConceptsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const candidateView = searchParams.get("view") === "candidates";
+  const requestedConceptId = searchParams.get("concept") ?? "";
+  const requestedScanId = searchParams.get("scan") ?? "";
   const [concepts, setConcepts] = useState<ConceptSummary[]>([]);
   const [archive, setArchive] = useState<ArchiveScope>("active");
   const [query, setQuery] = useState("");
   const [queryDraft, setQueryDraft] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(requestedConceptId);
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [mode, setMode] = useState<WorkspaceMode>("view");
   const [listLoading, setListLoading] = useState(true);
@@ -78,6 +83,13 @@ export function ConceptsPage() {
   }, [archive, query, reload]);
 
   useEffect(() => {
+    if (requestedConceptId) {
+      setSelectedId(requestedConceptId);
+      setMode("view");
+    }
+  }, [requestedConceptId]);
+
+  useEffect(() => {
     if (!selectedId || mode === "create") {
       return;
     }
@@ -112,12 +124,14 @@ export function ConceptsPage() {
     setMode("view");
     setError("");
     setNotice("");
+    setSearchParams({ concept: id });
   }
 
   function startCreate() {
     setMode("create");
     setError("");
     setNotice("");
+    setSearchParams({});
   }
 
   function applyMutation(next: ConceptDetail, message: string) {
@@ -126,6 +140,7 @@ export function ConceptsPage() {
     setMode("view");
     setNotice(message);
     setReload((value) => value + 1);
+    setSearchParams({ concept: next.concept.id });
   }
 
   async function changeArchiveState(nextArchived: boolean) {
@@ -197,13 +212,43 @@ export function ConceptsPage() {
           <p>
             用稳定定义组织多个知识点。名称、描述和成员变化都留下历史，原始记录与知识点不会被改写。
           </p>
-          <button className="primary-button" onClick={startCreate} type="button">
-            新建 Concept
-          </button>
+          <div className="concepts-heading-actions">
+            <button className="primary-button" onClick={startCreate} type="button">
+              新建 Concept
+            </button>
+          </div>
         </header>
 
         <Feedback error={error} notice={notice} />
 
+        <nav aria-label="Concept 工作区视图" className="concept-view-tabs">
+          <button
+            aria-current={!candidateView ? "page" : undefined}
+            onClick={() => setSearchParams(selectedId ? { concept: selectedId } : {})}
+            type="button"
+          >
+            正式图册
+            <span>人工创建与已晋级定义</span>
+          </button>
+          <button
+            aria-current={candidateView ? "page" : undefined}
+            onClick={() => setSearchParams({ view: "candidates" })}
+            type="button"
+          >
+            AI 候选
+            <span>扫描、审查与晋级记录</span>
+          </button>
+        </nav>
+
+        {candidateView ? (
+          <ConceptCandidatesPanel
+            initialScanId={requestedScanId}
+            onAccepted={() => setReload((value) => value + 1)}
+            onSelectScan={(id) =>
+              setSearchParams({ scan: id, view: "candidates" })
+            }
+          />
+        ) : (
         <div className="concept-workbench">
           <aside aria-label="Concept 图册索引" className="concept-catalog">
             <form
@@ -311,6 +356,7 @@ export function ConceptsPage() {
             ) : null}
           </section>
         </div>
+        )}
       </main>
 
       <NewRecordDialog

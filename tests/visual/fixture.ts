@@ -7,6 +7,7 @@ import { createZip } from "../../src/zip-archive.js";
 const FIXED_TIME = "2099-08-09T08:00:00.000Z";
 
 export const visualFixture = {
+  candidatePointIds: [stableUuid(6, 1), stableUuid(6, 2), stableUuid(6, 3)],
   detailRecordId: stableUuid(1, 1),
   reviewRecordId: stableUuid(1, 2),
   focusedTagName: "变更捕获",

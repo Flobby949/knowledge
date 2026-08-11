@@ -12,6 +12,11 @@ import {
   type CoverageGenerator,
 } from "./coverage-generator.js";
 import { registerCoverageRoutes } from "./coverage-routes.js";
+import {
+  generateOpenAICompatibleConceptCandidate,
+  type ConceptCandidateGenerator,
+} from "./concept-candidate-generator.js";
+import { registerConceptCandidateRoutes } from "./concept-candidate-routes.js";
 import { registerConceptRoutes } from "./concept-routes.js";
 import {
   embedOpenAICompatibleText,
@@ -54,6 +59,7 @@ export interface BuildAppOptions {
   databaseUrl: string;
   embedText?: EmbedText;
   generateAnalysis?: AnalysisGenerator;
+  generateConceptCandidate?: ConceptCandidateGenerator;
   generateCoverage?: CoverageGenerator;
   generateRelation?: RelationGenerator;
   logger?: boolean;
@@ -414,6 +420,12 @@ export async function buildApp(
       options.generateCoverage ?? generateOpenAICompatibleCoverage,
   });
   registerConceptRoutes(app, { pool });
+  registerConceptCandidateRoutes(app, {
+    pool,
+    credentialSecret,
+    generateConceptCandidate:
+      options.generateConceptCandidate ?? generateOpenAICompatibleConceptCandidate,
+  });
 
   app.post<{ Body: CreateRecordBody }>(
     "/api/v1/records",

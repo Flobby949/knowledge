@@ -80,6 +80,93 @@ test.describe("Concept workspace", () => {
     await detail.getByRole("button", { name: "恢复 Concept" }).click();
     await expect(detail.getByText("生效中", { exact: true })).toBeVisible();
   });
+
+  test("scans explicit knowledge points and promotes an edited AI candidate", async ({
+    page,
+    request,
+  }) => {
+    const marker = randomUUID().slice(0, 8);
+
+    await seedTwoKnowledgePoints(request, marker);
+    await page.goto(appUrl("/concepts?view=candidates"));
+
+    const main = page.getByRole("main", { name: "知识概念" });
+
+    await expect(
+      main.getByRole("button", { name: /AI 候选\s+扫描、审查与晋级记录/u }),
+    ).toHaveAttribute("aria-current", "page");
+    await main.getByRole("button", { name: "发起扫描" }).click();
+
+    const builder = main.getByRole("form", {
+      name: "发起 Concept Candidate 扫描",
+    });
+    const sourceChecks = builder.getByRole("checkbox", {
+      name: /扫描知识点/u,
+    });
+
+    await expect(sourceChecks).toHaveCount(2);
+    await sourceChecks.first().check();
+    await sourceChecks.last().check();
+
+    const scanRequested = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          "/api/v1/concept-candidate-scans",
+    );
+
+    await builder.getByRole("button", { name: "生成 AI 候选" }).click();
+    expect((await scanRequested).status()).toBe(202);
+
+    await expect(
+      main.getByRole("heading", { name: /共同机制/u }),
+    ).toBeVisible();
+    await expect(main.getByText("待人工确认", { exact: true }).first()).toBeVisible();
+
+    const pulse = page.getByRole("button", { name: /AI 任务：1 项需关注/u });
+
+    await expect(pulse).toBeVisible();
+    await pulse.click();
+    await expect(
+      page.getByRole("link", { name: /打开 Concept Candidate/u }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    const candidateName = `事件协作候选 ${marker}`;
+
+    await main.getByLabel("晋级名称").fill(candidateName);
+    await main
+      .getByLabel("晋级描述")
+      .fill("事件生产与消费共同构成异步协作机制，定义由人工确认。");
+
+    const memberChecks = main.getByRole("checkbox", { name: /晋级成员/u });
+    const confirm = main.getByRole("button", { name: "确认并创建 Concept" });
+
+    await expect(memberChecks).toHaveCount(2);
+    await memberChecks.last().uncheck();
+    await expect(confirm).toBeDisabled();
+    await memberChecks.last().check();
+
+    const accepted = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        /\/api\/v1\/concept-candidates\/[^/]+\/accept$/u.test(
+          new URL(response.url()).pathname,
+        ),
+    );
+
+    await confirm.click();
+    expect((await accepted).status()).toBe(201);
+    await expect(main.getByText("已晋级", { exact: true }).first()).toBeVisible();
+    await main.getByRole("link", { name: "打开正式 Concept" }).click();
+
+    const detail = main.getByRole("region", { name: "Concept 详情" });
+
+    await expect(detail.getByRole("heading", { name: candidateName })).toBeVisible();
+    await expect(detail.getByRole("article", { name: /Membership/u })).toHaveCount(
+      2,
+    );
+  });
 });
 
 async function seedTwoKnowledgePoints(

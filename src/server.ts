@@ -1,5 +1,6 @@
 import { buildApp } from "./app.js";
 import type { AnalysisGenerator } from "./analysis-generator.js";
+import type { ConceptCandidateGenerator } from "./concept-candidate-generator.js";
 import type { ModelEndpointTester } from "./model-endpoint-tester.js";
 
 const databaseUrl =
@@ -36,6 +37,7 @@ const app = await buildApp({
   ...(useE2eFakeAi
     ? {
         generateAnalysis: generateE2eAnalysis,
+        generateConceptCandidate: generateE2eConceptCandidate,
         onAiTaskSettled: (taskId: string) => {
           settledE2eAiTaskIds.add(taskId);
         },
@@ -83,6 +85,23 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 async function testE2eModelEndpoint(): ReturnType<ModelEndpointTester> {
   return { status: "passed" };
+}
+
+async function generateE2eConceptCandidate({
+  points,
+}: Parameters<ConceptCandidateGenerator>[0]): ReturnType<ConceptCandidateGenerator> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 120));
+
+  return {
+    candidate: {
+      name: `共同机制：${points[0]?.title ?? "知识点组合"}`,
+      description: "这些知识点共同描述一个可复用的机制，需要人工确认定义与最终成员。",
+      reason: "所选知识点共享同一工作机制，适合形成一个可维护的 Concept 候选。",
+      knowledgePointIds: points
+        .slice(0, Math.max(2, Math.min(3, points.length)))
+        .map((point) => point.id),
+    },
+  };
 }
 
 async function generateE2eAnalysis({
