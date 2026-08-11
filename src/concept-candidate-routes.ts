@@ -10,6 +10,7 @@ import {
   type GenerateConceptCandidateInput,
   type GeneratedConceptCandidate,
 } from "./concept-candidate-generator.js";
+import { recallConceptKnowledgePoints } from "./concept-recall.js";
 import { readConceptDetail } from "./concept-routes.js";
 import { normalizeConceptName } from "./domain/concept-name.js";
 import { decryptCredential } from "./model-credentials.js";
@@ -68,6 +69,7 @@ interface ScanRow {
   started_at: Timestamp | null;
   status: "FAILED" | "QUEUED" | "RUNNING" | "SUCCEEDED";
   text_model: string;
+  trigger_analysis_revision_id: string | null;
 }
 
 interface CandidateRow {
@@ -98,25 +100,113 @@ interface CandidateInputRow {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
+export interface ConceptCandidateAutomation {
+  schedulePending(): Promise<void>;
+  scheduleForAnalysis(analysisRevisionId: string): void;
+  settle(): Promise<void>;
+}
+
 export function registerConceptCandidateRoutes(
   app: FastifyInstance,
   options: {
     credentialSecret: string;
     generateConceptCandidate: ConceptCandidateGenerator;
     pool: Pool;
+    scheduleSemanticIndex: () => Promise<void>;
   },
-): void {
-  const { credentialSecret, generateConceptCandidate, pool } = options;
-  const schedule = (scanId: string) => {
-    setImmediate(() => {
-      void processConceptCandidateScan({
-        credentialSecret,
-        generateConceptCandidate,
-        log: app.log,
-        pool,
-        scanId,
-      });
+): ConceptCandidateAutomation {
+  const {
+    credentialSecret,
+    generateConceptCandidate,
+    pool,
+    scheduleSemanticIndex,
+  } = options;
+  const backgroundWork = new Set<Promise<void>>();
+  const scheduledAnalyses = new Set<string>();
+  const track = <T>(operation: Promise<T>): Promise<T> => {
+    const settled = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    backgroundWork.add(settled);
+    void settled.finally(() => backgroundWork.delete(settled));
+    return operation;
+  };
+  const runBackground = (
+    operation: () => Promise<void>,
+    context: Record<string, unknown>,
+    message: string,
+  ) => {
+    let run: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      run = () => {
+        void operation()
+          .catch((error) => app.log.error({ ...context, err: error }, message))
+          .finally(resolve);
+      };
     });
+
+    backgroundWork.add(pending);
+    void pending.finally(() => backgroundWork.delete(pending));
+    setImmediate(run);
+  };
+  const schedule = (scanId: string) => {
+    runBackground(
+      () =>
+        processConceptCandidateScan({
+          credentialSecret,
+          generateConceptCandidate,
+          log: app.log,
+          pool,
+          scanId,
+        }),
+      { scanId },
+      "Concept Candidate background task failed",
+    );
+  };
+  const scheduleForAnalysis = (analysisRevisionId: string) => {
+    if (scheduledAnalyses.has(analysisRevisionId)) {
+      return;
+    }
+
+    scheduledAnalyses.add(analysisRevisionId);
+    runBackground(
+      async () => {
+        try {
+          await processAutomaticConceptDiscovery({
+            analysisRevisionId,
+            pool,
+            scheduleCandidateScan: schedule,
+            scheduleSemanticIndex,
+          });
+        } finally {
+          scheduledAnalyses.delete(analysisRevisionId);
+        }
+      },
+      { analysisRevisionId },
+      "Automatic Concept discovery failed",
+    );
+  };
+  const schedulePending = () =>
+    track(
+      pool
+        .query<{ analysis_revision_id: string }>(
+          `SELECT analysis_revision_id
+             FROM concept_candidate_discovery_queue
+            WHERE processed_at IS NULL
+            ORDER BY enqueued_at, analysis_revision_id`,
+        )
+        .then((pending) => {
+          pending.rows.forEach(({ analysis_revision_id }) =>
+            scheduleForAnalysis(analysis_revision_id),
+          );
+        }),
+    );
+  const settle = async () => {
+    while (backgroundWork.size > 0) {
+      await Promise.all([...backgroundWork]);
+    }
   };
 
   app.addHook("onReady", async () => {
@@ -131,6 +221,7 @@ export function registerConceptCandidateRoutes(
               completed_at = clock_timestamp()
         WHERE status IN ('QUEUED', 'RUNNING')`,
     );
+    await schedulePending();
   });
 
   app.post<{ Body: unknown }>(
@@ -173,6 +264,7 @@ export function registerConceptCandidateRoutes(
         pool,
         orderedPoints,
         configuration,
+        {},
       );
       const scan = await readConceptCandidateScan(pool, scanId);
 
@@ -256,7 +348,8 @@ export function registerConceptCandidateRoutes(
         return reply.code(409).send({
           error: {
             code: "CONCEPT_CANDIDATE_STALE",
-            message: "扫描输入已经变化，不能重试，请重新选择知识点。",
+            message:
+              "扫描输入已经变化，不能重试；后续知识生效时系统会重新自动发现。",
           },
         });
       }
@@ -352,7 +445,8 @@ export function registerConceptCandidateRoutes(
         return reply.code(409).send({
           error: {
             code: "CONCEPT_CANDIDATE_STALE",
-            message: "候选输入已经变化，不能直接确认，请重新发起扫描。",
+            message:
+              "候选输入已经变化，不能直接确认；后续知识生效时系统会重新自动发现。",
           },
         });
       }
@@ -435,6 +529,137 @@ export function registerConceptCandidateRoutes(
       return { scan };
     },
   );
+
+  return { scheduleForAnalysis, schedulePending, settle };
+}
+
+async function processAutomaticConceptDiscovery(options: {
+  analysisRevisionId: string;
+  pool: Pool;
+  scheduleCandidateScan: (scanId: string) => void;
+  scheduleSemanticIndex: () => Promise<void>;
+}): Promise<void> {
+  const {
+    analysisRevisionId,
+    pool,
+    scheduleCandidateScan,
+    scheduleSemanticIndex,
+  } = options;
+  const queueEntry = await pool.query(
+    `SELECT 1
+       FROM concept_candidate_discovery_queue
+      WHERE analysis_revision_id = $1
+        AND processed_at IS NULL`,
+    [analysisRevisionId],
+  );
+
+  if (!queueEntry.rows[0]) {
+    return;
+  }
+
+  const existing = await pool.query<{ id: string }>(
+    `SELECT id
+       FROM concept_candidate_scans
+      WHERE trigger_analysis_revision_id = $1`,
+    [analysisRevisionId],
+  );
+
+  if (existing.rows[0]) {
+    await markConceptDiscoveryProcessed(pool, analysisRevisionId);
+    return;
+  }
+
+  await scheduleSemanticIndex();
+  const [configuration, seedResult] = await Promise.all([
+    readActiveTextConfiguration(pool),
+    pool.query<{ id: string }>(
+      `SELECT point.id
+         FROM ai_analysis_revisions AS analysis
+         INNER JOIN records AS record
+           ON record.current_analysis_revision_id = analysis.id
+          AND record.archived_at IS NULL
+         INNER JOIN knowledge_points AS point
+           ON point.analysis_revision_id = analysis.id
+          AND point.publication_status IN ('AUTO_PUBLISHED', 'CONFIRMED')
+          AND point.usage_status = 'INCLUDED'
+        WHERE analysis.id = $1
+          AND analysis.status = 'ACTIVE'
+        ORDER BY point.position`,
+      [analysisRevisionId],
+    ),
+  ]);
+  const seedIds = seedResult.rows.map(({ id }) => id);
+
+  if (!configuration || seedIds.length === 0) {
+    return;
+  }
+
+  const recall = await recallConceptKnowledgePoints({
+    configurationVersion: configuration.version,
+    pool,
+    seedKnowledgePointIds: seedIds,
+  });
+
+  if (!recall.embeddingReady) {
+    return;
+  }
+
+  const currentPoints = await readCurrentCandidatePoints(
+    pool,
+    recall.knowledgePointIds,
+  );
+  const byId = new Map(currentPoints.map((point) => [point.id, point]));
+  const orderedPoints = recall.knowledgePointIds.flatMap((id) => {
+    const point = byId.get(id);
+
+    return point ? [point] : [];
+  });
+
+  if (orderedPoints.length !== recall.knowledgePointIds.length) {
+    return;
+  }
+
+  const shouldGenerate = orderedPoints.length >= 2;
+  const scanId = await createCandidateScan(pool, orderedPoints, configuration, {
+    triggerAnalysisRevisionId: analysisRevisionId,
+    ...(shouldGenerate
+      ? {}
+      : {
+          noSuggestionReason:
+            "全局召回没有找到足以与新增知识共同形成 Concept 的当前知识点。",
+        }),
+  });
+
+  await markConceptDiscoveryProcessed(pool, analysisRevisionId);
+
+  if (shouldGenerate) {
+    scheduleCandidateScan(scanId);
+  }
+}
+
+export async function enqueueConceptCandidateDiscovery(
+  client: Pool | PoolClient,
+  analysisRevisionId: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO concept_candidate_discovery_queue (analysis_revision_id)
+     VALUES ($1)
+     ON CONFLICT (analysis_revision_id) DO NOTHING`,
+    [analysisRevisionId],
+  );
+}
+
+async function markConceptDiscoveryProcessed(
+  pool: Pool,
+  analysisRevisionId: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE concept_candidate_discovery_queue
+        SET processed_at = clock_timestamp()
+      WHERE analysis_revision_id = $1
+        AND processed_at IS NULL`,
+    [analysisRevisionId],
+  );
 }
 
 async function processConceptCandidateScan(options: {
@@ -510,9 +735,14 @@ async function createCandidateScan(
   pool: Pool,
   points: CurrentCandidatePoint[],
   configuration: TextConfiguration,
+  options: {
+    noSuggestionReason?: string;
+    triggerAnalysisRevisionId?: string;
+  },
 ): Promise<string> {
   const client = await pool.connect();
   const scanId = randomUUID();
+  const status = options.noSuggestionReason ? "SUCCEEDED" : "QUEUED";
   const snapshots = points.map((point, index) => ({
     ...point,
     contentFingerprint: candidatePointFingerprint(point),
@@ -525,14 +755,23 @@ async function createCandidateScan(
     await client.query(
       `INSERT INTO concept_candidate_scans
          (id, input_fingerprint, input_count, model_configuration_version,
-          text_model)
-       VALUES ($1, $2, $3, $4, $5)`,
+          text_model, trigger_analysis_revision_id, status, outcome,
+          outcome_reason, started_at, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6,
+               $7::concept_candidate_scan_status,
+               $8::concept_candidate_scan_outcome, $9,
+               CASE WHEN $7 = 'SUCCEEDED' THEN clock_timestamp() END,
+               CASE WHEN $7 = 'SUCCEEDED' THEN clock_timestamp() END)`,
       [
         scanId,
         candidateInputFingerprint(snapshots),
         snapshots.length,
         configuration.version,
         configuration.text_model,
+        options.triggerAnalysisRevisionId ?? null,
+        status,
+        options.noSuggestionReason ? "NO_SUGGESTION" : null,
+        options.noSuggestionReason ?? null,
       ],
     );
 
@@ -883,7 +1122,8 @@ async function readConceptCandidateScan(pool: Pool | PoolClient, scanId: string)
   const [scanResult, inputResult, candidateResult] = await Promise.all([
     pool.query<ScanRow>(
       `SELECT id, input_fingerprint, input_count, model_configuration_version,
-              text_model, status, outcome, outcome_reason, attempt_count,
+              text_model, trigger_analysis_revision_id, status, outcome,
+              outcome_reason, attempt_count,
               failure_code, failure_message, created_at, started_at, completed_at
          FROM concept_candidate_scans
         WHERE id = $1`,
@@ -916,6 +1156,18 @@ async function readConceptCandidateScan(pool: Pool | PoolClient, scanId: string)
   const inputs = inputResult.rows.map(candidateInputFromRow);
   const candidate = candidateResult.rows[0];
   const stale = await candidateInputsStale(pool, inputs);
+  const seedIds = scan.trigger_analysis_revision_id
+    ? new Set(
+        (
+          await pool.query<{ id: string }>(
+            `SELECT id
+               FROM knowledge_points
+              WHERE analysis_revision_id = $1`,
+            [scan.trigger_analysis_revision_id],
+          )
+        ).rows.map(({ id }) => id),
+      )
+    : new Set<string>();
   let publicCandidate = null;
 
   if (candidate) {
@@ -948,6 +1200,10 @@ async function readConceptCandidateScan(pool: Pool | PoolClient, scanId: string)
 
   return {
     id: scan.id,
+    origin: scan.trigger_analysis_revision_id
+      ? ("automatic" as const)
+      : ("manual" as const),
+    triggerAnalysisRevisionId: scan.trigger_analysis_revision_id,
     status: scan.status.toLowerCase() as Lowercase<ScanRow["status"]>,
     outcome: scan.outcome
       ? (scan.outcome.toLowerCase() as Lowercase<NonNullable<ScanRow["outcome"]>>)
@@ -969,6 +1225,7 @@ async function readConceptCandidateScan(pool: Pool | PoolClient, scanId: string)
     completedAt: nullableIsoString(scan.completed_at),
     inputs: inputs.map((point) => ({
       id: point.id,
+      seed: seedIds.has(point.id),
       recordId: point.recordId,
       recordTitle: point.recordTitle,
       title: point.title,

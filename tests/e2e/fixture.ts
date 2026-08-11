@@ -108,6 +108,7 @@ async function resetKnowledgeInstance(pool: Pool): Promise<void> {
          data_exports,
          coverage_analyses,
          model_configurations,
+         concept_candidate_discovery_queue,
          concept_candidate_decision_members,
          concept_candidate_members,
          concept_candidates,

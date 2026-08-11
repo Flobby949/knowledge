@@ -67,3 +67,100 @@ it("adds the V3.1 Candidate model without rewriting V3.0 Concepts", async () => 
     database.dispose();
   }
 }, 30_000);
+
+it("adds durable automatic discovery triggers without backfilling historical knowledge", async () => {
+  const database = prepareTestDatabase({
+    migrationsThrough: "0020_concept_candidates.sql",
+  });
+  const pool = new Pool({ connectionString: database.databaseUrl });
+  const recordId = randomUUID();
+  const revisionId = randomUUID();
+  const analysisId = randomUUID();
+  const pointId = randomUUID();
+  const scanId = randomUUID();
+  const tagId = randomUUID();
+
+  try {
+    await pool.query("BEGIN");
+    await pool.query(
+      `INSERT INTO tags
+         (id, display_name, normalized_name, origin, approval_status,
+          user_approved_at)
+       VALUES ($1, '迁移测试', '迁移测试', 'USER_CREATED',
+               'USER_APPROVED', now())`,
+      [tagId],
+    );
+    await pool.query(
+      `INSERT INTO records
+         (id, current_fragment_revision_id, current_analysis_revision_id)
+       VALUES ($1, $2, $3)`,
+      [recordId, revisionId, analysisId],
+    );
+    await pool.query(
+      `INSERT INTO fragment_revisions
+         (id, record_id, revision_number, content, grapheme_count)
+       VALUES ($1, $2, 1, '历史知识', 4)`,
+      [revisionId, recordId],
+    );
+    await pool.query(
+      `INSERT INTO ai_analysis_revisions
+         (id, record_id, fragment_revision_id, text_model, title, summary,
+          status)
+       VALUES ($1, $2, $3, 'migration-model', '历史知识', '历史摘要', 'ACTIVE')`,
+      [analysisId, recordId, revisionId],
+    );
+    await pool.query(
+      `INSERT INTO knowledge_points
+         (id, record_id, fragment_revision_id, analysis_revision_id,
+          position, ai_title, ai_body, publication_status, usage_status)
+       VALUES ($1, $2, $3, $4, 1, '历史知识', '历史知识正文',
+               'AUTO_PUBLISHED', 'INCLUDED')`,
+      [pointId, recordId, revisionId, analysisId],
+    );
+    await pool.query(
+      "INSERT INTO tag_assignments (record_id, tag_id) VALUES ($1, $2)",
+      [recordId, tagId],
+    );
+    await pool.query("COMMIT");
+
+    const migration = await readFile(
+      new URL(
+        "../../migrations/0021_automatic_concept_discovery.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    await pool.query(migration);
+
+    expect(
+      await pool.query("SELECT * FROM concept_candidate_discovery_queue"),
+    ).toMatchObject({ rowCount: 0 });
+    await expect(
+      pool.query(
+        `INSERT INTO concept_candidate_scans
+           (id, input_fingerprint, input_count, model_configuration_version,
+            text_model, status, outcome, outcome_reason, started_at,
+            completed_at)
+         VALUES ($1, $2, 1, 1, 'migration-model', 'SUCCEEDED',
+                 'NO_SUGGESTION', '没有召回结果', now(), now())`,
+        [randomUUID(), "e".repeat(64)],
+      ),
+    ).rejects.toMatchObject({ constraint: "concept_candidate_scans_automatic_single_input_check" });
+    expect(
+      await pool.query(
+        `INSERT INTO concept_candidate_scans
+           (id, input_fingerprint, input_count, model_configuration_version,
+            text_model, trigger_analysis_revision_id, status, outcome,
+            outcome_reason, started_at, completed_at)
+         VALUES ($1, $2, 1, 1, 'migration-model', $3, 'SUCCEEDED',
+                 'NO_SUGGESTION', '没有召回结果', now(), now())
+         RETURNING trigger_analysis_revision_id`,
+        [scanId, "f".repeat(64), analysisId],
+      ),
+    ).toMatchObject({ rows: [{ trigger_analysis_revision_id: analysisId }] });
+  } finally {
+    await pool.end();
+    database.dispose();
+  }
+}, 30_000);

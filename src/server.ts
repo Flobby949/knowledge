@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import type { AnalysisGenerator } from "./analysis-generator.js";
 import type { ConceptCandidateGenerator } from "./concept-candidate-generator.js";
+import type { EmbedText } from "./embedding-provider.js";
 import type { ModelEndpointTester } from "./model-endpoint-tester.js";
 
 const databaseUrl =
@@ -38,6 +39,7 @@ const app = await buildApp({
     ? {
         generateAnalysis: generateE2eAnalysis,
         generateConceptCandidate: generateE2eConceptCandidate,
+        embedText: embedE2eText,
         onAiTaskSettled: (taskId: string) => {
           settledE2eAiTaskIds.add(taskId);
         },
@@ -85,6 +87,18 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 async function testE2eModelEndpoint(): ReturnType<ModelEndpointTester> {
   return { status: "passed" };
+}
+
+async function embedE2eText(
+  input: Parameters<EmbedText>[0],
+): ReturnType<EmbedText> {
+  const marker = /\/concept-([0-9a-f]{8})\//u.exec(input.baseUrl)?.[1];
+
+  if (!marker) {
+    throw new Error("E2E embedding is only available to Concept scenarios");
+  }
+
+  return input.text.includes(marker) ? [1, 0, 0] : [0, 1, 0];
 }
 
 async function generateE2eConceptCandidate({

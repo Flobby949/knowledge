@@ -81,47 +81,34 @@ test.describe("Concept workspace", () => {
     await expect(detail.getByText("生效中", { exact: true })).toBeVisible();
   });
 
-  test("scans explicit knowledge points and promotes an edited AI candidate", async ({
+  test("automatically recalls knowledge and promotes an edited AI candidate", async ({
     page,
     request,
   }) => {
     const marker = randomUUID().slice(0, 8);
 
     await seedTwoKnowledgePoints(request, marker);
-    await page.goto(appUrl("/concepts?view=candidates"));
+    const scanId = await expectAutomaticCandidate(request, marker);
+    await page.goto(
+      appUrl(`/concepts?view=candidates&scan=${encodeURIComponent(scanId)}`),
+    );
 
     const main = page.getByRole("main", { name: "知识概念" });
 
     await expect(
       main.getByRole("button", { name: /AI 候选\s+扫描、审查与晋级记录/u }),
     ).toHaveAttribute("aria-current", "page");
-    await main.getByRole("button", { name: "发起扫描" }).click();
-
-    const builder = main.getByRole("form", {
-      name: "发起 Concept Candidate 扫描",
-    });
-    const sourceChecks = builder.getByRole("checkbox", {
-      name: /扫描知识点/u,
-    });
-
-    await expect(sourceChecks).toHaveCount(2);
-    await sourceChecks.first().check();
-    await sourceChecks.last().check();
-
-    const scanRequested = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          "/api/v1/concept-candidate-scans",
-    );
-
-    await builder.getByRole("button", { name: "生成 AI 候选" }).click();
-    expect((await scanRequested).status()).toBe(202);
 
     await expect(
       main.getByRole("heading", { name: /共同机制/u }),
     ).toBeVisible();
     await expect(main.getByText("待人工确认", { exact: true }).first()).toBeVisible();
+    await expect(main.getByText("全局自动召回", { exact: true })).toBeVisible();
+    await expect(main.getByText("本次新增知识", { exact: true })).toHaveCount(2);
+    await expect(main.getByRole("button", { name: "发起扫描" })).toHaveCount(0);
+    await expect(
+      main.getByRole("form", { name: "发起 Concept Candidate 扫描" }),
+    ).toHaveCount(0);
 
     const pulse = page.getByRole("button", { name: /AI 任务：1 项需关注/u });
 
@@ -253,6 +240,44 @@ async function expectTaskSucceeded(
       return body.task.status;
     })
     .toBe("succeeded");
+}
+
+async function expectAutomaticCandidate(
+  request: APIRequestContext,
+  marker: string,
+): Promise<string> {
+  let scanId = "";
+
+  await expect
+    .poll(async () => {
+      const response = await request.get(
+        appUrl("/api/v1/concept-candidate-scans?scope=all"),
+      );
+      const body = (await response.json()) as {
+        items: Array<{
+          candidate: null | { id: string };
+          id: string;
+          inputs: Array<{ body: string }>;
+          origin: string;
+          status: string;
+        }>;
+      };
+      const scan = body.items.find(
+        (item) =>
+          item.origin === "automatic" &&
+          item.inputs.some(({ body: inputBody }) => inputBody.includes(marker)),
+      );
+
+      if (scan?.status === "succeeded" && scan.candidate) {
+        scanId = scan.id;
+      }
+
+      return scan?.status ?? "missing";
+    })
+    .toBe("succeeded");
+
+  expect(scanId).not.toBe("");
+  return scanId;
 }
 
 function appUrl(pathname: string): string {

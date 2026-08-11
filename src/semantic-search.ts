@@ -33,7 +33,7 @@ export interface SemanticMatch {
 }
 
 export interface SemanticIndexScheduler {
-  schedule(options?: { retryFailed?: boolean }): void;
+  schedule(options?: { retryFailed?: boolean }): Promise<void>;
 }
 
 export function createSemanticIndexScheduler(options: {
@@ -46,6 +46,7 @@ export function createSemanticIndexScheduler(options: {
   let running = false;
   let rerunRequested = false;
   let retryFailedRequested = false;
+  let idleResolvers: Array<() => void> = [];
 
   function queueDrain(): void {
     if (queued || running) {
@@ -89,6 +90,11 @@ export function createSemanticIndexScheduler(options: {
 
       if (rerunRequested) {
         queueDrain();
+      } else {
+        const resolvers = idleResolvers;
+
+        idleResolvers = [];
+        resolvers.forEach((resolve) => resolve());
       }
     }
   }
@@ -98,6 +104,10 @@ export function createSemanticIndexScheduler(options: {
       rerunRequested = true;
       retryFailedRequested ||= scheduleOptions?.retryFailed === true;
       queueDrain();
+
+      return new Promise<void>((resolve) => {
+        idleResolvers.push(resolve);
+      });
     },
   };
 }
@@ -105,11 +115,12 @@ export function createSemanticIndexScheduler(options: {
 export function registerSemanticSearchRoutes(
   app: FastifyInstance,
   options: {
+    onIndexRebuilt?: () => Promise<void> | void;
     pool: Pool;
     scheduler: SemanticIndexScheduler;
   },
 ): void {
-  const { pool, scheduler } = options;
+  const { onIndexRebuilt, pool, scheduler } = options;
 
   app.get("/api/v1/search-health", async () => ({
     keyword: { status: "ready" },
@@ -128,7 +139,12 @@ export function registerSemanticSearchRoutes(
       });
     }
 
-    scheduler.schedule({ retryFailed: true });
+    void scheduler
+      .schedule({ retryFailed: true })
+      .then(() => onIndexRebuilt?.())
+      .catch((error) => {
+        app.log.error({ err: error }, "Semantic index rebuild follow-up failed");
+      });
 
     return reply.code(202).send({
       rebuild: {

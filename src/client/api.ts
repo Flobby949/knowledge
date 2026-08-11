@@ -486,14 +486,17 @@ export interface ConceptCandidateScan {
         quote: string;
         startOffset: number;
       }>;
+      seed: boolean;
     }
   >;
   model: { configurationVersion: number; name: string };
+  origin: "automatic" | "manual";
   outcome: "candidate" | "duplicate" | "no_suggestion" | null;
   outcomeReason: string | null;
   stale: boolean;
   startedAt: string | null;
   status: "failed" | "queued" | "running" | "succeeded";
+  triggerAnalysisRevisionId: string | null;
 }
 
 export interface ConceptDetail {
@@ -589,21 +592,6 @@ export async function listConceptCandidateScans(
   );
 
   return body.items;
-}
-
-export async function createConceptCandidateScan(
-  knowledgePointIds: string[],
-): Promise<ConceptCandidateScan> {
-  const response = await fetch("/api/v1/concept-candidate-scans", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ knowledgePointIds }),
-  });
-  const body = await parseConceptResponse<{ scan: ConceptCandidateScan }>(
-    response,
-  );
-
-  return body.scan;
 }
 
 export async function retryConceptCandidateScan(

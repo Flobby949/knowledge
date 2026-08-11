@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 
 import type { AnalysisGenerator, GeneratedAnalysis } from "./analysis-generator.js";
+import { enqueueConceptCandidateDiscovery } from "./concept-candidate-routes.js";
 import {
   validateAnalysisOutput,
   type AnalysisOutput,
@@ -143,6 +144,7 @@ export function registerAiOrganizationRoutes(
     pool: Pool;
     credentialSecret: string;
     generateAnalysis: AnalysisGenerator;
+    onKnowledgeActivated?: (analysisRevisionId: string) => void;
     onTaskSettled?: (taskId: string) => void;
     scheduleSemanticIndex: () => void;
   },
@@ -151,6 +153,7 @@ export function registerAiOrganizationRoutes(
     pool,
     credentialSecret,
     generateAnalysis,
+    onKnowledgeActivated,
     onTaskSettled,
     scheduleSemanticIndex,
   } = options;
@@ -274,6 +277,7 @@ export function registerAiOrganizationRoutes(
             credentialSecret,
             generateAnalysis,
             log: app.log,
+            ...(onKnowledgeActivated ? { onKnowledgeActivated } : {}),
             ...(onTaskSettled ? { onTaskSettled } : {}),
             scheduleSemanticIndex,
             taskId: task.id,
@@ -507,6 +511,7 @@ export function registerAiOrganizationRoutes(
             credentialSecret,
             generateAnalysis,
             log: app.log,
+            ...(onKnowledgeActivated ? { onKnowledgeActivated } : {}),
             ...(onTaskSettled ? { onTaskSettled } : {}),
             scheduleSemanticIndex,
             taskId: retryTask.id,
@@ -543,6 +548,7 @@ export function registerAiOrganizationRoutes(
       }
 
       scheduleSemanticIndex();
+      onKnowledgeActivated?.(request.params.candidateId);
 
       return {
         candidate: { id: request.params.candidateId, status: "adopted" },
@@ -654,7 +660,7 @@ export function registerAiOrganizationRoutes(
           ],
         );
 
-        await settleFirstReviewIfComplete(
+        const activated = await settleFirstReviewIfComplete(
           client,
           request.params.id,
           point.analysis_revision_id,
@@ -662,6 +668,11 @@ export function registerAiOrganizationRoutes(
 
         await client.query("COMMIT");
         scheduleSemanticIndex();
+
+        if (activated) {
+          onKnowledgeActivated?.(point.analysis_revision_id);
+        }
+
         return {
           item: {
             id: request.params.itemId,
@@ -748,8 +759,10 @@ export function registerAiOrganizationRoutes(
           [request.params.itemId],
         );
 
+        let activated = false;
+
         if (point.publication_status === "PENDING_REVIEW") {
-          await settleFirstReviewIfComplete(
+          activated = await settleFirstReviewIfComplete(
             client,
             request.params.id,
             point.analysis_revision_id,
@@ -757,6 +770,10 @@ export function registerAiOrganizationRoutes(
         }
 
         await client.query("COMMIT");
+
+        if (activated) {
+          onKnowledgeActivated?.(point.analysis_revision_id);
+        }
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
@@ -897,7 +914,7 @@ async function settleFirstReviewIfComplete(
   client: PoolClient,
   recordId: string,
   analysisId: string,
-): Promise<void> {
+): Promise<boolean> {
   const remaining = await client.query<{ pending_count: number }>(
     `SELECT COUNT(*)::integer AS pending_count
        FROM knowledge_points
@@ -907,7 +924,7 @@ async function settleFirstReviewIfComplete(
   );
 
   if (remaining.rows[0]?.pending_count !== 0) {
-    return;
+    return false;
   }
 
   const confirmed = await client.query<{ confirmed_count: number }>(
@@ -924,7 +941,7 @@ async function settleFirstReviewIfComplete(
       "UPDATE ai_analysis_revisions SET status = 'DISCARDED' WHERE id = $1",
       [analysisId],
     );
-    return;
+    return false;
   }
 
   const previous = await client.query<{
@@ -956,6 +973,8 @@ async function settleFirstReviewIfComplete(
       WHERE id = $1`,
     [recordId, analysisId],
   );
+  await enqueueConceptCandidateDiscovery(client, analysisId);
+  return true;
 }
 
 async function decideOrganizationCandidate(options: {
@@ -1047,6 +1066,7 @@ async function decideOrganizationCandidate(options: {
         WHERE id = $1`,
       [recordId, candidateId],
     );
+    await enqueueConceptCandidateDiscovery(client, candidateId);
     await client.query("COMMIT");
     return true;
   } catch (error) {
@@ -1271,6 +1291,7 @@ async function processTask(options: {
   credentialSecret: string;
   generateAnalysis: AnalysisGenerator;
   log: FastifyInstance["log"];
+  onKnowledgeActivated?: (analysisRevisionId: string) => void;
   onTaskSettled?: (taskId: string) => void;
   scheduleSemanticIndex: () => void;
   taskId: string;
@@ -1280,6 +1301,7 @@ async function processTask(options: {
     credentialSecret,
     generateAnalysis,
     log,
+    onKnowledgeActivated,
     onTaskSettled,
     scheduleSemanticIndex,
     taskId,
@@ -1355,6 +1377,11 @@ async function processTask(options: {
 
         if (published) {
           scheduleSemanticIndex();
+
+          if (published.activated) {
+            onKnowledgeActivated?.(published.analysisId);
+          }
+
           log.info(
             {
               attempt,
@@ -1609,7 +1636,7 @@ async function publishAnalysis(
   pool: Pool,
   task: TaskSourceRow,
   analysis: AnalysisOutput,
-): Promise<boolean> {
+): Promise<{ activated: boolean; analysisId: string } | null> {
   const client = await pool.connect();
 
   try {
@@ -1653,7 +1680,7 @@ async function publishAnalysis(
 
     if (!record) {
       await client.query("ROLLBACK");
-      return false;
+      return null;
     }
 
     const currentTask = await client.query<{ status: AiTaskRow["status"] }>(
@@ -1663,7 +1690,7 @@ async function publishAnalysis(
 
     if (currentTask.rows[0]?.status !== "RUNNING") {
       await client.query("ROLLBACK");
-      return false;
+      return null;
     }
 
     const publishable =
@@ -1784,6 +1811,7 @@ async function publishAnalysis(
           WHERE id = $1`,
         [task.record_id, analysisId],
       );
+      await enqueueConceptCandidateDiscovery(client, analysisId);
     }
 
     await client.query(
@@ -1796,7 +1824,7 @@ async function publishAnalysis(
       [task.id],
     );
     await client.query("COMMIT");
-    return true;
+    return { activated: automaticPublish, analysisId };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

@@ -3,13 +3,10 @@ import { Link } from "react-router-dom";
 
 import {
   acceptConceptCandidate,
-  createConceptCandidateScan,
   listConceptCandidateScans,
-  listConceptSources,
   rejectConceptCandidate,
   retryConceptCandidateScan,
   type ConceptCandidateScan,
-  type ConceptSource,
 } from "./api.js";
 import "./concept-candidates-panel.css";
 
@@ -26,7 +23,6 @@ export function ConceptCandidatesPanel({
 }) {
   const [scans, setScans] = useState<ConceptCandidateScan[]>([]);
   const [selectedId, setSelectedId] = useState(initialScanId);
-  const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -64,7 +60,6 @@ export function ConceptCandidatesPanel({
   useEffect(() => {
     if (initialScanId) {
       setSelectedId(initialScanId);
-      setCreating(false);
     }
   }, [initialScanId]);
 
@@ -92,7 +87,6 @@ export function ConceptCandidatesPanel({
 
   function selectScan(id: string) {
     setSelectedId(id);
-    setCreating(false);
     setError("");
     setNotice("");
     onSelectScan(id);
@@ -119,42 +113,37 @@ export function ConceptCandidatesPanel({
       <aside aria-label="Concept Candidate 扫描记录" className="candidate-catalog">
         <header>
           <div>
-            <strong>AI 候选</strong>
-            <span>{loading ? "正在载入…" : `${scans.length} 次扫描`}</span>
+            <strong>自动发现</strong>
+            <span>{loading ? "正在载入…" : `${scans.length} 次知识分析`}</span>
           </div>
-          <button
-            className="primary-button"
-            onClick={() => {
-              setCreating(true);
-              setError("");
-              setNotice("");
-            }}
-            type="button"
-          >
-            发起扫描
-          </button>
+          <span className="candidate-live-mark">持续监听新增知识</span>
         </header>
 
         <div className="candidate-catalog-list">
           {scans.map((scan, index) => (
             <button
-              aria-pressed={!creating && selectedId === scan.id}
+              aria-pressed={selectedId === scan.id}
               className="candidate-catalog-entry"
-              data-selected={!creating && selectedId === scan.id}
+              data-selected={selectedId === scan.id}
               key={scan.id}
               onClick={() => selectScan(scan.id)}
               type="button"
             >
-              <span>AI{String(scans.length - index).padStart(3, "0")}</span>
+              <span>
+                {scan.origin === "automatic" ? "AUTO" : "AI"}
+                {String(scans.length - index).padStart(3, "0")}
+              </span>
               <strong>{scanTitle(scan)}</strong>
-              <small>{scan.inputs.length} 个冻结知识点 · {formatDate(scan.createdAt)}</small>
+              <small>
+                {scanInputSummary(scan)} · {formatDate(scan.createdAt)}
+              </small>
               <em data-status={scanDisplayStatus(scan)}>{scanStatusLabel(scan)}</em>
             </button>
           ))}
           {!loading && scans.length === 0 ? (
             <div className="candidate-catalog-empty">
               <strong>还没有 AI 候选</strong>
-              <p>选择 2–12 个知识点，让 AI 提炼一个可选定义。</p>
+              <p>新增知识正式生效后，系统会从全库召回关联知识并在这里给出候选。</p>
             </div>
           ) : null}
         </div>
@@ -166,18 +155,7 @@ export function ConceptCandidatesPanel({
           <p className="candidate-feedback notice" role="status">{notice}</p>
         ) : null}
 
-        {creating ? (
-          <CandidateScanBuilder
-            onCancel={() => setCreating(false)}
-            onCreated={(scan) => {
-              replaceScan(setScans, scan);
-              setSelectedId(scan.id);
-              setCreating(false);
-              setNotice("扫描已进入队列；AI 最多返回一个候选，也可能明确不给建议。");
-              onSelectScan(scan.id);
-            }}
-          />
-        ) : selected ? (
+        {selected ? (
           <CandidateScanDetail
             busy={busy}
             onAccepted={() => {
@@ -198,141 +176,12 @@ export function ConceptCandidatesPanel({
         ) : (
           <div className="candidate-stage-empty">
             <span aria-hidden="true">◇</span>
-            <strong>从一组明确的知识点开始</strong>
-            <p>AI 只提出候选；正式 Concept 仍由你确认。</p>
-            <button className="primary-button" onClick={() => setCreating(true)} type="button">
-              选择扫描范围
-            </button>
+            <strong>候选会自动来到这里</strong>
+            <p>仅保存的原文不会进入 Concept 关联；自动采用或人工确认后的知识会触发全局召回。</p>
           </div>
         )}
       </section>
     </div>
-  );
-}
-
-function CandidateScanBuilder({
-  onCancel,
-  onCreated,
-}: {
-  onCancel: () => void;
-  onCreated: (scan: ConceptCandidateScan) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [sources, setSources] = useState<ConceptSource[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    setLoading(true);
-    void listConceptSources(query, controller.signal)
-      .then(setSources)
-      .catch((caught: unknown) => {
-        if (!isAbortError(caught)) {
-          setError(messageFrom(caught, "知识点目录暂时无法载入。"));
-        }
-      })
-      .finally(() => setLoading(false));
-
-    return () => controller.abort();
-  }, [query]);
-
-  async function submit() {
-    if (selected.length < 2 || selected.length > 12) {
-      setError("请选择 2–12 个知识点作为本次扫描的固定范围。");
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-
-    try {
-      onCreated(await createConceptCandidateScan(selected));
-    } catch (caught) {
-      setError(messageFrom(caught, "扫描未能发起，请检查模型配置和知识点状态。"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form
-      aria-label="发起 Concept Candidate 扫描"
-      className="candidate-builder"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      <header>
-        <div>
-          <span>显式范围 · 单次建议</span>
-          <h2>选择这次要一起理解的知识点</h2>
-          <p>提交后会冻结标题、正文与证据。AI 最多提出一个候选，不会自动进入正式图册。</p>
-        </div>
-        <button className="secondary-button" onClick={onCancel} type="button">取消</button>
-      </header>
-
-      <label className="candidate-source-search">
-        <span className="visually-hidden">筛选扫描知识点</span>
-        <input
-          aria-label="筛选扫描知识点"
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="筛选标题、正文或来源"
-          type="search"
-          value={query}
-        />
-        <strong>{selected.length} / 12</strong>
-      </label>
-
-      <div className="candidate-source-list">
-        {sources.map((source) => {
-          const checked = selected.includes(source.id);
-          const disabled = !checked && selected.length >= 12;
-
-          return (
-            <label data-selected={checked} key={source.id}>
-              <input
-                aria-label={`扫描知识点：${source.title}`}
-                checked={checked}
-                disabled={disabled}
-                onChange={(event) => {
-                  const nextChecked = event.currentTarget.checked;
-
-                  setSelected((current) =>
-                    nextChecked
-                      ? [...current, source.id]
-                      : current.filter((id) => id !== source.id),
-                  );
-                }}
-                type="checkbox"
-              />
-              <span>
-                <strong>{source.title}</strong>
-                <small>{source.recordTitle}</small>
-              </span>
-              <p>{source.body}</p>
-            </label>
-          );
-        })}
-        {loading ? <p className="candidate-source-empty">正在检索知识点…</p> : null}
-        {!loading && sources.length === 0 ? (
-          <p className="candidate-source-empty">没有匹配的当前知识点。</p>
-        ) : null}
-      </div>
-
-      {error ? <p className="candidate-inline-error" role="alert">{error}</p> : null}
-
-      <footer>
-        <span>至少选择 2 个；选择范围越聚焦，候选越容易判断。</span>
-        <button className="primary-button" disabled={busy || selected.length < 2} type="submit">
-          {busy ? "正在冻结输入…" : "生成 AI 候选"}
-        </button>
-      </footer>
-    </form>
   );
 }
 
@@ -414,6 +263,7 @@ function CandidateScanDetail({
         <div>
           <div className="candidate-state-line">
             <span data-status={scanDisplayStatus(scan)}>{scanStatusLabel(scan)}</span>
+            <span>{scan.origin === "automatic" ? "全局自动召回" : "历史手动扫描"}</span>
             <span>第 {scan.attemptCount} 次尝试</span>
             <span>模型 {scan.model.name}</span>
           </div>
@@ -424,7 +274,7 @@ function CandidateScanDetail({
 
       {scan.stale ? (
         <p className="candidate-stale" role="status">
-          输入知识点已变化。这份建议仍可回看，但不能确认或重试；请重新选择当前知识点发起扫描。
+          输入知识点已变化。这份建议仍可回看，但不能确认或重试；后续知识正式生效时系统会再次自动发现。
         </p>
       ) : null}
 
@@ -441,7 +291,11 @@ function CandidateScanDetail({
       {scan.status === "failed" ? (
         <section className="candidate-failure">
           <strong>{scan.failure?.message ?? "扫描失败，模型没有返回可用结果。"}</strong>
-          <p>{scan.canRetry ? "可以按原输入快照重试一次。" : "本次扫描不能再次重试，请重新发起。"}</p>
+          <p>
+            {scan.canRetry
+              ? "可以按原输入快照重试一次。"
+              : "本次扫描不能再次重试；后续知识生效时系统会重新自动发现。"}
+          </p>
           {scan.canRetry ? (
             <button className="secondary-button" disabled={busy === scan.id} onClick={onRetry} type="button">
               {busy === scan.id ? "正在重试…" : "按原快照重试"}
@@ -452,7 +306,7 @@ function CandidateScanDetail({
 
       {scan.status === "succeeded" && !candidate ? (
         <section className="candidate-no-result">
-          <strong>{scan.outcome === "duplicate" ? "已有等价候选" : "这组输入没有形成可靠候选"}</strong>
+          <strong>{scan.outcome === "duplicate" ? "已有等价候选" : scan.inputs.length === 1 ? "没有召回到可组合知识" : "召回结果没有形成可靠候选"}</strong>
           <p>{scan.outcomeReason}</p>
         </section>
       ) : null}
@@ -496,8 +350,8 @@ function CandidateScanDetail({
           <section className="candidate-inputs">
             <header>
               <div>
-                <h3>冻结输入与证据</h3>
-                <p>可在本次固定范围内调整最终成员；AI 建议的成员已预选。</p>
+                <h3>新增知识与全局召回</h3>
+                <p>系统冻结本次新增知识和召回依据；你只需调整最终晋级成员。</p>
               </div>
               <span>{members.length} 个拟晋级成员</span>
             </header>
@@ -528,7 +382,13 @@ function CandidateScanDetail({
                         />
                         <span>K{String(index + 1).padStart(2, "0")}</span>
                       </label>
-                      {suggested ? <em>AI 建议成员</em> : <em>扫描范围</em>}
+                      {input.seed ? (
+                        <em>本次新增知识</em>
+                      ) : suggested ? (
+                        <em>AI 建议成员</em>
+                      ) : (
+                        <em>全局召回</em>
+                      )}
                     </header>
                     <h4>{input.title}</h4>
                     <p>{input.body}</p>
@@ -598,6 +458,16 @@ function scanTitle(scan: ConceptCandidateScan): string {
   }
 
   return scan.inputs.slice(0, 2).map((input) => input.title).join(" · ");
+}
+
+function scanInputSummary(scan: ConceptCandidateScan): string {
+  const seeds = scan.inputs.filter(({ seed }) => seed).length;
+
+  if (scan.origin === "manual") {
+    return `${scan.inputs.length} 个历史扫描知识点`;
+  }
+
+  return `${seeds} 个新增 · ${scan.inputs.length - seeds} 个召回`;
 }
 
 function scanDisplayStatus(scan: ConceptCandidateScan): string {

@@ -359,10 +359,6 @@ export async function buildApp(
   const pool = new Pool({ connectionString: options.databaseUrl });
   const searchSnapshots = new Map<string, SearchSnapshot>();
 
-  app.addHook("onClose", async () => {
-    await pool.end();
-  });
-
   const credentialSecret =
     options.credentialEncryptionKey ??
     process.env.MODEL_CONFIG_ENCRYPTION_KEY ??
@@ -391,6 +387,14 @@ export async function buildApp(
     testModelEndpoint:
       options.testModelEndpoint ?? testOpenAICompatibleEndpoint,
   });
+  registerConceptRoutes(app, { pool });
+  const conceptCandidateAutomation = registerConceptCandidateRoutes(app, {
+    pool,
+    credentialSecret,
+    generateConceptCandidate:
+      options.generateConceptCandidate ?? generateOpenAICompatibleConceptCandidate,
+    scheduleSemanticIndex,
+  });
   registerAiOrganizationRoutes(app, {
     pool,
     credentialSecret,
@@ -399,10 +403,12 @@ export async function buildApp(
     ...(options.onAiTaskSettled
       ? { onTaskSettled: options.onAiTaskSettled }
       : {}),
+    onKnowledgeActivated: conceptCandidateAutomation.scheduleForAnalysis,
     scheduleSemanticIndex,
   });
   registerDataTransferRoutes(app, { pool, scheduleSemanticIndex });
   registerSemanticSearchRoutes(app, {
+    onIndexRebuilt: conceptCandidateAutomation.schedulePending,
     pool,
     scheduler: semanticIndexScheduler,
   });
@@ -419,14 +425,6 @@ export async function buildApp(
     generateCoverage:
       options.generateCoverage ?? generateOpenAICompatibleCoverage,
   });
-  registerConceptRoutes(app, { pool });
-  registerConceptCandidateRoutes(app, {
-    pool,
-    credentialSecret,
-    generateConceptCandidate:
-      options.generateConceptCandidate ?? generateOpenAICompatibleConceptCandidate,
-  });
-
   app.post<{ Body: CreateRecordBody }>(
     "/api/v1/records",
     async (request, reply) => {
@@ -2206,6 +2204,11 @@ export async function buildApp(
       return searchSnapshotPage(snapshotId, snapshot, 0, limit);
     },
   );
+
+  app.addHook("onClose", async () => {
+    await conceptCandidateAutomation.settle();
+    await pool.end();
+  });
 
   return app;
 }

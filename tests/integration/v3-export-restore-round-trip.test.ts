@@ -24,24 +24,31 @@ const V3_TABLES = [
 describe("V3 Concept and Candidate export and restore", () => {
   let sourceApp: FastifyInstance;
   let currentTargetApp: FastifyInstance;
+  let format6TargetApp: FastifyInstance;
   let format5TargetApp: FastifyInstance;
   let format4TargetApp: FastifyInstance;
   let sourceDatabase: PreparedTestDatabase;
   let currentTargetDatabase: PreparedTestDatabase;
+  let format6TargetDatabase: PreparedTestDatabase;
   let format5TargetDatabase: PreparedTestDatabase;
   let format4TargetDatabase: PreparedTestDatabase;
   let sourcePool: Pool;
   let currentTargetPool: Pool;
+  let format6TargetPool: Pool;
   let format5TargetPool: Pool;
 
   beforeAll(async () => {
     sourceDatabase = prepareTestDatabase();
     currentTargetDatabase = prepareTestDatabase();
+    format6TargetDatabase = prepareTestDatabase();
     format5TargetDatabase = prepareTestDatabase();
     format4TargetDatabase = prepareTestDatabase();
     sourcePool = new Pool({ connectionString: sourceDatabase.databaseUrl });
     currentTargetPool = new Pool({
       connectionString: currentTargetDatabase.databaseUrl,
+    });
+    format6TargetPool = new Pool({
+      connectionString: format6TargetDatabase.databaseUrl,
     });
     format5TargetPool = new Pool({
       connectionString: format5TargetDatabase.databaseUrl,
@@ -49,6 +56,9 @@ describe("V3 Concept and Candidate export and restore", () => {
     sourceApp = await buildApp({ databaseUrl: sourceDatabase.databaseUrl });
     currentTargetApp = await buildApp({
       databaseUrl: currentTargetDatabase.databaseUrl,
+    });
+    format6TargetApp = await buildApp({
+      databaseUrl: format6TargetDatabase.databaseUrl,
     });
     format5TargetApp = await buildApp({
       databaseUrl: format5TargetDatabase.databaseUrl,
@@ -59,6 +69,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     await Promise.all([
       sourceApp.ready(),
       currentTargetApp.ready(),
+      format6TargetApp.ready(),
       format5TargetApp.ready(),
       format4TargetApp.ready(),
     ]);
@@ -68,21 +79,24 @@ describe("V3 Concept and Candidate export and restore", () => {
     await Promise.all([
       sourceApp?.close(),
       currentTargetApp?.close(),
+      format6TargetApp?.close(),
       format5TargetApp?.close(),
       format4TargetApp?.close(),
     ]);
     await Promise.all([
       sourcePool?.end(),
       currentTargetPool?.end(),
+      format6TargetPool?.end(),
       format5TargetPool?.end(),
     ]);
     sourceDatabase?.dispose();
     currentTargetDatabase?.dispose();
+    format6TargetDatabase?.dispose();
     format5TargetDatabase?.dispose();
     format4TargetDatabase?.dispose();
   }, 30_000);
 
-  it("round-trips Concept Candidate decisions in format 6 and adapts format 4 to empty V3 collections", async () => {
+  it("round-trips automatic Candidate provenance in format 7 and restores formats 4–6", async () => {
     const ids = await seedConceptDomain(sourcePool);
     const before = await snapshotTables(sourcePool, [...V3_TABLES]);
     const requested = await sourceApp.inject({
@@ -96,7 +110,7 @@ describe("V3 Concept and Candidate export and restore", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
-      manifest: { formatVersion: 6, recordCount: 2 },
+      manifest: { formatVersion: 7, recordCount: 2 },
     });
 
     const downloaded = await sourceApp.inject({
@@ -105,8 +119,8 @@ describe("V3 Concept and Candidate export and restore", () => {
     });
 
     expect(downloaded.statusCode).toBe(200);
-    const format5Archive = downloaded.rawPayload;
-    const domainEntry = readStoredZip(format5Archive).get("domain.json");
+    const format7Archive = downloaded.rawPayload;
+    const domainEntry = readStoredZip(format7Archive).get("domain.json");
 
     if (!domainEntry) {
       throw new Error("domain.json is missing");
@@ -118,7 +132,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     >;
 
     expect(domain).toMatchObject({
-      formatVersion: 6,
+      formatVersion: 7,
       concepts: [expect.objectContaining({ id: ids.conceptId })],
       conceptRevisions: expect.arrayContaining([
         expect.objectContaining({ id: ids.firstConceptRevisionId }),
@@ -139,6 +153,7 @@ describe("V3 Concept and Candidate export and restore", () => {
           id: ids.candidateScanId,
           status: "SUCCEEDED",
           outcome: "CANDIDATE",
+          trigger_analysis_revision_id: ids.firstAnalysisId,
         }),
       ],
       conceptCandidateInputs: expect.arrayContaining([
@@ -158,11 +173,11 @@ describe("V3 Concept and Candidate export and restore", () => {
       ]),
     });
 
-    const currentInspection = await inspect(currentTargetApp, format5Archive);
+    const currentInspection = await inspect(currentTargetApp, format7Archive);
 
     expect(currentInspection).toMatchObject({
       canRestore: true,
-      formatVersion: 6,
+      formatVersion: 7,
       recordCount: 2,
     });
     await restore(currentTargetApp, currentInspection.id);
@@ -192,7 +207,25 @@ describe("V3 Concept and Candidate export and restore", () => {
       },
     });
 
-    const legacyFormat5Archive = downgradeToFormat5(format5Archive);
+    const legacyFormat6Archive = downgradeToFormat6(format7Archive);
+    const format6Inspection = await inspect(
+      format6TargetApp,
+      legacyFormat6Archive,
+    );
+
+    expect(format6Inspection).toMatchObject({
+      canRestore: true,
+      formatVersion: 6,
+      recordCount: 2,
+    });
+    await restore(format6TargetApp, format6Inspection.id);
+    expect(
+      await format6TargetPool.query(
+        "SELECT trigger_analysis_revision_id FROM concept_candidate_scans",
+      ),
+    ).toMatchObject({ rows: [{ trigger_analysis_revision_id: null }] });
+
+    const legacyFormat5Archive = downgradeToFormat5(format7Archive);
     const format5Inspection = await inspect(
       format5TargetApp,
       legacyFormat5Archive,
@@ -219,7 +252,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     ).toHaveLength(1);
     expect(format5Candidates.json()).toEqual({ items: [] });
 
-    const format4Archive = downgradeToFormat4(format5Archive);
+    const format4Archive = downgradeToFormat4(format7Archive);
     const format4Inspection = await inspect(format4TargetApp, format4Archive);
 
     expect(format4Inspection).toMatchObject({
@@ -388,10 +421,11 @@ async function seedConceptDomain(pool: Pool) {
     await client.query(
       `INSERT INTO concept_candidate_scans
          (id, input_fingerprint, input_count, model_configuration_version,
-          text_model, status, outcome, attempt_count, started_at, completed_at)
-       VALUES ($1, $2, 2, 7, 'v3-candidate-model', 'SUCCEEDED',
+          text_model, trigger_analysis_revision_id, status, outcome,
+          attempt_count, started_at, completed_at)
+       VALUES ($1, $2, 2, 7, 'v3-candidate-model', $3, 'SUCCEEDED',
                'CANDIDATE', 1, now(), now())`,
-      [ids.candidateScanId, "a".repeat(64)],
+      [ids.candidateScanId, "a".repeat(64), ids.firstAnalysisId],
     );
     await client.query(
       `INSERT INTO concept_candidate_inputs
@@ -477,8 +511,38 @@ async function seedConceptDomain(pool: Pool) {
   }
 }
 
-function downgradeToFormat5(archive: Buffer): Buffer {
+function downgradeToFormat6(archive: Buffer): Buffer {
   const entries = readStoredZip(archive);
+  const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8")) as {
+    formatVersion: number;
+  };
+  const domain = JSON.parse(entries.get("domain.json")!.toString("utf8")) as {
+    conceptCandidateScans: Array<Record<string, unknown>>;
+    formatVersion: number;
+  };
+
+  manifest.formatVersion = 6;
+  domain.formatVersion = 6;
+
+  for (const scan of domain.conceptCandidateScans) {
+    delete scan.trigger_analysis_revision_id;
+  }
+
+  return createZip(
+    [...entries].map(([name, data]) => ({
+      name,
+      data:
+        name === "manifest.json"
+          ? Buffer.from(JSON.stringify(manifest), "utf8")
+          : name === "domain.json"
+            ? Buffer.from(JSON.stringify(domain), "utf8")
+            : data,
+    })),
+  );
+}
+
+function downgradeToFormat5(archive: Buffer): Buffer {
+  const entries = readStoredZip(downgradeToFormat6(archive));
   const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8")) as {
     formatVersion: number;
   };

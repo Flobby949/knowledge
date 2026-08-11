@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 6,
+  formatVersion: 7,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -324,6 +324,7 @@ interface ConceptCandidateScanSnapshotRow extends DomainRow {
   input_count: number;
   model_configuration_version: number;
   text_model: string;
+  trigger_analysis_revision_id: string | null;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
   outcome: "CANDIDATE" | "NO_SUGGESTION" | "DUPLICATE" | null;
   outcome_reason: string | null;
@@ -378,7 +379,7 @@ interface ConceptCandidateDecisionMemberSnapshotRow extends DomainRow {
 }
 
 interface DomainSnapshot {
-  formatVersion: 6;
+  formatVersion: 7;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
@@ -414,7 +415,7 @@ interface DomainSnapshot {
 
 interface ParsedSnapshot {
   snapshot: DomainSnapshot;
-  sourceFormatVersion: 4 | 5 | 6;
+  sourceFormatVersion: 4 | 5 | 6 | 7;
 }
 
 interface ExportRow {
@@ -834,7 +835,7 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
         ORDER BY member.candidate_id, member.position`,
     );
     const snapshot: DomainSnapshot = {
-      formatVersion: 6,
+      formatVersion: 7,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
@@ -899,7 +900,8 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
     !isDomainRow(publicManifest) ||
     (publicManifest.formatVersion !== 4 &&
       publicManifest.formatVersion !== 5 &&
-      publicManifest.formatVersion !== 6) ||
+      publicManifest.formatVersion !== 6 &&
+      publicManifest.formatVersion !== 7) ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -953,7 +955,8 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
   if (
     value.formatVersion !== 4 &&
     value.formatVersion !== 5 &&
-    value.formatVersion !== 6
+    value.formatVersion !== 6 &&
+    value.formatVersion !== 7
   ) {
     throw new Error("domain snapshot version is unsupported");
   }
@@ -1010,7 +1013,7 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     value.formatVersion === 4
       ? {
           ...value,
-          formatVersion: 6,
+          formatVersion: 7,
           concepts: [],
           conceptRevisions: [],
           conceptMemberships: [],
@@ -1024,14 +1027,26 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
       : value.formatVersion === 5
         ? {
             ...value,
-            formatVersion: 6,
+            formatVersion: 7,
             conceptCandidateScans: [],
             conceptCandidateInputs: [],
             conceptCandidates: [],
             conceptCandidateMembers: [],
             conceptCandidateDecisionMembers: [],
           }
-        : value;
+        : value.formatVersion === 6
+          ? {
+              ...value,
+              formatVersion: 7,
+              conceptCandidateScans: requireRows(
+                value.conceptCandidateScans,
+                "conceptCandidateScans",
+              ).map((row) => ({
+                ...row,
+                trigger_analysis_revision_id: null,
+              })),
+            }
+          : value;
 
   const records = requireRows(normalizedValue.records, "records");
   const fragmentRevisions = requireRows(
@@ -1876,6 +1891,7 @@ function validateConceptCandidateScanRow(row: DomainRow): void {
     "input_count",
     "model_configuration_version",
     "text_model",
+    "trigger_analysis_revision_id",
     "status",
     "outcome",
     "outcome_reason",
@@ -1888,9 +1904,14 @@ function validateConceptCandidateScanRow(row: DomainRow): void {
   ]);
   requireUuid(row, "id");
   requireFingerprint(row, "input_fingerprint");
-  requireInteger(row, "input_count", 2, 12);
+  requireInteger(row, "input_count", 1, 12);
   requireInteger(row, "model_configuration_version", 1);
   requireNonEmptyString(row, "text_model");
+  requireNullableUuid(row, "trigger_analysis_revision_id");
+
+  if (row.trigger_analysis_revision_id === null && row.input_count === 1) {
+    throw new Error("manual concept candidate scan input count is invalid");
+  }
   requireEnum(row, "status", ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]);
   if (row.outcome !== null) {
     requireEnum(row, "outcome", ["CANDIDATE", "NO_SUGGESTION", "DUPLICATE"]);
@@ -2275,6 +2296,13 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     "concept candidate scan id",
   );
   assertUnique(
+    snapshot.conceptCandidateScans.filter(
+      (row) => row.trigger_analysis_revision_id !== null,
+    ),
+    (row) => row.trigger_analysis_revision_id ?? "",
+    "concept candidate trigger analysis",
+  );
+  assertUnique(
     snapshot.conceptCandidateInputs,
     (row) => row.id,
     "concept candidate input id",
@@ -2482,10 +2510,22 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     const candidates = snapshot.conceptCandidates.filter(
       (candidate) => candidate.scan_id === scan.id,
     );
+    const triggerAnalysis = scan.trigger_analysis_revision_id
+      ? analyses.get(scan.trigger_analysis_revision_id)
+      : undefined;
+    const includesTriggerPoint = scan.trigger_analysis_revision_id
+      ? inputs.some(
+          (input) =>
+            points.get(input.knowledge_point_id)?.analysis_revision_id ===
+            scan.trigger_analysis_revision_id,
+        )
+      : true;
 
     if (
       inputs.length !== scan.input_count ||
       inputs.some((input, index) => input.position !== index + 1) ||
+      (scan.trigger_analysis_revision_id !== null && !triggerAnalysis) ||
+      !includesTriggerPoint ||
       (scan.outcome === "CANDIDATE" && candidates.length !== 1) ||
       (scan.outcome !== "CANDIDATE" && candidates.length !== 0)
     ) {
@@ -3271,6 +3311,7 @@ async function restoreSnapshot(
     "input_count",
     "model_configuration_version",
     "text_model",
+    "trigger_analysis_revision_id",
     "status",
     "outcome",
     "outcome_reason",
