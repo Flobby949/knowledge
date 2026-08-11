@@ -215,6 +215,15 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
     "page",
   );
   await expect(main).toContainText("不删除原文、知识点或历史版本");
+  await expect(main.getByText("人工治理工作台", { exact: true })).toBeVisible();
+  await expect(main.getByRole("heading", { name: "知识发现" })).toBeVisible();
+  const discoveryHeading = main.locator(".insights-heading");
+  const discoveryHeadingHeight = await discoveryHeading.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  const discoveryTabHeight = await main
+    .getByRole("tab", { name: "重复建议" })
+    .evaluate((element) => element.getBoundingClientRect().height);
 
   const duplicateCard = main.locator(".review-card");
 
@@ -227,6 +236,16 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
   ).toBeVisible();
 
   await main.getByRole("tab", { name: "关系审查" }).click();
+  expect(
+    await discoveryHeading.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    ),
+  ).toBe(discoveryHeadingHeight);
+  expect(
+    await main
+      .getByRole("tab", { name: "关系审查" })
+      .evaluate((element) => element.getBoundingClientRect().height),
+  ).toBe(discoveryTabHeight);
   const relationCard = main.locator(".relation-card");
 
   await expect(relationCard).toContainText("只建立连接，不改写内容");
@@ -312,6 +331,16 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
   await expect(relationHistory).toContainText("第 2 / 2 页");
 
   await main.getByRole("tab", { name: "覆盖分析" }).click();
+  expect(
+    await discoveryHeading.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    ),
+  ).toBe(discoveryHeadingHeight);
+  expect(
+    await main
+      .getByRole("tab", { name: "覆盖分析" })
+      .evaluate((element) => element.getBoundingClientRect().height),
+  ).toBe(discoveryTabHeight);
   await main.getByRole("button", { name: "新建覆盖分析" }).click();
   await main.getByLabel("分析主题").fill("缓存一致性");
   await main.getByRole("checkbox").first().check();

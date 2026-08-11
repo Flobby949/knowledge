@@ -57,7 +57,6 @@ export function InsightsPage() {
   const [tab, setTab] = useState<InsightTab>("duplicates");
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const newRecordButton = useRef<HTMLButtonElement>(null);
-  const reviewingRelations = tab === "relations";
 
   return (
     <div className="insights-shell">
@@ -66,19 +65,14 @@ export function InsightsPage() {
         onCreate={() => setNewRecordOpen(true)}
       />
 
-      <main
-        aria-label="知识发现"
-        className={`insights-main${reviewingRelations ? " is-relation-review" : ""}`}
-      >
+      <main aria-label="知识发现" className="insights-main">
         <header className="insights-heading">
           <div>
-            <p>{reviewingRelations ? "人工确认" : "V2 · 人工治理"}</p>
-            <h1>{reviewingRelations ? "把散落的知识连起来" : "知识发现"}</h1>
+            <p>人工治理工作台</p>
+            <h1>知识发现</h1>
           </div>
           <p className="insights-thesis">
-            {reviewingRelations
-              ? "一次只判断一条。AI 提议，你来决定这段连接是否成立。"
-              : "AI 负责召回和解释，你负责最后决定。这里的操作只新增可撤销的治理关系，不删除原文、知识点或历史版本。"}
+            AI 负责发现线索和解释依据，你负责最终判断。所有治理操作都可回看、可撤销，不删除原文、知识点或历史版本。
           </p>
         </header>
 

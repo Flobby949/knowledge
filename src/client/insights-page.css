@@ -354,23 +354,6 @@
   padding-top: 8px;
 }
 
-.insights-main.is-relation-review .insights-heading {
-  min-height: 70px;
-  padding-bottom: 14px;
-}
-
-.insights-main.is-relation-review .insights-heading h1 {
-  font-size: 28px;
-}
-
-.insights-main.is-relation-review .insight-tabs {
-  margin-top: 14px;
-}
-
-.insights-main.is-relation-review .insight-tabs button {
-  min-height: 42px;
-}
-
 .relation-workspace-toolbar {
   display: flex;
   align-items: center;
