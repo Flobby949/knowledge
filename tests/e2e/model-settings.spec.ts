@@ -40,12 +40,12 @@ test.describe("model settings initial workspace", () => {
       navigation.getByRole("link", { name: "设置", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expectBox(navigation, {
-      x: 0,
+      x: 76,
       y: 0,
-      width: 1_600,
-      height: 60,
+      width: 1_524,
+      height: 72,
     });
-    await expectBox(main, { x: 32, width: 1_536 });
+    await expectBox(main, { x: 116, width: 1_444 });
 
     const modelAnchor = anchors.getByRole("link", {
       name: "AI 模型",

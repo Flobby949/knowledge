@@ -75,15 +75,15 @@ test.describe("automatically organized record detail", () => {
     const articles = knowledgePane.getByRole("article");
 
     await expectBox(navigation, {
-      x: 0,
+      x: 76,
       y: 0,
-      width: 1_600,
-      height: 60,
+      width: 1_524,
+      height: 72,
     });
-    await expectBox(toolbar, { x: 0, y: 60, width: 1_600, height: 64 });
-    await expectBox(detail, { x: 0, y: 124, width: 1_600 });
+    await expectBox(toolbar, { x: 76, y: 72, width: 1_524, height: 64 });
+    await expectBox(detail, { x: 76, y: 136, width: 1_524 });
     await expectHorizontalSplit(recordPane, knowledgePane, {
-      leftRatio: 0.58,
+      leftRatio: 0.6,
       gap: 0,
       ratioTolerance: 0.02,
     });
@@ -134,6 +134,7 @@ test.describe("automatically organized record detail", () => {
     await expect(rawText.locator("mark")).toHaveText(
       expectedPoints[0]!.evidence,
     );
+    await expect(rawText.locator("mark")).toHaveAttribute("data-marker", "1");
     expect(await rawText.textContent()).toBe(sourceText);
 
     const secondSelection = articles.nth(1).getByRole("button", {
@@ -148,6 +149,7 @@ test.describe("automatically organized record detail", () => {
     await expect(rawText.locator("mark")).toHaveText(
       expectedPoints[1]!.evidence,
     );
+    await expect(rawText.locator("mark")).toHaveAttribute("data-marker", "2");
     expect(await rawText.textContent()).toBe(sourceText);
   });
 });

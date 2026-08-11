@@ -66,26 +66,58 @@ test("Home / 首页气泡标签场 · 1600×1000 基线与 1280×800 几何", as
   ).toBe(1_280);
 });
 
-test("Records / 记录库 · 1600×1000 基线与 1280×800 真瀑布流", async ({
+test("Records / 记录库 · 1600×1000 基线与 1280×800 错落摘录流", async ({
   page,
 }) => {
   await page.goto(`${appBaseUrl}/records`);
 
   const navigation = page.getByRole("navigation", { name: "主导航" });
+  const heading = page.locator(".records-library-heading");
   const toolbar = page.getByRole("search", { name: "记录筛选" });
-  const cards = page.getByRole("region", { name: "记录列表" })
-    .getByRole("article");
+  const library = page.getByRole("region", { name: "记录列表" });
+  const cards = library.getByRole("article");
+  const leadCard = library.locator(".record-card.is-lead");
+  const flowCards = library.locator(".record-card:not(.is-lead)");
 
   await expect(cards).toHaveCount(12);
-  await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-  await expectBox(toolbar, { x: 32, y: 92, width: 1_536, height: 44 });
-  await expectMasonryColumns(cards, {
-    columnLefts: [32, 422, 812, 1_202],
-    columnWidth: 366,
-    top: 160,
-    verticalGap: 16,
+  const organizedState = library.locator(".record-state.is-organized");
+  const savedOnlyStates = library.locator(".record-state.is-saved-only");
+
+  await expect(organizedState).toHaveCount(1);
+  await expect(organizedState.locator(".record-state-mark")).toHaveText("✓");
+  await expect(savedOnlyStates).toHaveCount(11);
+  await expect(savedOnlyStates.first().locator(".record-state-mark"))
+    .toHaveText("•");
+  await expect(organizedState).toHaveCSS(
+    "color",
+    theme === "scifi" ? "rgb(6, 118, 71)" : "rgb(63, 127, 93)",
+  );
+  await expect(savedOnlyStates.first()).toHaveCSS(
+    "color",
+    theme === "scifi" ? "rgb(92, 107, 135)" : "rgb(125, 99, 113)",
+  );
+  await expect(savedOnlyStates.first().locator(".record-state-mark"))
+    .toHaveCSS(
+      "background-color",
+      theme === "scifi" ? "rgb(248, 250, 255)" : "rgb(255, 253, 253)",
+    );
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(heading, { x: 108, y: 90, width: 1_460, height: 106 });
+  await expectBox(toolbar, { x: 108, y: 198, width: 1_460, height: 74 });
+  await expectBox(leadCard, { x: 108, y: 294, width: 1_460 });
+  const leadBox = await leadCard.boundingBox();
+
+  expect(leadBox).not.toBeNull();
+  await expectMasonryColumns(flowCards, {
+    columnLefts: [108, 606, 1_104],
+    columnWidth: 464,
+    top: (leadBox?.y ?? 0) + (leadBox?.height ?? 0) + 38,
+    verticalGap: 26,
     minimumDistinctHeights: 3,
   });
+  expect(
+    await library.evaluate((element) => getComputedStyle(element).columnRuleStyle),
+  ).toBe("none");
   await expect(page).toHaveScreenshot(snapshotName(theme, "records"), {
     animations: "disabled",
     caret: "hide",
@@ -94,13 +126,18 @@ test("Records / 记录库 · 1600×1000 基线与 1280×800 真瀑布流", async
   });
 
   await page.setViewportSize({ width: 1_280, height: 800 });
-  await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-  await expectBox(toolbar, { x: 24, y: 92, width: 1_232, height: 44 });
-  await expectMasonryColumns(cards, {
-    columnLefts: [24, 338, 652, 966],
-    columnWidth: 290,
-    top: 160,
-    verticalGap: 16,
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(heading, { x: 100, y: 90, width: 1_156, height: 106 });
+  await expectBox(toolbar, { x: 100, y: 198, width: 1_156, height: 74 });
+  await expectBox(leadCard, { x: 100, y: 294, width: 1_156 });
+  const narrowLeadBox = await leadCard.boundingBox();
+
+  expect(narrowLeadBox).not.toBeNull();
+  await expectMasonryColumns(flowCards, {
+    columnLefts: [100, 496.67, 893.33],
+    columnWidth: 362.67,
+    top: (narrowLeadBox?.y ?? 0) + (narrowLeadBox?.height ?? 0) + 38,
+    verticalGap: 26,
     minimumDistinctHeights: 3,
   });
 });
@@ -164,7 +201,7 @@ test("New modal / 新建记录 · 1600×1000 基线与 1280×800 的 64/36 弹�
   });
 });
 
-test("Detail / 记录详情 · 1600×1000 基线与 1280×800 的 58/42 双滚动区", async ({
+test("Detail / 记录详情 · 1600×1000 基线与 1280×800 的 60/40 双滚动区", async ({
   page,
 }) => {
   await page.goto(
@@ -185,11 +222,11 @@ test("Detail / 记录详情 · 1600×1000 基线与 1280×800 的 58/42 双滚�
   await firstPoint.click();
   await expect(sourcePane.getByLabel("完整原文").locator("mark"))
     .toHaveText("CDC 通过读取数据库事务日志捕获增量变更，并以事件驱动方式实时推送。");
-  await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-  await expectBox(toolbar, { x: 0, y: 60, width: 1_600, height: 64 });
-  await expectBox(main, { x: 0, y: 124, width: 1_600, height: 876 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(toolbar, { x: 76, y: 72, width: 1_524, height: 64 });
+  await expectBox(main, { x: 76, y: 136, width: 1_524, height: 864 });
   await expectHorizontalSplit(sourcePane, pointsPane, {
-    leftRatio: 0.58,
+    leftRatio: 0.6,
     gap: 0,
     ratioTolerance: 0.005,
     pixelTolerance: 1,
@@ -202,18 +239,18 @@ test("Detail / 记录详情 · 1600×1000 基线与 1280×800 的 58/42 双滚�
   });
 
   await page.setViewportSize({ width: 1_280, height: 800 });
-  await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-  await expectBox(toolbar, { x: 0, y: 60, width: 1_280, height: 64 });
-  await expectBox(main, { x: 0, y: 124, width: 1_280, height: 676 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(toolbar, { x: 76, y: 72, width: 1_204, height: 64 });
+  await expectBox(main, { x: 76, y: 136, width: 1_204, height: 664 });
   await expectHorizontalSplit(sourcePane, pointsPane, {
-    leftRatio: 0.58,
+    leftRatio: 0.6,
     gap: 0,
     ratioTolerance: 0.005,
     pixelTolerance: 1,
   });
 });
 
-test("Review / 待审查 · 1600×1000 基线与 1280×800 的队列、58/42 工作台及流转栏", async ({
+test("Review / 待审查 · 1600×1000 基线与 1280×800 的队列、60/40 工作台及流转栏", async ({
   page,
 }) => {
   await page.goto(`${appBaseUrl}/review`);
@@ -232,16 +269,16 @@ test("Review / 待审查 · 1600×1000 基线与 1280×800 的队列、58/42 工
     .click();
   await expect(sourcePane.getByLabel("完整原文").locator("mark"))
     .toHaveText("Redis CDC 通过监听写操作日志捕获数据变更事件。");
-  await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-  await expectBox(queue, { x: 30, y: 90, width: 1_540, height: 72 });
-  await expectBox(workspace, { x: 30, y: 183, width: 1_540, height: 717 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(queue, { x: 76, y: 72, width: 1_524, height: 64 });
+  await expectBox(workspace, { x: 76, y: 136, width: 1_524, height: 794 });
   await expectHorizontalSplit(sourcePane, pointsPane, {
-    leftRatio: 0.58,
-    gap: 20,
+    leftRatio: 0.6,
+    gap: 0,
     ratioTolerance: 0.01,
     pixelTolerance: 2,
   });
-  await expectBox(flow, { x: 30, y: 919, width: 1_540, height: 68 });
+  await expectBox(flow, { x: 76, y: 930, width: 1_524, height: 70 });
   await expect(page).toHaveScreenshot(snapshotName(theme, "review"), {
     animations: "disabled",
     caret: "hide",
@@ -250,16 +287,16 @@ test("Review / 待审查 · 1600×1000 基线与 1280×800 的队列、58/42 工
   });
 
   await page.setViewportSize({ width: 1_280, height: 800 });
-  await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-  await expectBox(queue, { x: 30, y: 90, width: 1_220, height: 72 });
-  await expectBox(workspace, { x: 30, y: 183, width: 1_220, height: 517 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(queue, { x: 76, y: 72, width: 1_204, height: 64 });
+  await expectBox(workspace, { x: 76, y: 136, width: 1_204, height: 594 });
   await expectHorizontalSplit(sourcePane, pointsPane, {
-    leftRatio: 0.58,
-    gap: 20,
+    leftRatio: 0.6,
+    gap: 0,
     ratioTolerance: 0.01,
     pixelTolerance: 2,
   });
-  await expectBox(flow, { x: 30, y: 719, width: 1_220, height: 68 });
+  await expectBox(flow, { x: 76, y: 730, width: 1_204, height: 70 });
 });
 
 test("Search / 搜索 · 1600×1000 基线与 1280×800 的 480px 推挤抽屉", async ({
@@ -328,9 +365,9 @@ test("Search / 搜索 · 1600×1000 基线与 1280×800 的 480px 推挤抽屉",
   await expect(drawer.getByRole("link", { name: "打开完整详情" }))
     .toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-  await expectBox(stage, { x: 0, y: 60, width: 1_120, height: 940 });
-  await expectBox(drawer, { x: 1_120, y: 60, width: 480, height: 940 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(stage, { x: 76, y: 72, width: 1_044, height: 928 });
+  await expectBox(drawer, { x: 1_120, y: 72, width: 480, height: 928 });
   await expect(page).toHaveScreenshot(snapshotName(theme, "search-drawer"), {
     animations: "disabled",
     caret: "hide",
@@ -339,9 +376,9 @@ test("Search / 搜索 · 1600×1000 基线与 1280×800 的 480px 推挤抽屉",
   });
 
   await page.setViewportSize({ width: 1_280, height: 800 });
-  await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-  await expectBox(stage, { x: 0, y: 60, width: 800, height: 740 });
-  await expectBox(drawer, { x: 800, y: 60, width: 480, height: 740 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(stage, { x: 76, y: 72, width: 724, height: 728 });
+  await expectBox(drawer, { x: 800, y: 72, width: 480, height: 728 });
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBe(1_280);
@@ -374,12 +411,12 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
   await expect(drawer.getByRole("list", { name: "关联记录" })
     .getByRole("listitem")).toHaveCount(2);
   await page.waitForTimeout(220);
-  await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-  await expectBox(main, { x: 0, y: 60, width: 1_120, height: 940 });
-  await expectBox(drawer, { x: 1_120, y: 60, width: 480, height: 940 });
-  await expectBox(cards.first(), { x: 32, width: 341.33, height: 142 }, 3);
-  await expectBox(cards.nth(1), { x: 389.33, width: 341.33, height: 142 }, 3);
-  await expectBox(cards.nth(2), { x: 746.67, width: 341.33, height: 142 }, 3);
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(main, { x: 76, y: 72, width: 1_044, height: 928 });
+  await expectBox(drawer, { x: 1_120, y: 72, width: 480, height: 928 });
+  await expectBox(cards.first(), { x: 111, width: 325, height: 128 }, 3);
+  await expectBox(cards.nth(1), { x: 436, width: 325, height: 128 }, 3);
+  await expectBox(cards.nth(2), { x: 761, width: 325, height: 128 }, 3);
   await expect(page).toHaveScreenshot(snapshotName(theme, "tags-drawer"), {
     animations: "disabled",
     caret: "hide",
@@ -389,12 +426,12 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
 
   await page.setViewportSize({ width: 1_280, height: 800 });
   await page.waitForTimeout(220);
-  await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-  await expectBox(main, { x: 0, y: 60, width: 800, height: 740 });
-  await expectBox(drawer, { x: 800, y: 60, width: 480, height: 740 });
-  await expectBox(cards.first(), { x: 24, width: 368, height: 142 }, 3);
-  await expectBox(cards.nth(1), { x: 408, width: 368, height: 142 }, 3);
-  await expectBox(cards.nth(2), { x: 24, width: 368, height: 142 }, 3);
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(main, { x: 76, y: 72, width: 724, height: 728 });
+  await expectBox(drawer, { x: 800, y: 72, width: 480, height: 728 });
+  await expectBox(cards.first(), { x: 111, width: 218.33, height: 128 }, 3);
+  await expectBox(cards.nth(1), { x: 329.33, width: 218.33, height: 128 }, 3);
+  await expectBox(cards.nth(2), { x: 547.67, width: 218.33, height: 128 }, 3);
 });
 
 test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制台", async ({
@@ -440,10 +477,10 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
     .toBeEnabled();
   await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect(page.getByRole("tablist")).toHaveCount(0);
-  await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-  await expectBox(main, { x: 32, y: 60, width: 1_536 });
-  await expectBox(preference, { x: 32, width: 1_536 });
-  await expectBox(analysisPrompt, { x: 32, width: 1_536 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(main, { x: 116, y: 72, width: 1_444 });
+  await expectBox(preference, { x: 116, width: 1_444 });
+  await expectBox(analysisPrompt, { x: 116, width: 1_444 });
   await expectHorizontalSplit(
     current.getByRole("group", { name: "文本推理模型" }),
     current.getByRole("group", { name: "嵌入模型" }),
@@ -473,10 +510,10 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
   });
 
   await page.setViewportSize({ width: 1_280, height: 800 });
-  await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-  await expectBox(main, { x: 24, y: 60, width: 1_232 });
-  await expectBox(preference, { x: 24, width: 1_232 });
-  await expectBox(analysisPrompt, { x: 24, width: 1_232 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(main, { x: 116, y: 72, width: 1_124 });
+  await expectBox(preference, { x: 116, width: 1_124 });
+  await expectBox(analysisPrompt, { x: 116, width: 1_124 });
   await expectHorizontalSplit(
     current.getByRole("group", { name: "文本推理模型" }),
     current.getByRole("group", { name: "嵌入模型" }),

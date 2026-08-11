@@ -64,7 +64,7 @@ test.describe("keyword search and record detail drawer", () => {
     const matchedText = drawer.getByLabel("原文匹配片段", { exact: true });
 
     await expect(drawer).toBeVisible();
-    await expectBox(resultStage, { x: 0, width: 1_120 }, 8);
+    await expectBox(resultStage, { x: 76, width: 1_044 }, 8);
     await expectBox(drawer, { x: 1_120, width: 480 }, 8);
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("alertdialog")).toHaveCount(0);

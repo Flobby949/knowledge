@@ -407,7 +407,23 @@ export function RecordsPage() {
       />
 
       <main className="records-main">
-        <h1 className="visually-hidden">记录库</h1>
+        <header className="records-library-heading">
+          <div className="records-library-title">
+            <span aria-hidden="true" className="records-library-orbit">
+              <span />
+            </span>
+            <div>
+              <p>原文与知识的入口</p>
+              <h1>记录库</h1>
+            </div>
+          </div>
+          <p className="records-library-thesis">
+            从每条原文出发，继续阅读它的整理状态、知识点与历史。
+          </p>
+          <p aria-live="polite" className="records-library-count">
+            {initialLoading ? "正在载入" : `当前已载入 ${records.length} 条`}
+          </p>
+        </header>
 
         <form
           aria-label="记录筛选"
@@ -616,6 +632,13 @@ export function RecordsPage() {
         >
           {records.map((record, index) => (
             <RecordArchiveCard
+              leadLabel={
+                index === 0
+                  ? sort === "updated_desc"
+                    ? "最近更新"
+                    : "最早更新"
+                  : null
+              }
               key={record.id}
               index={records.length - index}
               onOpen={(viewportTop) =>
@@ -735,6 +758,7 @@ export function AppNavigation({
   const location = useLocation();
   const navigate = useNavigate();
   const darkNavigation = theme === "scifi" && location.pathname === "/";
+  const workspaceNavigation = location.pathname !== "/";
   const currentQuery = new URLSearchParams(location.search).get("q") ?? "";
   const [query, setQuery] = useState(currentQuery);
   const [tags, setTags] = useState<TagFieldItem[]>([]);
@@ -781,10 +805,10 @@ export function AppNavigation({
   }
 
   return (
-    <header className="app-header">
+    <header className={`app-header ${workspaceNavigation ? "is-workspace" : "is-home"}`}>
       <nav
         aria-label="主导航"
-        className={`app-navigation ${darkNavigation ? "dark" : "light"}`}
+        className={`app-navigation ${darkNavigation ? "dark" : "light"} ${workspaceNavigation ? "workspace-navigation" : "home-navigation"}`}
         data-testid="app-nav"
       >
         <div className="nav-primary">
@@ -792,11 +816,26 @@ export function AppNavigation({
             <span aria-hidden="true" className="brand-orbit" />
           </Link>
           <span aria-hidden="true" className="nav-divider" />
-          <Link aria-current={location.pathname === "/" ? "page" : undefined} className={location.pathname === "/" ? "active" : undefined} to="/">首页</Link>
-          <Link aria-current={location.pathname.startsWith("/records") ? "page" : undefined} className={location.pathname.startsWith("/records") ? "active" : undefined} to="/records">记录</Link>
-          <Link aria-current={location.pathname.startsWith("/review") ? "page" : undefined} className={location.pathname.startsWith("/review") ? "active" : undefined} to="/review">待审查</Link>
-          <Link aria-current={location.pathname.startsWith("/tags") ? "page" : undefined} className={location.pathname.startsWith("/tags") ? "active" : undefined} to="/tags">标签</Link>
-          <Link aria-current={location.pathname.startsWith("/insights") ? "page" : undefined} className={location.pathname.startsWith("/insights") ? "active" : undefined} to="/insights">发现</Link>
+          <Link aria-current={location.pathname === "/" ? "page" : undefined} className={location.pathname === "/" ? "active" : undefined} to="/">
+            <NavigationGlyph kind="home" />
+            <span className="nav-link-label">首页</span>
+          </Link>
+          <Link aria-current={location.pathname.startsWith("/records") ? "page" : undefined} className={location.pathname.startsWith("/records") ? "active" : undefined} to="/records">
+            <NavigationGlyph kind="records" />
+            <span className="nav-link-label">记录</span>
+          </Link>
+          <Link aria-current={location.pathname.startsWith("/review") ? "page" : undefined} className={location.pathname.startsWith("/review") ? "active" : undefined} to="/review">
+            <NavigationGlyph kind="review" />
+            <span className="nav-link-label">待审查</span>
+          </Link>
+          <Link aria-current={location.pathname.startsWith("/tags") ? "page" : undefined} className={location.pathname.startsWith("/tags") ? "active" : undefined} to="/tags">
+            <NavigationGlyph kind="tags" />
+            <span className="nav-link-label">标签</span>
+          </Link>
+          <Link aria-current={location.pathname.startsWith("/insights") ? "page" : undefined} className={location.pathname.startsWith("/insights") ? "active" : undefined} to="/insights">
+            <NavigationGlyph kind="insights" />
+            <span className="nav-link-label">发现</span>
+          </Link>
         </div>
 
         <form
@@ -878,23 +917,96 @@ export function AppNavigation({
           </button>
           <ThemeToggleButton />
           <span aria-hidden="true" className="nav-divider" />
-          <Link aria-current={location.pathname.startsWith("/settings") ? "page" : undefined} className={location.pathname.startsWith("/settings") ? "settings-link active" : "settings-link"} to="/settings">设置</Link>
+          <Link aria-current={location.pathname.startsWith("/settings") ? "page" : undefined} className={location.pathname.startsWith("/settings") ? "settings-link active" : "settings-link"} to="/settings">
+            <NavigationGlyph kind="settings" />
+            <span className="nav-link-label">设置</span>
+          </Link>
         </div>
       </nav>
     </header>
   );
 }
 
+function NavigationGlyph({
+  kind,
+}: {
+  kind: "home" | "insights" | "records" | "review" | "settings" | "tags";
+}) {
+  const common = {
+    "aria-hidden": true,
+    className: "nav-glyph",
+    fill: "none",
+    viewBox: "0 0 24 24",
+  } as const;
+
+  if (kind === "home") {
+    return (
+      <svg {...common}>
+        <path d="M3.5 10.5 12 3l8.5 7.5v9a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19.5z" />
+        <path d="M9 21v-6.5h6V21" />
+      </svg>
+    );
+  }
+
+  if (kind === "records") {
+    return (
+      <svg {...common}>
+        <path d="M6 3.5h9l3 3V20.5H6z" />
+        <path d="M15 3.5v3h3M9 11h6M9 15h6" />
+      </svg>
+    );
+  }
+
+  if (kind === "review") {
+    return (
+      <svg {...common}>
+        <rect height="17" rx="1.5" width="14" x="5" y="4" />
+        <path d="M9 3h6v3H9zM8.5 12l2 2 4.5-5" />
+      </svg>
+    );
+  }
+
+  if (kind === "tags") {
+    return (
+      <svg {...common}>
+        <path d="M3.5 12.5 12 4h7.5v7.5L11 20z" />
+        <circle cx="16" cy="7.5" r="1" />
+      </svg>
+    );
+  }
+
+  if (kind === "insights") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="5" r="2" />
+        <circle cx="5.5" cy="17.5" r="2" />
+        <circle cx="18.5" cy="17.5" r="2" />
+        <path d="m10.8 6.8-4.1 8.8M13.2 6.8l4.1 8.8M7.5 17.5h9" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...common}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2.8v2.1M12 19.1v2.1M2.8 12h2.1M19.1 12h2.1M5.5 5.5 7 7M17 17l1.5 1.5M18.5 5.5 17 7M7 17l-1.5 1.5" />
+    </svg>
+  );
+}
+
 function RecordArchiveCard({
   index,
+  leadLabel,
   onOpen,
   record,
 }: {
   index: number;
+  leadLabel: string | null;
   onOpen: (viewportTop: number) => void;
   record: RecordCard;
 }) {
   const excerpt = recordExcerpt(record);
+  const stateKind = recordStateKind(record);
   const link = useRef<HTMLAnchorElement>(null);
   const [visibility, setVisibility] = useState({
     intrinsicSize: 220,
@@ -920,7 +1032,7 @@ function RecordArchiveCard({
 
   return (
     <article
-      className="record-card"
+      className={leadLabel ? "record-card is-lead" : "record-card"}
       data-record-id={record.id}
       data-testid="record-card"
     >
@@ -937,7 +1049,12 @@ function RecordArchiveCard({
         to={`/records/${record.id}`}
       >
         <div className="record-index-row" aria-hidden="true">
-          <span className="archive-glyph">◉</span>
+          <span className="record-index-signal">
+            <span className="archive-glyph">◉</span>
+            {leadLabel ? (
+              <span className="record-lead-label">{leadLabel}</span>
+            ) : null}
+          </span>
           <span>· {String(index).padStart(4, "0")}</span>
         </div>
         <h2>{record.title}</h2>
@@ -946,13 +1063,9 @@ function RecordArchiveCard({
           {record.myTags.map((tag) => <span key={tag.id}>{tag.name}</span>)}
         </div>
         <div className="record-meta">
-          <span
-            className={`record-state is-${record.organization.activity} is-${record.lifecycle}`}
-          >
+          <span className={`record-state is-${stateKind}`}>
             <span aria-hidden="true" className="record-state-mark">
-              {record.lifecycle === "archived" || record.organization.activity === "failed"
-                ? "!"
-                : "✓"}
+              {recordStateMark(stateKind)}
             </span>
             <span>{recordStateLabel(record)}</span>
           </span>
@@ -1018,6 +1131,42 @@ function recordStateLabel(record: RecordCard): string {
   }
 
   return record.organization.view === "organized" ? "AI 整理完成" : "仅保存";
+}
+
+type RecordStateKind =
+  | "archived"
+  | "failed"
+  | "organized"
+  | "queued"
+  | "running"
+  | "saved-only";
+
+function recordStateKind(record: RecordCard): RecordStateKind {
+  if (record.lifecycle === "archived") {
+    return "archived";
+  }
+
+  if (record.organization.activity !== "idle") {
+    return record.organization.activity;
+  }
+
+  return record.organization.view === "organized" ? "organized" : "saved-only";
+}
+
+function recordStateMark(stateKind: RecordStateKind): string {
+  if (stateKind === "organized") {
+    return "✓";
+  }
+
+  if (stateKind === "queued" || stateKind === "running") {
+    return "…";
+  }
+
+  if (stateKind === "failed") {
+    return "!";
+  }
+
+  return stateKind === "archived" ? "—" : "•";
 }
 
 function recordExcerpt(record: RecordCard): string {

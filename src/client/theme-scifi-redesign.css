@@ -1,0 +1,372 @@
+/* Sci-fi material override for the shared knowledge workbench. */
+
+:root {
+  --workspace-canvas: #f8faff;
+  --workspace-panel: #f1f5fb;
+  --workspace-panel-strong: #e7eef8;
+  --workspace-rail: #f3f6fb;
+  --workspace-line: #d8e2f0;
+  --workspace-line-strong: #aebfd6;
+  --workspace-ink: #0b1734;
+  --workspace-muted: #5b6b87;
+  --workspace-accent: #005ff9;
+  --workspace-accent-hover: #0052d8;
+  --workspace-accent-soft: #eaf2ff;
+  --workspace-evidence: #bcefff;
+  --workspace-marker-1: #005ff9;
+  --workspace-marker-2: #0a9db2;
+  --workspace-marker-3: #7259f5;
+  --workspace-shadow: 0 12px 30px rgb(19 41 78 / 12%);
+}
+
+body {
+  color: var(--workspace-ink);
+  background: var(--workspace-canvas);
+}
+
+.app-header.is-workspace {
+  height: var(--workspace-command-height);
+}
+
+.workspace-navigation {
+  position: fixed;
+  inset: 0 0 auto var(--workspace-rail-width);
+  width: auto;
+  height: var(--workspace-command-height);
+  padding: 0 24px;
+  color: var(--workspace-ink);
+  background: rgb(248 250 255 / 97%);
+  border-bottom-color: var(--workspace-line);
+}
+
+.workspace-navigation .nav-primary {
+  position: fixed;
+  inset: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+  width: var(--workspace-rail-width);
+  height: 100vh;
+  padding: 8px 8px 84px;
+  gap: 4px;
+  background: var(--workspace-rail);
+  border-right-color: var(--workspace-line-strong);
+}
+
+.workspace-navigation .nav-primary::before {
+  position: absolute;
+  z-index: -1;
+  top: 72px;
+  bottom: 82px;
+  left: 37px;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--workspace-accent) 22%, var(--workspace-line)) 12%,
+    color-mix(in srgb, var(--workspace-accent) 22%, var(--workspace-line)) 88%,
+    transparent
+  );
+  content: "";
+}
+
+.workspace-navigation .brand-orbit {
+  background: #071126;
+  border-color: #39c6ff;
+  border-radius: 48% 52% 45% 55% / 55% 46% 54% 45%;
+  box-shadow: 0 6px 16px rgb(27 81 155 / 19%);
+}
+
+.workspace-navigation .brand-orbit::before {
+  background: #eaf7ff;
+  border-color: #168bc9;
+}
+
+.workspace-navigation .brand-orbit::after {
+  background: #39c6ff;
+  border-color: #f3fbff;
+}
+
+.workspace-navigation .nav-primary > a:not(.brand-mark),
+.workspace-navigation .settings-link {
+  color: #20314f;
+  border-radius: 10px;
+}
+
+.workspace-navigation .nav-primary > a:not(.brand-mark):hover,
+.workspace-navigation .settings-link:hover,
+.workspace-navigation .nav-primary > a.active,
+.workspace-navigation .settings-link.active {
+  color: var(--workspace-accent);
+  background: #e8f0ff;
+}
+
+.workspace-navigation .nav-primary > a.active::before,
+.workspace-navigation .settings-link.active::before {
+  position: absolute;
+  right: -5px;
+  width: 7px;
+  height: 7px;
+  background: var(--workspace-accent);
+  border: 2px solid var(--workspace-rail);
+  border-radius: 50%;
+  content: "";
+}
+
+.workspace-navigation .nav-primary > a.active::after,
+.workspace-navigation .settings-link.active::after {
+  display: none;
+}
+
+.workspace-navigation .nav-glyph {
+  display: block;
+  stroke: currentColor;
+}
+
+.workspace-navigation .global-search {
+  top: 13px;
+  left: 48%;
+  width: min(580px, 42vw);
+  height: 46px;
+  background: #f3f7fd;
+  border-color: #cdd9e9;
+}
+
+.workspace-navigation .global-search:focus-within {
+  background: #fff;
+  border-color: var(--workspace-accent);
+  box-shadow: 0 0 0 3px rgb(0 95 249 / 10%);
+}
+
+.workspace-navigation .primary-button {
+  min-height: 44px;
+  color: #fff;
+  background: var(--workspace-accent);
+  border-color: var(--workspace-accent);
+  border-radius: 8px;
+}
+
+.workspace-navigation .theme-toggle-button {
+  background: #071126;
+  border-color: #8ba2c1;
+}
+
+.records-main,
+.record-detail-shell,
+.settings-shell,
+.insights-shell,
+.ai-task-page-shell,
+.search-result-region,
+.tag-atlas-main,
+.record-source-pane,
+.review-source-pane,
+.record-detail-toolbar,
+.review-queue-bar,
+.review-finish-bar {
+  background: var(--workspace-canvas);
+}
+
+.record-card {
+  background: transparent;
+  border: 0;
+  border-radius: 14px;
+}
+
+.record-card-link {
+  background: color-mix(in srgb, var(--workspace-panel) 52%, var(--workspace-canvas));
+}
+
+.record-card:hover .record-card-link,
+.record-card.is-lead .record-card-link {
+  background: var(--workspace-panel);
+}
+
+.records-library-orbit {
+  border-color: #83badf;
+  border-radius: 48% 52% 45% 55% / 55% 46% 54% 45%;
+}
+
+.records-library-orbit::before {
+  border-color: #4f9ed2;
+  border-radius: 54% 46% 52% 48% / 45% 55% 47% 53%;
+}
+
+.records-library-orbit > span {
+  background: #0077c8;
+  border-radius: 44% 56% 48% 52% / 55% 46% 54% 45%;
+}
+
+.archive-glyph {
+  color: var(--workspace-accent);
+  border-color: #73a6f5;
+  border-radius: 46% 54% 49% 51% / 54% 47% 53% 46%;
+}
+
+.record-card h2,
+.record-heading-block h1,
+.knowledge-point h3,
+.search-stage-header h1,
+.tag-atlas-heading h1,
+.settings-heading h1,
+.insights-heading h1,
+.ai-task-page-heading h1 {
+  color: var(--workspace-ink);
+}
+
+.record-preview,
+.record-summary p,
+.knowledge-point-meta,
+.knowledge-point-copy > p {
+  color: var(--workspace-muted);
+}
+
+.record-detail-main {
+  grid-template-columns: minmax(0, 60fr) minmax(420px, 40fr);
+  height: calc(100vh - var(--workspace-command-height) - 64px);
+}
+
+.record-knowledge-pane,
+.review-points-pane,
+.search-detail-drawer,
+.tag-detail-drawer {
+  background: var(--workspace-panel);
+  border-color: var(--workspace-line);
+}
+
+.record-section-heading,
+.knowledge-pane-heading,
+.record-heading-block,
+.knowledge-point,
+.review-point,
+.search-result-group,
+.review-card,
+.ai-task-row {
+  border-color: var(--workspace-line);
+}
+
+.knowledge-pane-heading .knowledge-heading-mark {
+  background: #e4f4ff;
+  border-color: #83badf;
+  border-radius: 48% 52% 45% 55% / 55% 46% 54% 45%;
+}
+
+.knowledge-pane-heading .knowledge-heading-mark::before {
+  border-color: #4f9ed2;
+  border-radius: 54% 46% 52% 48% / 45% 55% 47% 53%;
+}
+
+.knowledge-pane-heading .knowledge-heading-mark > span {
+  background: #0077c8;
+  border-radius: 44% 56% 48% 52% / 55% 46% 54% 45%;
+}
+
+.knowledge-pane-heading .knowledge-heading-count {
+  color: var(--workspace-accent);
+  background: #e4edff;
+  border-color: #bfd0ee;
+}
+
+.knowledge-point {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--workspace-line);
+  border-radius: 0;
+}
+
+.knowledge-point.is-selected,
+.review-point.selected,
+.search-result-group:hover,
+.search-result-group.selected {
+  background: var(--workspace-accent-soft);
+  border-color: var(--workspace-line-strong);
+  box-shadow: none;
+}
+
+.knowledge-point-select {
+  background: #f8fbff;
+  border-radius: 46% 54% 49% 51% / 54% 47% 53% 46%;
+}
+
+.knowledge-point-select[aria-pressed="true"] {
+  color: #fff;
+  background: var(--workspace-accent);
+  border-color: var(--workspace-accent);
+  box-shadow: 0 0 0 4px rgb(0 95 249 / 10%);
+}
+
+.record-original mark {
+  background: var(--workspace-evidence);
+  box-shadow: 0 0 0 2px var(--workspace-evidence);
+}
+
+.record-original mark[data-marker]::before {
+  color: var(--workspace-accent);
+  background: var(--workspace-canvas);
+  border-color: var(--workspace-accent);
+  border-radius: 47% 53% 45% 55% / 54% 46% 55% 45%;
+}
+
+.record-save-only-prompt {
+  color: var(--workspace-ink);
+  background: #f2f6fc;
+  border-color: #8fb3df;
+  border-radius: 10px;
+}
+
+.record-save-only-orbit {
+  border-color: #8ab9e3;
+  border-radius: 48% 52% 45% 55% / 55% 46% 54% 45%;
+}
+
+.record-save-only-orbit::before {
+  border-color: #62a6d7;
+  border-radius: 54% 46% 52% 48% / 45% 55% 47% 53%;
+}
+
+.record-save-only-orbit > span {
+  border-color: #087fc6;
+  border-radius: 45% 55% 48% 52% / 53% 47% 55% 45%;
+}
+
+.review-source-pane,
+.review-points-pane,
+.review-finish-bar {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.search-result-group,
+.review-point,
+.review-card,
+.tag-atlas-grid button {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.tag-atlas-grid button,
+.ai-task-list {
+  background: transparent;
+}
+
+.tag-atlas-grid button:not(:disabled):hover,
+.tag-atlas-grid button[aria-pressed="true"],
+.tag-atlas-grid li.is-batch-selected > button,
+.ai-task-row:hover {
+  background: var(--workspace-accent-soft);
+  box-shadow: none;
+}
+
+.settings-panel {
+  border-top-color: var(--workspace-line);
+}
+
+.theme-choice {
+  background: #fbfcff;
+  border-color: var(--workspace-line);
+  box-shadow: none;
+}
+
+.theme-choice:has(input:checked) {
+  background: var(--workspace-accent-soft);
+  border-color: var(--workspace-accent);
+  box-shadow: none;
+}

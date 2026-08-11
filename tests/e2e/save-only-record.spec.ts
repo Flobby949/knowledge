@@ -34,17 +34,23 @@ test.describe("save-only record UI tracer", () => {
     const toolbar = page.getByRole("search", { name: "记录筛选" });
     const library = page.getByRole("region", { name: "记录列表" });
     const cards = library.getByRole("article");
+    const leadCard = library.locator(".record-card.is-lead");
+    const flowCards = library.locator(".record-card:not(.is-lead)");
 
     await expect(recordsLink).toHaveAttribute("aria-current", "page");
     await expect.poll(() => cards.count()).toBeGreaterThanOrEqual(8);
-    await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-    await expectBox(toolbar, { x: 32, y: 92, width: 1_536, height: 44 });
-    await expectBox(library, { x: 32, y: 160, width: 1_536 });
-    await expectMasonryColumns(cards, {
-      columnLefts: [32, 422, 812, 1_202],
-      columnWidth: 366,
-      top: 160,
-      verticalGap: 16,
+    await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+    await expectBox(toolbar, { x: 108, y: 198, width: 1_460, height: 74 });
+    await expectBox(library, { x: 108, y: 290, width: 1_460 });
+    await expectBox(leadCard, { x: 108, y: 294, width: 1_460 });
+    const leadBox = await leadCard.boundingBox();
+
+    expect(leadBox).not.toBeNull();
+    await expectMasonryColumns(flowCards, {
+      columnLefts: [108, 606, 1_104],
+      columnWidth: 464,
+      top: (leadBox?.y ?? 0) + (leadBox?.height ?? 0) + 38,
+      verticalGap: 26,
       minimumDistinctHeights: 3,
     });
 
@@ -112,6 +118,10 @@ test.describe("save-only record UI tracer", () => {
     await expect(createdCard.getByText(preview, { exact: true })).toBeVisible();
     await expect(createdCard.getByText(tagName, { exact: true })).toBeVisible();
     await expect(createdCard.getByText("仅保存", { exact: true })).toBeVisible();
+    const savedState = createdCard.locator(".record-state");
+
+    await expect(savedState).toHaveClass(/\bis-saved-only\b/u);
+    await expect(savedState.locator(".record-state-mark")).toHaveText("•");
     await expect(
       navigation.getByRole("button", { name: /AI 任务/u }),
     ).toHaveCount(0);

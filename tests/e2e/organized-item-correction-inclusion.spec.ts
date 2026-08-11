@@ -63,7 +63,7 @@ test.describe("published knowledge correction and reversible exclusion", () => {
     const rawText = recordPane.getByLabel("完整原文", { exact: true });
 
     await expectHorizontalSplit(recordPane, knowledgePane, {
-      leftRatio: 0.58,
+      leftRatio: 0.6,
       gap: 0,
       ratioTolerance: 0.02,
     });

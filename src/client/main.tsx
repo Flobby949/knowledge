@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { App } from "./app.js";
 import { ThemeProvider } from "./theme.js";
 import "./styles.css";
+import "./workspace-redesign.css";
 
 const root = document.getElementById("root");
 

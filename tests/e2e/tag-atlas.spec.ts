@@ -33,13 +33,13 @@ test.describe("tag atlas", () => {
       navigation.getByRole("link", { name: "标签", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expectBox(navigation, {
-      x: 0,
+      x: 76,
       y: 0,
-      width: 1_600,
-      height: 60,
+      width: 1_524,
+      height: 72,
     });
     await expect.poll(() => cards.count()).toBeGreaterThanOrEqual(6);
-    await expectFiveEqualColumns(cards);
+    await expectFourEqualColumns(cards);
     await expect(atlas.locator("canvas")).toHaveCount(0);
     await expect(atlas.getByRole("img")).toHaveCount(0);
 
@@ -626,7 +626,7 @@ async function expectTaskSucceeded(
   throw new Error(`AI task ${taskId} did not finish in time`);
 }
 
-async function expectFiveEqualColumns(cards: Locator): Promise<void> {
+async function expectFourEqualColumns(cards: Locator): Promise<void> {
   const boxes = await Promise.all(
     Array.from({ length: await cards.count() }, (_, index) =>
       cards.nth(index).boundingBox(),
@@ -642,7 +642,7 @@ async function expectFiveEqualColumns(cards: Locator): Promise<void> {
     .sort((left, right) => left.x - right.x);
   const reference = rendered[0]!;
 
-  expect(firstRow).toHaveLength(5);
+  expect(firstRow).toHaveLength(4);
 
   for (const box of rendered) {
     expect(Math.abs(box.width - reference.width)).toBeLessThanOrEqual(2);
@@ -650,9 +650,12 @@ async function expectFiveEqualColumns(cards: Locator): Promise<void> {
   }
 
   for (let index = 1; index < firstRow.length; index += 1) {
-    expect(firstRow[index]!.x).toBeGreaterThan(
-      firstRow[index - 1]!.x + firstRow[index - 1]!.width,
-    );
+    expect(
+      Math.abs(
+        firstRow[index]!.x -
+        (firstRow[index - 1]!.x + firstRow[index - 1]!.width),
+      ),
+    ).toBeLessThanOrEqual(2);
   }
 }
 

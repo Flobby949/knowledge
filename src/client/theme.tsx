@@ -9,6 +9,8 @@ import {
 } from "react";
 
 import sciFiCss from "./theme-scifi.css?inline";
+import sciFiRedesignCss from "./theme-scifi-redesign.css?inline";
+import workspaceRedesignCss from "./workspace-redesign.css?inline";
 
 export type AppTheme = "macaron" | "scifi";
 
@@ -64,7 +66,7 @@ function applyTheme(theme: AppTheme, persist: boolean) {
     const style = currentStyle ?? document.createElement("style");
 
     style.dataset.knowledgeScifiTheme = "";
-    style.textContent = sciFiCss;
+    style.textContent = `${sciFiCss}\n${workspaceRedesignCss}\n${sciFiRedesignCss}`;
     document.head.append(style);
   } else {
     currentStyle?.remove();

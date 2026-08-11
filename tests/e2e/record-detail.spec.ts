@@ -1,8 +1,6 @@
-import { randomUUID } from "node:crypto";
-
 import { expect, test } from "./fixture.js";
 
-import { expectBox, expectHorizontalSplit } from "./geometry.js";
+import { expectBox } from "./geometry.js";
 
 const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 
@@ -13,7 +11,7 @@ test.describe("save-only record detail UI tracer", () => {
     page,
     request,
   }) => {
-    const marker = `detail-${randomUUID().slice(0, 8)}`;
+    const marker = "save-only-visual";
     const title = `纯文本记录详情 ${marker}`;
     const tagName = `原文标签 ${marker}`;
     const text = [
@@ -50,23 +48,20 @@ test.describe("save-only record detail UI tracer", () => {
     const toolbar = page.getByRole("toolbar", { name: "记录操作" });
     const detail = page.getByRole("main", { name: "记录详情" });
     const recordPane = detail.getByRole("region", { name: "记录与原文" });
-    const knowledgePane = detail.getByRole("region", { name: "知识点" });
+    const organizationPrompt = detail.getByRole("complementary", {
+      name: "知识点整理状态",
+    });
     const rawText = recordPane.getByLabel("完整原文", { exact: true });
 
     await expect(navigation).toBeVisible();
     await expect(recordsLink).toHaveAttribute("aria-current", "page");
-    await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-    await expectBox(toolbar, { x: 0, y: 60, width: 1_600, height: 64 });
+    await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+    await expectBox(toolbar, { x: 76, y: 72, width: 1_524, height: 64 });
     await expect(toolbar.getByText("仅保存", { exact: true })).toBeVisible();
 
-    await expectBox(detail, { x: 0, y: 124, width: 1_600 });
-    await expectBox(recordPane, { x: 0, y: 124 });
-    await expectBox(knowledgePane, { y: 124 });
-    await expectHorizontalSplit(recordPane, knowledgePane, {
-      leftRatio: 0.58,
-      gap: 0,
-      ratioTolerance: 0.02,
-    });
+    await expectBox(detail, { x: 76, y: 136, width: 1_524 });
+    await expectBox(recordPane, { x: 76, y: 136, width: 1_114 });
+    await expect(detail.getByRole("region", { name: "知识点" })).toHaveCount(0);
 
     await expect(
       recordPane.getByRole("heading", { name: title, exact: true }),
@@ -82,10 +77,28 @@ test.describe("save-only record detail UI tracer", () => {
       rawText.locator("b, strong, em, code, h1, h2, h3, blockquote"),
     ).toHaveCount(0);
 
+    await expect(organizationPrompt).toBeVisible();
     await expect(
-      knowledgePane.getByText("尚未整理知识点", { exact: true }),
+      organizationPrompt.getByRole("heading", {
+        name: "原文已完整保存",
+        exact: true,
+      }),
     ).toBeVisible();
-    await expect(knowledgePane.getByRole("article")).toHaveCount(0);
+    await expect(organizationPrompt).toContainText("原文仍可搜索");
+    await expect(organizationPrompt).toContainText("AI 整理不会覆盖原文");
+    await expect(
+      organizationPrompt.getByRole("button", {
+        name: "整理此记录",
+        exact: true,
+      }),
+    ).toBeEnabled();
+
+    await expect(page).toHaveScreenshot("record-detail-save-only.png", {
+      animations: "disabled",
+      caret: "hide",
+      fullPage: false,
+      maxDiffPixels: 500,
+    });
 
     await toolbar.getByRole("link", { name: "返回记录库" }).click();
     await expect(page).toHaveURL(/\/records(?:\?.*)?$/u);

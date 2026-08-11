@@ -1,9 +1,9 @@
 /*
- * THESIS: The detail surface is a verification desk, not a dashboard.
- * OWN-WORLD: Verification planes switch between cloud-white berry and cold paper-blue while evidence geometry stays fixed.
- * STORY: The user returns from the archive, confirms the exact saved source, and sees plainly that no knowledge was invented.
- * FIRST VIEWPORT: A 60px global navigation, 64px action strip, then a full-height 58/42 source-and-knowledge split.
- * FORM: Established-world precision archive; the product brief fixes this two-pane staging, so no concept seed applies.
+ * THESIS: Knowledge leads and evidence answers on demand; this is not a history timeline.
+ * OWN-WORLD: A slim signal rail, cloud-paper reading field, berry ink, and numbered concentric knowledge markers.
+ * STORY: Read the source, choose a knowledge point, reveal its exact proof, then correct or exclude without losing context.
+ * FIRST VIEWPORT: A 76px rail, 72px command bar, sticky top actions, then a 60/40 source-and-knowledge canvas.
+ * FORM: Reading-first knowledge canvas, ranked fifth and chosen as the working staging; direction seed ac559a1b.
  */
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -959,8 +959,30 @@ function RecordDetailContent({
     }
   }
 
+  const hasNoKnowledge =
+    !record.organization.candidate &&
+    organizedItems.length === 0 &&
+    excludedItems.length === 0;
+  const organizationRunning =
+    record.organization.activity === "queued" ||
+    record.organization.activity === "running";
+  const organizationFailed = record.organization.activity === "failed";
+  const knowledgeHeadingStatus = organizationRunning
+    ? record.organization.activity === "queued"
+      ? "等待重新整理 · 已有知识点已保留"
+      : "正在重新整理 · 已有知识点已保留"
+    : organizationFailed
+      ? "整理失败 · 已有知识点已保留"
+      : "AI 整理完成";
+  const selectedKnowledgeIndex = organizedItems.findIndex(
+    (item) => item.id === selectedItemId,
+  ) + 1;
+
   return (
-    <main aria-label="记录详情" className="record-detail-main">
+    <main
+      aria-label="记录详情"
+      className={hasNoKnowledge ? "record-detail-main is-save-only" : "record-detail-main"}
+    >
       <section aria-label="记录与原文" className="record-source-pane">
         <div className="record-heading-block">
           <p className="record-detail-index">记录 · 原文 v{record.editable.textVersion}</p>
@@ -1054,12 +1076,59 @@ function RecordDetailContent({
           <pre aria-label="完整原文">
             <HighlightedSource
               evidence={selectedEvidence}
+              marker={selectedKnowledgeIndex || undefined}
               sourceText={historicalSource?.text ?? record.editable.text}
             />
           </pre>
         </div>
       </section>
 
+      {hasNoKnowledge ? (
+        <aside aria-label="知识点整理状态" className="record-save-only-prompt">
+          <span aria-hidden="true" className="record-save-only-orbit">
+            <span />
+          </span>
+          <div>
+            <p>{organizationRunning ? "整理进行中" : organizationFailed ? "整理未完成" : "仅保存原文"}</p>
+            <h2>
+              {organizationRunning
+                ? "正在整理知识点"
+                : organizationFailed
+                  ? "知识点暂未生成"
+                  : "原文已完整保存"}
+            </h2>
+            <p className="record-save-only-copy">
+              {organizationRunning
+                ? "原文已可搜索，整理完成后知识点会出现在这里。"
+                : organizationFailed
+                  ? "原文仍可搜索，稍后可以重新发起整理。"
+                  : "尚未生成知识点。原文仍可搜索，稍后需要时再整理。"}
+            </p>
+            <p className="record-save-only-trust">
+              <span aria-hidden="true">i</span>
+              AI 整理不会覆盖原文。
+            </p>
+            <button
+              className="primary-button"
+              disabled={
+                organizationRunning ||
+                organizeLatestBusy ||
+                record.lifecycle === "archived"
+              }
+              onClick={() => void organizeLatestSource()}
+              type="button"
+            >
+              {organizationRunning
+                ? "整理进行中"
+                : organizeLatestBusy
+                  ? "正在整理…"
+                  : organizationFailed
+                    ? "重新整理"
+                    : "整理此记录"}
+            </button>
+          </div>
+        </aside>
+      ) : (
       <section aria-label="知识点" className="record-knowledge-pane">
         {record.organization.candidate ? (
           <VersionComparison
@@ -1075,22 +1144,21 @@ function RecordDetailContent({
         ) : (
           <>
             <header className="knowledge-pane-heading">
-              <h2>知识点</h2>
-              <span>{organizedItems.length}</span>
+              <div>
+                <span aria-hidden="true" className="knowledge-heading-mark">
+                  <span />
+                </span>
+                <h2>知识点</h2>
+                <span className="knowledge-heading-count">{organizedItems.length}</span>
+              </div>
+              <span className="knowledge-heading-status" role="status">
+                {knowledgeHeadingStatus}
+              </span>
             </header>
             {actionError ? (
               <p className="knowledge-action-error" role="alert">
                 {actionError}
               </p>
-            ) : null}
-            {organizedItems.length === 0 && excludedItems.length === 0 ? (
-              <div className="knowledge-empty-state">
-                <span aria-hidden="true" className="empty-signal">
-                  <span />
-                </span>
-                <h3>尚未整理知识点</h3>
-                <p>这条记录仅保存了完整原文，尚未产生 AI 整理结果。</p>
-              </div>
             ) : null}
             <div
               aria-label="当前采用的知识点"
@@ -1100,7 +1168,7 @@ function RecordDetailContent({
           {organizedItems.length === 0 && excludedItems.length > 0 ? (
             <p className="knowledge-current-empty">当前没有采用的知识点，可从下方恢复。</p>
           ) : null}
-          {organizedItems.map((item) => {
+          {organizedItems.map((item, index) => {
               const selected = item.id === selectedItemId;
               const aiOriginalVisible = visibleAiOriginals.includes(item.id);
 
@@ -1116,7 +1184,7 @@ function RecordDetailContent({
                     onClick={() => void selectItem(item.id)}
                     type="button"
                   >
-                    <span aria-hidden="true" />
+                    <span aria-hidden="true">{index + 1}</span>
                   </button>
                   <div className="knowledge-point-copy">
                     <div className="knowledge-point-meta">
@@ -1253,6 +1321,7 @@ function RecordDetailContent({
           </>
         )}
       </section>
+      )}
 
       {editingItem ? (
         <KnowledgeCorrectionDialog
@@ -2024,9 +2093,11 @@ function KnowledgeCorrectionDialog({
 
 function HighlightedSource({
   evidence,
+  marker,
   sourceText,
 }: {
   evidence: EvidenceSpan | null;
+  marker?: number | undefined;
   sourceText: string;
 }) {
   if (
@@ -2039,7 +2110,7 @@ function HighlightedSource({
   return (
     <>
       {sourceText.slice(0, evidence.start)}
-      <mark>{evidence.quote}</mark>
+      <mark data-marker={marker}>{evidence.quote}</mark>
       {sourceText.slice(evidence.end)}
     </>
   );

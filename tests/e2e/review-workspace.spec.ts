@@ -63,10 +63,10 @@ test.describe("Mode B review workspace", () => {
     const navigation = page.getByRole("navigation", { name: "主导航" });
 
     await expectBox(navigation, {
-      x: 0,
+      x: 76,
       y: 0,
-      width: 1_600,
-      height: 60,
+      width: 1_524,
+      height: 72,
     });
     await navigation
       .getByRole("link", { name: "待审查", exact: true })
@@ -89,26 +89,26 @@ test.describe("Mode B review workspace", () => {
     });
 
     await expectBox(queueBar, {
-      x: 30,
-      y: 90,
-      width: 1_540,
-      height: 72,
+      x: 76,
+      y: 72,
+      width: 1_524,
+      height: 64,
     }, 4);
     await expectBox(workspace, {
-      x: 30,
-      y: 183,
-      width: 1_540,
+      x: 76,
+      y: 136,
+      width: 1_524,
     }, 4);
     await expectHorizontalSplit(sourcePane, pointsPane, {
-      leftRatio: 0.58,
-      gap: 20,
+      leftRatio: 0.6,
+      gap: 0,
       ratioTolerance: 0.02,
       pixelTolerance: 4,
     });
     await expectBox(flowBar, {
-      x: 30,
-      width: 1_540,
-      height: 68,
+      x: 76,
+      width: 1_524,
+      height: 70,
     }, 4);
     await expect(page.getByRole("table")).toHaveCount(0);
     await expect(sourcePane.getByLabel("内容来源", { exact: true }))

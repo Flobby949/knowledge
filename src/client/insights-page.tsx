@@ -2,7 +2,7 @@
  * THESIS: Knowledge discovery is a review desk, not an autonomous cleanup engine.
  * OWN-WORLD: A quiet evidence workspace with explicit decisions and persistent source links.
  * STORY: Scan, inspect both sides, decide, then revisit or undo without touching source history.
- * FIRST VIEWPORT: 60px navigation, a compact thesis header, three work tabs, and an evidence-first review list.
+ * FIRST VIEWPORT: A 76px signal rail, 72px command bar, compact thesis header, three work tabs, and an evidence-first review list.
  */
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
