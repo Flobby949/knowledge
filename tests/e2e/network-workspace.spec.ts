@@ -102,13 +102,26 @@ test.describe("Knowledge Network workspace", () => {
     await page.keyboard.press("Enter");
 
     const drawer = page.getByRole("region", { name: "节点详情" });
+    const closeDrawer = drawer.getByRole("button", { name: "关闭节点详情" });
 
     await expect(drawer.getByRole("heading", { name: graph.source.label }))
       .toBeVisible();
+    await expect(closeDrawer).toBeFocused();
     await expect(drawer.getByRole("link", { name: "打开 Concept" }))
       .toHaveAttribute("href", `/concepts?concept=${graph.source.id}`);
+    await page.keyboard.press("Tab");
+    await expect(drawer.getByRole("link", { name: "打开 Concept" }))
+      .toBeFocused();
+    await page.keyboard.press("Tab");
+    const startButton = drawer.getByRole("button", { name: "设为路径起点" });
+
+    await expect(startButton).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(drawer.getByRole("button", { name: "已设为起点" }))
+      .toHaveAttribute("aria-pressed", "true");
     await page.keyboard.press("Escape");
     await expect(drawer).toHaveCount(0);
+    await expect(source).toBeFocused();
     await expect(page).not.toHaveURL(/(?:\?|&)node=/u);
   });
 

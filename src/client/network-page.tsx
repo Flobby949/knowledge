@@ -7,20 +7,15 @@
  */
 import {
   Component,
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import {
-  getNetworkPath,
-  getNetworkSubgraph,
-  searchNetworkNodes,
   type NetworkEdge,
   type NetworkEdgeKind,
   type NetworkNode,
@@ -29,33 +24,16 @@ import {
   type NetworkTraversalDirection,
 } from "./api.js";
 import type {
-  NetworkLayoutSnapshot,
   NetworkPosition,
 } from "./network-layout.js";
-import type {
-  NetworkLayoutWorkerRequest,
-  NetworkLayoutWorkerResponse,
-} from "./network-layout-worker.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
+import {
+  NETWORK_EDGE_KINDS as EDGE_KINDS,
+  NETWORK_NODE_TYPES as NODE_TYPES,
+  useNetworkWorkspaceController,
+} from "./network-workspace-controller.js";
 import { AppNavigation } from "./records-page.js";
 import "./network-page.css";
-
-const NODE_TYPES = ["concept", "knowledge_point"] as const;
-const EDGE_KINDS = [
-  "concept_membership",
-  "concept_relation",
-  "knowledge_relation",
-] as const;
-const TYPED_KEY_PATTERN =
-  /^(concept|knowledge_point):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-
-type NetworkView = "graph" | "list";
-
-interface NetworkGraphState {
-  edges: NetworkEdge[];
-  nodes: NetworkNode[];
-  truncated: boolean;
-}
 
 export interface NetworkCanvasProps {
   edges: NetworkEdge[];
@@ -68,464 +46,55 @@ export interface NetworkCanvasProps {
 }
 
 export function NetworkPage() {
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const selectedKey = validTypedKey(searchParams.get("node"));
-  const fromKey = validTypedKey(searchParams.get("from"));
-  const toKey = validTypedKey(searchParams.get("to"));
-  const query = (searchParams.get("q") ?? "").trim();
-  const view: NetworkView =
-    searchParams.get("view") === "list" ? "list" : "graph";
-  const nodeTypes = readRepeatedFilter(
-    searchParams,
-    "type",
-    NODE_TYPES,
-  );
-  const edgeKinds = readRepeatedFilter(
-    searchParams,
-    "relation",
-    EDGE_KINDS,
-  );
-  const [graph, setGraph] = useState<NetworkGraphState>({
-    edges: [],
-    nodes: [],
-    truncated: false,
-  });
-  const [path, setPath] = useState<NetworkPath | null>(null);
-  const [pathResolved, setPathResolved] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [pathLoading, setPathLoading] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [pathError, setPathError] = useState("");
-  const [layout, setLayout] = useState<NetworkLayoutSnapshot | null>(null);
-  const layoutRef = useRef<NetworkLayoutSnapshot | null>(null);
-  const [layoutLoading, setLayoutLoading] = useState(false);
-  const [rendererFailure, setRendererFailure] = useState("");
-  const [focusedKey, setFocusedKey] = useState("");
-  const [selectedPreview, setSelectedPreview] = useState<NetworkNode | null>(
-    null,
-  );
-  const [queryDraft, setQueryDraft] = useState(query);
-  const [searchItems, setSearchItems] = useState<NetworkNode[]>([]);
-  const [searchOpen, setSearchOpen] = useState(Boolean(query));
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState("");
-  const [searchTruncated, setSearchTruncated] = useState(false);
+  const {
+    actions: {
+      clearPath,
+      closeDrawer,
+      fallBackToList,
+      focusSelectedNode,
+      openNode,
+      resetView,
+      setEndpoint,
+      setQueryDraft,
+      setSearchOpen,
+      setView,
+      submitSearch,
+      toggleEdgeKind,
+      toggleNodeType,
+    },
+    drawerOpen,
+    edgeKinds,
+    focusedKey,
+    fromKey,
+    graph,
+    layout,
+    layoutLoading,
+    loadError,
+    loading,
+    nodeByKey,
+    nodeTypes,
+    path,
+    pathError,
+    pathLoading,
+    pathResolved,
+    pathTruncated,
+    query,
+    queryDraft,
+    rendererFailure,
+    searchError,
+    searchItems,
+    searchLoading,
+    searchOpen,
+    searchTruncated,
+    selectedKey,
+    selectedNode,
+    toKey,
+    view,
+    visibleEdges,
+    visibleNodes,
+  } = useNetworkWorkspaceController();
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const newRecordButton = useRef<HTMLButtonElement>(null);
-  const drawerOpenedHere = useRef(false);
-  const drawerEntryMutated = useRef(false);
-
-  const nodeByKey = useMemo(
-    () => new Map(graph.nodes.map((node) => [node.key, node])),
-    [graph.nodes],
-  );
-  const selectedNode =
-    nodeByKey.get(selectedKey) ??
-    (selectedPreview?.key === selectedKey ? selectedPreview : null);
-  const pathNodeKeys = useMemo(
-    () => new Set(path?.nodes.map(({ key }) => key) ?? []),
-    [path],
-  );
-  const pathEdgeKeys = useMemo(
-    () => new Set(path?.steps.map(({ edgeKey }) => edgeKey) ?? []),
-    [path],
-  );
-  const visibleNodes = useMemo(
-    () =>
-      graph.nodes.filter(
-        (node) => nodeTypes.has(node.type) || pathNodeKeys.has(node.key),
-      ),
-    [graph.nodes, nodeTypes, pathNodeKeys],
-  );
-  const visibleNodeKeys = useMemo(
-    () => new Set(visibleNodes.map(({ key }) => key)),
-    [visibleNodes],
-  );
-  const visibleEdges = useMemo(
-    () =>
-      graph.edges.filter(
-        (edge) =>
-          pathEdgeKeys.has(edge.edgeKey) ||
-          (edgeKinds.has(edge.kind) &&
-            visibleNodeKeys.has(edge.source) &&
-            visibleNodeKeys.has(edge.target)),
-      ),
-    [edgeKinds, graph.edges, pathEdgeKeys, visibleNodeKeys],
-  );
-  const searchType: "all" | NetworkNodeType =
-    nodeTypes.size === 1 ? ([...nodeTypes][0] ?? "concept") : "all";
-
-  useEffect(() => {
-    setQueryDraft(query);
-  }, [query]);
-
-  useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-    const roots = [...new Set([selectedKey, fromKey, toKey].filter(Boolean))];
-
-    setLoading(true);
-    setLoadError("");
-    setPath(null);
-    setPathError("");
-    setPathLoading(Boolean(fromKey && toKey));
-    setPathResolved(false);
-
-    void (async () => {
-      try {
-        const graphPromise = Promise.all([
-          getNetworkSubgraph({ signal: controller.signal }),
-          ...roots.map((root) =>
-            getNetworkSubgraph({
-              depth: 1,
-              root,
-              signal: controller.signal,
-            }),
-          ),
-        ]);
-        const pathPromise =
-          fromKey && toKey
-            ? getNetworkPath({
-                from: fromKey,
-                maxDepth: 6,
-                signal: controller.signal,
-                to: toKey,
-              })
-                .then((result) => ({ result }))
-                .catch((error: unknown) => ({ error }))
-            : Promise.resolve(null);
-        const [graphs, pathOutcome] = await Promise.all([
-          graphPromise,
-          pathPromise,
-        ]);
-
-        if (!active) {
-          return;
-        }
-
-        if (pathOutcome && "error" in pathOutcome) {
-          if (!isAbortError(pathOutcome.error)) {
-            setPathError(
-              messageFrom(pathOutcome.error, "路径暂时无法探索，请缩短范围后重试。"),
-            );
-          }
-          setPath(null);
-        } else {
-          const nextPath = pathOutcome?.result.path ?? null;
-
-          setPath(nextPath);
-          setPathResolved(Boolean(pathOutcome));
-          if (nextPath) {
-            graphs.push({
-              edges: nextPath.edges,
-              limits: { depth: 6, edgeLimit: 600, nodeLimit: 1_000 },
-              nodes: nextPath.nodes,
-              root: null,
-              truncated: false,
-              truncation: { edges: false, nodes: false },
-            });
-          }
-        }
-
-        setGraph(mergeGraphs(graphs));
-      } catch (caught) {
-        if (active && !isAbortError(caught)) {
-          setLoadError(
-            messageFrom(caught, "知识网络暂时无法载入，请稍后重试。"),
-          );
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-          setPathLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [fromKey, selectedKey, toKey]);
-
-  useEffect(() => {
-    if (!query) {
-      setSearchItems([]);
-      setSearchError("");
-      setSearchLoading(false);
-      setSearchTruncated(false);
-      return;
-    }
-
-    let active = true;
-    const controller = new AbortController();
-    setSearchItems([]);
-    setSearchLoading(true);
-    setSearchError("");
-    setSearchTruncated(false);
-    setSearchOpen(true);
-    void searchNetworkNodes({
-      limit: 12,
-      query,
-      signal: controller.signal,
-      type: searchType,
-    })
-      .then(({ items, truncated }) => {
-        if (active) {
-          setSearchItems(items);
-          setSearchTruncated(truncated);
-        }
-      })
-      .catch((caught: unknown) => {
-        if (active && !isAbortError(caught)) {
-          setSearchError(
-            messageFrom(caught, "网络节点搜索失败，请修改关键词后重试。"),
-          );
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setSearchLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [query, searchType]);
-
-  const fallBackToList = useCallback(
-    (_reason: string) => {
-      if (selectedKey) {
-        drawerEntryMutated.current = true;
-      }
-      setRendererFailure(
-        "图形渲染不可用，已切换到等价列表。所有查询状态均已保留。",
-      );
-      setSearchParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-
-          next.set("view", "list");
-          return next;
-        },
-        { replace: true },
-      );
-    },
-    [selectedKey, setSearchParams],
-  );
-
-  useEffect(() => {
-    if (
-      view !== "graph" ||
-      rendererFailure ||
-      graph.nodes.length === 0
-    ) {
-      return;
-    }
-
-    let active = true;
-    let worker: Worker;
-
-    setLayoutLoading(true);
-    try {
-      worker = new Worker(
-        new URL("./network-layout-worker.ts", import.meta.url),
-        { type: "module" },
-      );
-    } catch (caught) {
-      setLayoutLoading(false);
-      fallBackToList(messageFrom(caught, "布局 Worker 无法启动。"));
-      return;
-    }
-
-    worker.onmessage = (event: MessageEvent<NetworkLayoutWorkerResponse>) => {
-      if (!active) {
-        return;
-      }
-
-      if (event.data.type === "error") {
-        setLayoutLoading(false);
-        fallBackToList(event.data.error);
-        return;
-      }
-
-      layoutRef.current = event.data.snapshot;
-      setLayout(event.data.snapshot);
-      setLayoutLoading(false);
-    };
-    worker.onerror = () => {
-      if (active) {
-        setLayoutLoading(false);
-        fallBackToList("布局 Worker 执行失败。");
-      }
-    };
-
-    const common = {
-      nodes: graph.nodes.map(({ key, type }) => ({ key, type })),
-      edges: graph.edges.map(({ edgeKey, source, target }) => ({
-        edgeKey,
-        source,
-        target,
-      })),
-    };
-    const focusKey = selectedKey || toKey || fromKey;
-    const request: NetworkLayoutWorkerRequest =
-      layoutRef.current && focusKey
-        ? {
-            type: "expand",
-            ...common,
-            focusKey,
-            previous: layoutRef.current,
-          }
-        : { type: "initial", ...common };
-
-    worker.postMessage(request);
-
-    return () => {
-      active = false;
-      worker.terminate();
-    };
-  }, [fallBackToList, fromKey, graph.edges, graph.nodes, rendererFailure, selectedKey, toKey, view]);
-
-  useEffect(() => {
-    if (!selectedKey) {
-      setSelectedPreview(null);
-      drawerOpenedHere.current = false;
-      drawerEntryMutated.current = false;
-    }
-  }, [selectedKey]);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && selectedKey) {
-        closeDrawer();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  });
-
-  function updateParams(
-    mutate: (next: URLSearchParams) => void,
-    options: { drawerMutation?: boolean; replace?: boolean } = {},
-  ) {
-    const mutatesDrawerEntry =
-      Boolean(selectedKey) && (options.drawerMutation ?? true);
-
-    if (mutatesDrawerEntry) {
-      drawerEntryMutated.current = true;
-    }
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-
-        mutate(next);
-        return next;
-      },
-      { replace: options.replace ?? mutatesDrawerEntry },
-    );
-  }
-
-  function openNode(node: NetworkNode) {
-    const alreadyOpen = Boolean(selectedKey);
-
-    setSelectedPreview(node);
-    setFocusedKey(node.key);
-    setSearchOpen(false);
-    if (!alreadyOpen) {
-      drawerOpenedHere.current = true;
-      drawerEntryMutated.current = false;
-    }
-    updateParams(
-      (next) => next.set("node", node.key),
-      { drawerMutation: false, replace: alreadyOpen },
-    );
-  }
-
-  function closeDrawer() {
-    if (drawerOpenedHere.current && !drawerEntryMutated.current) {
-      drawerOpenedHere.current = false;
-      drawerEntryMutated.current = false;
-      navigate(-1);
-      return;
-    }
-
-    drawerOpenedHere.current = false;
-    drawerEntryMutated.current = false;
-    updateParams((next) => next.delete("node"), {
-      drawerMutation: false,
-      replace: true,
-    });
-  }
-
-  function submitSearch() {
-    const nextQuery = queryDraft.trim().slice(0, 200);
-
-    updateParams((next) => {
-      if (nextQuery) {
-        next.set("q", nextQuery);
-      } else {
-        next.delete("q");
-      }
-    });
-    setSearchOpen(Boolean(nextQuery));
-  }
-
-  function setEndpoint(kind: "from" | "to", key: string) {
-    updateParams((next) => next.set(kind, key));
-  }
-
-  function clearPath() {
-    updateParams((next) => {
-      next.delete("from");
-      next.delete("to");
-    });
-  }
-
-  function resetView() {
-    layoutRef.current = null;
-    setLayout(null);
-    setFocusedKey("");
-    updateParams((next) => {
-      next.delete("node");
-      next.delete("from");
-      next.delete("to");
-      next.delete("q");
-    });
-  }
-
-  function toggleRepeated<T extends string>(
-    name: "relation" | "type",
-    value: T,
-    selected: Set<T>,
-    all: readonly T[],
-  ) {
-    const nextValues = new Set(selected);
-
-    if (nextValues.has(value)) {
-      if (nextValues.size === 1) {
-        return;
-      }
-      nextValues.delete(value);
-    } else {
-      nextValues.add(value);
-    }
-
-    updateParams((next) => {
-      next.delete(name);
-      if (nextValues.size !== all.length) {
-        for (const item of all.filter((candidate) => nextValues.has(candidate))) {
-          next.append(name, item);
-        }
-      }
-    });
-  }
-
-  const drawerOpen = Boolean(selectedKey);
 
   return (
     <div className="network-shell">
@@ -610,9 +179,7 @@ export function NetworkPage() {
                   checked={nodeTypes.has(type)}
                   key={type}
                   label={nodeTypeLabel(type)}
-                  onChange={() =>
-                    toggleRepeated("type", type, nodeTypes, NODE_TYPES)
-                  }
+                  onChange={() => toggleNodeType(type)}
                 />
               ))}
             </FilterGroup>
@@ -622,9 +189,7 @@ export function NetworkPage() {
                   checked={edgeKinds.has(kind)}
                   key={kind}
                   label={edgeKindLabel(kind)}
-                  onChange={() =>
-                    toggleRepeated("relation", kind, edgeKinds, EDGE_KINDS)
-                  }
+                  onChange={() => toggleEdgeKind(kind)}
                 />
               ))}
             </FilterGroup>
@@ -637,25 +202,21 @@ export function NetworkPage() {
               <button
                 aria-pressed={view === "graph"}
                 disabled={Boolean(rendererFailure)}
-                onClick={() =>
-                  updateParams((next) => next.delete("view"))
-                }
+                onClick={() => setView("graph")}
                 type="button"
               >
                 图幅视图
               </button>
               <button
                 aria-pressed={view === "list"}
-                onClick={() =>
-                  updateParams((next) => next.set("view", "list"))
-                }
+                onClick={() => setView("list")}
                 type="button"
               >
                 列表视图
               </button>
               <button
                 disabled={!selectedKey}
-                onClick={() => setFocusedKey(selectedKey)}
+                onClick={focusSelectedNode}
                 type="button"
               >
                 聚焦节点
@@ -745,6 +306,7 @@ export function NetworkPage() {
             path={path}
             resolved={pathResolved}
             to={nodeByKey.get(toKey) ?? null}
+            truncated={pathTruncated}
           />
         </section>
 
@@ -908,7 +470,7 @@ export function NetworkCanvas({
   );
 }
 
-function NetworkList({
+export function NetworkList({
   edges,
   nodes,
   onSelect,
@@ -983,7 +545,7 @@ function NetworkList({
   );
 }
 
-function SearchResults({
+export function SearchResults({
   error,
   items,
   loading,
@@ -1039,7 +601,7 @@ function SearchResults({
   );
 }
 
-function NetworkNodeDrawer({
+export function NetworkNodeDrawer({
   edges,
   fromKey,
   loading,
@@ -1060,6 +622,7 @@ function NetworkNodeDrawer({
   onSetEndpoint: (kind: "from" | "to", key: string) => void;
   toKey: string;
 }) {
+  const closeButton = useRef<HTMLButtonElement>(null);
   const incident = node
     ? edges.filter(({ source, target }) => source === node.key || target === node.key)
     : [];
@@ -1067,14 +630,27 @@ function NetworkNodeDrawer({
     ({ kind }) => kind === "concept_membership",
   ).length;
 
+  useEffect(() => {
+    closeButton.current?.focus();
+  }, [node?.key]);
+
   return (
-    <aside aria-label="节点详情" className="network-drawer" role="region">
+    <aside
+      aria-label="节点详情"
+      className="network-drawer"
+      role="region"
+    >
       <header>
         <div>
           <span>{node ? nodeTypeLabel(node.type) : "节点"} · 当前有效视图</span>
           <h2>{node?.label ?? "正在读取节点…"}</h2>
         </div>
-        <button aria-label="关闭节点详情" onClick={onClose} type="button">×</button>
+        <button
+          aria-label="关闭节点详情"
+          onClick={onClose}
+          ref={closeButton}
+          type="button"
+        >×</button>
       </header>
       {loading ? <p className="network-drawer-state" role="status">正在读取节点来源与邻居…</p> : null}
       {!loading && !node ? (
@@ -1152,7 +728,7 @@ function NetworkNodeDrawer({
   );
 }
 
-function PathDocket({
+export function PathDocket({
   error,
   from,
   loading,
@@ -1160,6 +736,7 @@ function PathDocket({
   path,
   resolved,
   to,
+  truncated,
 }: {
   error: string;
   from: NetworkNode | null;
@@ -1168,6 +745,7 @@ function PathDocket({
   path: NetworkPath | null;
   resolved: boolean;
   to: NetworkNode | null;
+  truncated: boolean;
 }) {
   let status = "选择起点和终点，服务端最多探索 6 步。";
 
@@ -1177,6 +755,8 @@ function PathDocket({
   else if (!from && to) status = `终点：${to.label}。请选择起点。`;
   else if (from && to && resolved && path) {
     status = `已找到 ${path.steps.length} 步真实路径。可逐边核验方向与来源。`;
+  } else if (from && to && resolved && truncated) {
+    status = "路径探索已达到查询预算，暂时无法确认是否存在真实路径。请缩短范围后重试。";
   } else if (from && to && resolved) {
     status = "没有找到由当前真实边构成的路径。";
   }
@@ -1224,7 +804,7 @@ function FilterCheck({
   );
 }
 
-class NetworkRendererBoundary extends Component<
+export class NetworkRendererBoundary extends Component<
   { children: ReactNode; onFailure: (reason: string) => void },
   { failed: boolean }
 > {
@@ -1241,43 +821,6 @@ class NetworkRendererBoundary extends Component<
   render() {
     return this.state.failed ? null : this.props.children;
   }
-}
-
-function mergeGraphs(
-  graphs: Array<{
-    edges: NetworkEdge[];
-    nodes: NetworkNode[];
-    truncated: boolean;
-  }>,
-): NetworkGraphState {
-  const nodes = new Map<string, NetworkNode>();
-  const edges = new Map<string, NetworkEdge>();
-
-  for (const graph of graphs) {
-    for (const node of graph.nodes) nodes.set(node.key, node);
-    for (const edge of graph.edges) edges.set(edge.edgeKey, edge);
-  }
-
-  return {
-    nodes: [...nodes.values()].sort((left, right) => left.key.localeCompare(right.key)),
-    edges: [...edges.values()].sort((left, right) => left.edgeKey.localeCompare(right.edgeKey)),
-    truncated: graphs.some(({ truncated }) => truncated),
-  };
-}
-
-function readRepeatedFilter<T extends string>(
-  params: URLSearchParams,
-  name: string,
-  allowed: readonly T[],
-): Set<T> {
-  const allowedSet = new Set<string>(allowed);
-  const values = params.getAll(name).filter((value): value is T => allowedSet.has(value));
-
-  return new Set(values.length > 0 ? values : allowed);
-}
-
-function validTypedKey(value: string | null): string {
-  return value && TYPED_KEY_PATTERN.test(value) ? value.toLowerCase() : "";
 }
 
 function nodeTypeLabel(type: NetworkNodeType): string {
@@ -1419,12 +962,4 @@ function shortLabel(label: string): string {
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(new Date(value));
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
-function messageFrom(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }

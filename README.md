@@ -4,7 +4,7 @@
 
 把零散文本保存成不可变的原文版本，再按需交给 AI 生成标题、摘要、知识点、证据片段和候选标签。AI 整理结果始终可以回到对应原文核验，也不会覆盖用户输入。
 
-![Knowledge 首页标签场](docs/screenshots/home.png)
+![V3.4 首页真实知识网络（macaron 主题）](docs/screenshots/home.png)
 
 ## 核心能力
 
@@ -16,6 +16,7 @@
 - **可维护 Concept**：可以把多个当前知识点组织成稳定定义，保留定义版本、成员变更、来源状态和归档历史。
 - **AI Concept 候选**：新知识生效后自动从全局知识点召回关联内容，也可一键为尚未覆盖的历史知识补做全量发现；“仅保存”不进入 Concept 关联，候选只有人工编辑并确认后才会晋级为正式 Concept。
 - **功能性知识网络**：Concept Relation 先经人工审查；独立 `/network` 工作区只绘制真实有效的 Membership、Knowledge Relation 与 Concept Relation，支持节点搜索、局部展开、来源抽屉、服务端路径和键盘等价列表。
+- **真实 3D 网络首页**：首页初始展示当前有效 Concept，按选择、节点搜索或路径加入 Knowledge Point；3D 与 `/network` 共享真实边、URL、抽屉和路径，并在 WebGL2 或渲染失败时按同状态降级为 2D 和键盘列表。
 - **关键词与语义检索**：同时搜索原文、AI 概览、知识点和标签，并按同一记录聚合结果。
 - **完整数据管理**：支持版本历史、归档、永久删除，以及 Markdown + JSON 完整导出和恢复。
 
@@ -83,13 +84,17 @@ pnpm run dev
 
 文本推理端点与 Embedding 端点相互独立，均使用 OpenAI-compatible 接口，可以分别连接不同服务商。
 
-## 功能性知识网络（V3.3）
+## 真实知识网络（V3.3–V3.4）
 
 网络节点统一使用 `concept:<uuid>` 或 `knowledge_point:<uuid>` typed key。公开读取接口为 `GET /api/v1/network/nodes/search`、`GET /api/v1/network/subgraph`、`GET /api/v1/network/nodes/:typedKey/neighbors` 和 `GET /api/v1/network/path`；只返回 `concept_membership`、`knowledge_relation`、`concept_relation` 三类真实边，并保留来源、确认记录、规范端点和路径遍历方向。
 
 局部子图最多返回 300 个节点、600 条边并展开到深度 2；路径最多搜索深度 6、访问 1000 个节点，并受 2 秒数据库查询预算保护。Concept Relation Suggestion 可通过 API 扫描和列出，用户可以修改后确认、拒绝，或撤销已确认关系。
 
 `/network` 默认以 Concept 为入口，选择或搜索后按需展开 Knowledge Point。2D 布局由真实 typed node key 与 edge key 确定性生成，局部展开不会移动已有节点；筛选、路径、选中对象和列表模式可由 URL 恢复。布局 Worker 或 SVG 失败时会保留当前状态并降级到键盘可操作列表。
+
+V3.4 首页复用同一网络控制器和确定性布局：3D 原样使用 x/y，只从 typed node key 派生浅层稳定 z，不把空间深度、距离、颜色或光效解释为关系。WebGL2、初始化、帧渲染或上下文失败时保留查询、URL、选择、路径和详情状态回到功能性 2D；2D 再失败时进入等价列表。
+
+首页底部的 Tag 定位与记录搜索继续是独立入口：Tag 只进入既有硬筛选搜索，不成为 Concept、Knowledge Point 或知识边。合成 500 节点／1000 真实边用于 3D 表现层的最终压力验收，不改变线上 300 节点／600 边读取预算；最终验收结果以 [V3 晋级路线](docs/V3-ROADMAP.md) 的进度记录为准。
 
 ## 常用命令
 

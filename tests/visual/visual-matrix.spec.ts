@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { DEFAULT_ANALYSIS_PROMPT } from "../../src/domain/analysis-prompt.js";
 import {
@@ -22,6 +22,101 @@ function snapshotName(theme: (typeof visualThemes)[number], name: string) {
   return theme === "macaron" ? `${name}.png` : `scifi-${name}.png`;
 }
 
+async function expectHomeTopology(stage: Locator): Promise<void> {
+  const topology = await stage.evaluate((element) => ({
+    edges: (element.getAttribute("data-edge-keys") ?? "")
+      .split(" ")
+      .filter(Boolean),
+    nodes: (element.getAttribute("data-node-keys") ?? "")
+      .split(" ")
+      .filter(Boolean),
+  }));
+
+  expect(topology.nodes.filter((key) => key.startsWith("concept:")))
+    .toHaveLength(1);
+  expect(
+    topology.nodes.filter((key) => key.startsWith("knowledge_point:")),
+  ).toHaveLength(3);
+  expect(topology.nodes.some((key) => key.startsWith("tag:"))).toBe(false);
+  expect(topology.edges).toHaveLength(3);
+  expect(
+    topology.edges.every((key) => key.startsWith("concept_membership:")),
+  ).toBe(true);
+}
+
+async function installHomeVisualNetworkRoutes(page: Page): Promise<void> {
+  const concept = networkConcept(
+    "41000000-0000-4000-8000-000000000001",
+    "变更数据捕获",
+    "通过读取事务日志识别增量变化，并以有序事件向下游传播，避免周期轮询造成的负载与延迟。",
+    1,
+  );
+  const points = [
+    networkPoint(
+      "42000000-0000-4000-8000-000000000001",
+      "CDC 捕获增量变化",
+      "CDC 读取数据库事务日志获取增量变化，避免对业务库进行周期轮询。",
+    ),
+    networkPoint(
+      "42000000-0000-4000-8000-000000000002",
+      "轮询带来的性能问题",
+      "传统轮询增加数据库负载，并会放大同步延迟和一致性风险。",
+    ),
+    networkPoint(
+      "42000000-0000-4000-8000-000000000003",
+      "事务日志保留提交顺序",
+      "事务日志保留变更顺序，使下游可以按提交顺序消费事件。",
+    ),
+  ];
+  const memberships = points.map((point, index) =>
+    networkMembership(
+      `43000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      concept.key,
+      point.key,
+    ),
+  );
+  const expandedNodes = [concept, ...points];
+
+  await page.route("**/api/v1/network/nodes/search**", async (route) => {
+    const url = new URL(route.request().url());
+    const query = (url.searchParams.get("q") ?? "").trim().toLocaleLowerCase();
+    const type = url.searchParams.get("type") ?? "all";
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "20", 10);
+    const matches = expandedNodes.filter(
+      (node) =>
+        (type === "all" || node.type === type) &&
+        node.label.toLocaleLowerCase().includes(query),
+    );
+
+    await route.fulfill({
+      json: {
+        items: matches.slice(0, limit),
+        limit,
+        truncated: matches.length > limit,
+      },
+    });
+  });
+  await page.route("**/api/v1/network/subgraph**", async (route) => {
+    const url = new URL(route.request().url());
+    const root = url.searchParams.get("root");
+
+    await route.fulfill({
+      json: {
+        root,
+        nodes: root ? expandedNodes : [concept],
+        edges: root ? memberships : [],
+        limits: {
+          depth: root ? 1 : 0,
+          edgeLimit: 600,
+          nodeLimit: 300,
+        },
+        truncated: false,
+        truncation: { edges: false, nodes: false },
+      },
+    });
+  });
+}
+
 for (const theme of visualThemes) {
   test.describe(theme, () => {
     test.beforeEach(async ({ page }) => {
@@ -30,27 +125,68 @@ for (const theme of visualThemes) {
       }, theme);
     });
 
-test("Home / 首页气泡标签场 · 1600×1000 基线与 1280×800 几何", async ({
+test("Home / 首页真实 3D 知识网络 · 双主题、2D 降级与 1280×800 几何", async ({
+  context,
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installHomeVisualNetworkRoutes(page);
   await page.goto(`${appBaseUrl}/`);
 
   const navigation = page.getByRole("navigation", { name: "主导航" });
-  const field = page.getByRole("region", {
-    name: theme === "scifi" ? "神经标签场" : "气泡标签场",
+  const main = page.getByRole("main", { name: "首页" });
+  const stage = main.getByRole("region", {
+    name: "真实 3D 知识网络",
   });
-  const focusedTag = field.getByRole("button", {
-    name: visualFixture.focusedTagName,
-    exact: true,
+  const canvas3d = stage.locator(
+    'canvas[aria-label="真实知识网络 3D 图幅"]',
+  );
+  const networkSearch = main.getByRole("search", {
+    name: "首页网络节点搜索",
+  });
+  const networkSearchbox = networkSearch.getByRole("searchbox", {
+    name: "搜索网络节点",
   });
 
-  await expect(focusedTag).toBeVisible();
-  await focusedTag.focus();
-  await expect(field).toHaveAttribute("data-state", /webgl2/u);
-  await expect(field.getByRole("status", { name: "标签焦点信息" }))
-    .toContainText(`${visualFixture.focusedTagName} · AI 候选`);
+  await expect(stage).toHaveAttribute("data-renderer", "webgl2");
+  await expect(stage).toHaveAttribute("data-motion", "reduce");
+  await expect(stage).toHaveAttribute("data-node-count", "1");
+  await expect(stage).toHaveAttribute("data-edge-count", "0");
+  await expect(canvas3d).toBeVisible();
+  await expect(canvas3d).toHaveAttribute("data-render-mode", "demand");
+  await expect(canvas3d).toHaveAttribute("data-reduced-motion", "true");
+
+  await networkSearchbox.fill("变更数据捕获");
+  await networkSearchbox.press("Enter");
+  await networkSearch
+    .getByRole("button", { name: "选择搜索结果：变更数据捕获" })
+    .click();
+
+  const drawer = page.getByRole("region", { name: "节点详情" });
+
+  await expect(drawer.getByRole("heading", { name: "变更数据捕获" }))
+    .toBeVisible();
+  await expect(stage).toHaveAttribute("data-node-count", "4");
+  await expect(stage).toHaveAttribute("data-edge-count", "3");
+  await expectHomeTopology(stage);
+  await expect(stage).toHaveAttribute("data-renderer", "webgl2");
+  await expect(canvas3d).toBeVisible();
+  const resetCamera = main.getByRole("button", { name: "重置镜头" });
+
+  await expect(resetCamera).toBeEnabled();
+  await resetCamera.click();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      ),
+  );
   await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
-  await expectBox(field, { x: 0, y: 60, width: 1_600, height: 940 });
+  await expectBox(main, { x: 0, y: 60, width: 1_600, height: 940 });
+  await expectBox(stage, { x: 0, y: 60, width: 1_120, height: 940 });
+  await expectBox(canvas3d, { x: 0, y: 60, width: 1_120, height: 940 });
+  await expectBox(drawer, { x: 1_120, y: 60, width: 480, height: 940 });
+
   await expect(page).toHaveScreenshot(snapshotName(theme, "home"), {
     animations: "disabled",
     caret: "hide",
@@ -60,10 +196,93 @@ test("Home / 首页气泡标签场 · 1600×1000 基线与 1280×800 几何", as
 
   await page.setViewportSize({ width: 1_280, height: 800 });
   await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-  await expectBox(field, { x: 0, y: 60, width: 1_280, height: 740 });
+  await expectBox(main, { x: 0, y: 60, width: 1_280, height: 740 });
+  await expectBox(stage, { x: 0, y: 60, width: 800, height: 740 });
+  await expectBox(canvas3d, { x: 0, y: 60, width: 800, height: 740 });
+  await expectBox(drawer, { x: 800, y: 60, width: 480, height: 740 });
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBe(1_280);
+
+  if (theme === "macaron") {
+    await context.addInitScript(() => {
+      window.localStorage.setItem("knowledge.theme.v1", "macaron");
+      const getContext = HTMLCanvasElement.prototype.getContext;
+
+      HTMLCanvasElement.prototype.getContext = function disabledWebGl2(
+        this: HTMLCanvasElement,
+        contextId: string,
+        options?: unknown,
+      ) {
+        if (contextId === "webgl2") {
+          return null;
+        }
+
+        return getContext.call(this, contextId, options);
+      } as typeof HTMLCanvasElement.prototype.getContext;
+    });
+    const fallbackPage = await context.newPage();
+
+    await fallbackPage.emulateMedia({ reducedMotion: "reduce" });
+    await installHomeVisualNetworkRoutes(fallbackPage);
+    await fallbackPage.goto(`${appBaseUrl}/`);
+
+    const fallbackMain = fallbackPage.getByRole("main", { name: "首页" });
+    const fallbackStage = fallbackMain.getByRole("region", {
+      name: "真实 3D 知识网络",
+    });
+    const fallbackSearch = fallbackMain.getByRole("search", {
+      name: "首页网络节点搜索",
+    });
+    const fallbackSearchbox = fallbackSearch.getByRole("searchbox", {
+      name: "搜索网络节点",
+    });
+
+    await expect(fallbackStage).toHaveAttribute("data-renderer", "2d");
+    await expect(fallbackStage).toHaveAttribute("data-motion", "reduce");
+    await fallbackSearchbox.fill("变更数据捕获");
+    await fallbackSearchbox.press("Enter");
+    await fallbackSearch
+      .getByRole("button", { name: "选择搜索结果：变更数据捕获" })
+      .click();
+
+    const fallbackCanvas = fallbackMain.getByRole("group", {
+      name: "真实知识网络图幅",
+    });
+    const fallbackDrawer = fallbackPage.getByRole("region", {
+      name: "节点详情",
+    });
+
+    await expect(fallbackStage).toHaveAttribute("data-node-count", "4");
+    await expect(fallbackStage).toHaveAttribute("data-edge-count", "3");
+    await expectHomeTopology(fallbackStage);
+    await expect(fallbackCanvas.getByRole("button")).toHaveCount(4);
+    await expect(
+      fallbackCanvas.locator(".network-edges > [role='listitem']"),
+    ).toHaveCount(3);
+    await expect(
+      fallbackDrawer.getByRole("heading", { name: "变更数据捕获" }),
+    ).toBeVisible();
+    await expectBox(fallbackStage, {
+      x: 0,
+      y: 60,
+      width: 1_120,
+      height: 940,
+    });
+    await expectBox(fallbackDrawer, {
+      x: 1_120,
+      y: 60,
+      width: 480,
+      height: 940,
+    });
+    await expect(fallbackPage).toHaveScreenshot("home-2d-fallback.png", {
+      animations: "disabled",
+      caret: "hide",
+      fullPage: false,
+      maxDiffPixels: 1_200,
+    });
+    await fallbackPage.close();
+  }
 });
 
 test("Records / 记录库 · 1600×1000 基线与 1280×800 错落摘录流", async ({

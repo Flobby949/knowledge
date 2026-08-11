@@ -1,876 +1,924 @@
-import { randomUUID } from "node:crypto";
-
 import {
   expect,
   test,
-  type APIRequestContext,
   type Locator,
   type Page,
 } from "./fixture.js";
 
+import type {
+  NetworkEdge,
+  NetworkGraph,
+  NetworkNode,
+  NetworkPath,
+} from "../../src/client/api.js";
 import { expectBox } from "./geometry.js";
 
 const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 
-type SeededTag = {
-  id: string;
-  name: string;
-  approval: "approved" | "candidate";
-};
+const ids = {
+  conceptA: "41000000-0000-4000-8000-000000000001",
+  conceptB: "41000000-0000-4000-8000-000000000002",
+  conceptC: "41000000-0000-4000-8000-000000000003",
+  pointA: "42000000-0000-4000-8000-000000000001",
+  pointB: "42000000-0000-4000-8000-000000000002",
+  pointC: "42000000-0000-4000-8000-000000000003",
+  pointD: "42000000-0000-4000-8000-000000000004",
+  tag: "61000000-0000-4000-8000-000000000001",
+} as const;
 
-test.describe("home bubble tag field", () => {
+test.describe("V3.4 home real knowledge network", () => {
   test.use({
     contextOptions: { reducedMotion: "reduce" },
     viewport: { width: 1_600, height: 1_000 },
   });
 
-  test("an empty instance offers only the real first-record actions", async ({
+  test("starts with Concepts, expands real Knowledge Points, and keeps selection and path in browser history", async ({
     page,
   }) => {
+    const fixture = homeNetworkFixture();
+
+    await installHomeNetworkRoutes(page, fixture);
     await page.goto(appUrl("/"));
 
     const home = page.getByRole("main", { name: "首页" });
-    const scene = home.getByRole("region", { name: "气泡标签场" });
-    const emptyState = scene
-      .getByRole("status")
-      .filter({ hasText: "记录第一条知识，让网络开始生长" });
-    const firstRecordActions = emptyState.getByRole("button", {
-      name: "新建第一条记录",
-      exact: true,
+    const stage = home.getByRole("region", { name: "真实 3D 知识网络" });
+    const networkSearch = home.getByRole("search", {
+      name: "首页网络节点搜索",
+    });
+    const searchbox = networkSearch.getByRole("searchbox", {
+      name: "搜索网络节点",
     });
 
-    await expect(
-      scene.getByRole("list", { name: "全部标签" }).getByRole("button"),
-    ).toHaveCount(0);
-    await expect(emptyState).toBeVisible();
-    await expect(firstRecordActions).toHaveCount(2);
-    await expect(
-      page
-        .getByRole("main", { name: "首页" })
-        .getByRole("search", { name: "首页搜索" })
-        .getByRole("searchbox", { name: "定位标签或搜索记录" }),
-    ).toBeEnabled();
-    await expect(
-      page
-        .getByRole("navigation", { name: "主导航" })
-        .getByRole("search"),
-    ).toHaveCount(0);
+    await expect(stage).toHaveAttribute("data-renderer", "webgl2");
+    await expect(stage).toHaveAttribute(
+      "data-node-keys",
+      fixture.concepts.map(({ key }) => key).sort().join(" "),
+    );
+    await expect(stage).toHaveAttribute("data-node-count", "3");
+    await expect(stage).toHaveAttribute(
+      "data-edge-keys",
+      fixture.initialEdges.map(({ edgeKey }) => edgeKey).sort().join(" "),
+    );
+    await expect(stage).toHaveAttribute("data-edge-count", "1");
 
-    for (let index = 0; index < 2; index += 1) {
-      await firstRecordActions.nth(index).click();
+    const viewToggle = home.getByRole("button", {
+      name: "切换到列表视图",
+    });
 
-      const dialog = page.getByRole("dialog", { name: "新建记录" });
+    await viewToggle.click();
+    await expect(home.getByRole("region", { name: "网络等价列表" }))
+      .toBeVisible();
+    await expect(
+      home.getByRole("button", { name: "切换到图幅视图" }),
+    ).toBeVisible();
+    await home.getByRole("button", { name: "切换到图幅视图" }).click();
+    await expect(stage).toHaveAttribute("data-renderer", "webgl2");
 
-      await expect(dialog).toBeVisible();
-      await dialog.getByRole("button", { name: "关闭新建记录" }).click();
-      await expect(dialog).toBeHidden();
-    }
+    await selectNetworkSearchResult(
+      networkSearch,
+      searchbox,
+      fixture.conceptA,
+    );
+
+    const drawer = page.getByRole("region", { name: "节点详情" });
+
+    await expect(drawer.getByRole("heading", { name: fixture.conceptA.label }))
+      .toBeVisible();
+    await expectBox(drawer, { width: 480 }, 4);
+    await expectNetworkQuery(page, { node: fixture.conceptA.key });
+    await expect(stage).toHaveAttribute(
+      "data-node-keys",
+      fixture.nodes.map(({ key }) => key).sort().join(" "),
+    );
+    await expect(stage).toHaveAttribute("data-renderer", "webgl2");
+    await expect(stage).toHaveAttribute("data-node-count", "7");
+    await expect(stage).toHaveAttribute(
+      "data-edge-keys",
+      fixture.edges.map(({ edgeKey }) => edgeKey).sort().join(" "),
+    );
+    await expect(stage).toHaveAttribute("data-edge-count", "6");
+
+    await page.goBack();
+    await expect(drawer).toHaveCount(0);
+    await expectNetworkQuery(page, { node: null });
+    await expect(stage).toHaveAttribute(
+      "data-node-keys",
+      fixture.concepts.map(({ key }) => key).sort().join(" "),
+    );
+
+    await selectNetworkSearchResult(
+      networkSearch,
+      searchbox,
+      fixture.conceptA,
+    );
+    await drawer.getByRole("button", { name: "设为路径起点" }).click();
+    await selectNetworkSearchResult(
+      networkSearch,
+      searchbox,
+      fixture.conceptB,
+    );
+    await drawer.getByRole("button", { name: "设为路径终点" }).click();
+
+    await expectNetworkQuery(page, {
+      from: fixture.conceptA.key,
+      node: fixture.conceptB.key,
+      to: fixture.conceptB.key,
+    });
+    await expect(home.getByRole("status", { name: "路径探索结果" }))
+      .toHaveText("已找到 3 步真实路径。可逐边核验方向与来源。");
+    await expect(stage).toHaveAttribute(
+      "data-path-edge-keys",
+      fixture.path.steps.map(({ edgeKey }) => edgeKey).join(" "),
+    );
+    await expect(stage).toHaveAttribute("data-path-edge-count", "3");
   });
 
-  test("every tag remains identifiable and operable in the motion-safe field and its WebGL2 fallback", async ({
-    context,
+  test("keeps Tag filtering, record search, and new-record entry outside the network", async ({
     page,
-    request,
   }) => {
-    const marker = `home-field-${randomUUID().slice(0, 8)}`;
-    const seeded = await seedTagUniverse(request, marker);
+    const fixture = homeNetworkFixture();
 
+    await installHomeNetworkRoutes(page, fixture);
     await page.goto(appUrl("/"));
-    await expect(page).toHaveURL(appUrl("/"));
 
-    const navigation = page.getByRole("navigation", { name: "主导航" });
-    const home = page.getByRole("main", { name: "首页" });
-    const scene = home.getByRole("region", { name: "气泡标签场" });
-    const tagList = scene.getByRole("list", { name: "全部标签" });
-    const searchHud = home.getByRole("search", { name: "首页搜索" });
-    const resetView = scene.getByRole("button", {
-      name: "重置视角",
-      exact: true,
-    });
-
-    await expectBox(navigation, {
-      x: 0,
-      y: 0,
-      width: 1_600,
-      height: 60,
-    });
-    await expect(page.getByRole("main")).toHaveCount(1);
-    await expect(
-      page.getByRole("region", { name: "气泡标签场" }),
-    ).toHaveCount(1);
-    await expectBox(scene, {
-      x: 0,
-      y: 60,
-      width: 1_600,
-      height: 940,
-    });
-    await expectNoPageScroll(page);
-    await expectDataState(scene, "pastel-space");
-    await expectDataState(scene, "webgl2");
-    await expectDataState(scene, "static-motion");
-    await expectWebGlCanvasToOwnTheField(scene);
-
-    const reducedMotionCamera = await readCameraState(scene);
-
-    await page.waitForTimeout(240);
-    await expect(scene).toHaveAttribute(
-      "data-camera",
-      reducedMotionCamera.signature,
-    );
-    await expect(resetView).toBeVisible();
-    await expect(resetView).toBeEnabled();
-
-    await expect
-      .poll(() => tagList.getByRole("button").count())
-      .toBeGreaterThanOrEqual(seeded.tags.length);
-
-    for (const tag of seeded.tags) {
-      const node = tagNode(tagList, tag);
-
-      await expectTagNode(node, tag);
-      await node.focus();
-      await expect(node).toBeFocused();
-    }
-
-    const candidate = seeded.tags.find(
-      (tag) => tag.approval === "candidate",
-    );
-    const approved = seeded.tags.find(
-      (tag) => tag.approval === "approved" && tag.name.includes(marker),
-    );
-    const highUseTag = seeded.tags.find(
-      (tag) => tag.name === `跨记录主题 ${marker}`,
-    );
-
-    expect(
-      candidate,
-      "the public fake-AI flow must create a candidate tag",
-    ).toBeDefined();
-    expect(
-      approved,
-      "the public record flow must create an approved tag",
-    ).toBeDefined();
-    expect(highUseTag, "the field must include a higher-use tag").toBeDefined();
-
-    if (!candidate || !approved || !highUseTag) {
-      return;
-    }
-
-    await expectEnergyNode(tagNode(tagList, approved), "complete");
-    await expectEnergyNode(tagNode(tagList, candidate), "dashed");
-
-    const searchInput = searchHud.getByRole("searchbox", {
+    const homeSearch = page
+      .getByRole("main", { name: "首页" })
+      .getByRole("search", { name: "首页搜索" });
+    const searchbox = homeSearch.getByRole("searchbox", {
       name: "定位标签或搜索记录",
     });
 
-    await expect(searchHud).toBeVisible();
-    await searchInput.fill(candidate.name);
-    await searchHud
-      .getByRole("option", { name: candidate.name, exact: true })
+    await searchbox.fill(fixture.tag.name);
+    await homeSearch
+      .getByRole("button", { name: fixture.tag.name, exact: true })
       .click();
+    await expect(page).toHaveURL(tagSearchUrl(fixture.tag.id));
 
-    const focusedCandidate = tagNode(tagList, candidate);
-
-    await expectDataState(focusedCandidate, "focused");
-    await expect(
-      scene.getByRole("status", { name: "标签焦点信息" }),
-    ).toContainText(candidate.name);
-    await expect(
-      scene.getByRole("status", { name: "标签焦点信息" }),
-    ).toContainText("AI 候选");
-
-    const cameraBeforeInteraction = await readCameraState(scene);
-    const dragTargetY =
-      cameraBeforeInteraction.pitch <= 0 ? 528 : 392;
-
-    await dragScene(
-      page,
-      scene,
-      { x: 46, y: 460 },
-      { x: 176, y: dragTargetY },
-    );
-
-    const cameraAfterDrag = await readCameraState(scene);
-
-    expect(cameraAfterDrag.yaw).not.toBe(cameraBeforeInteraction.yaw);
-    expect(cameraAfterDrag.pitch).not.toBe(cameraBeforeInteraction.pitch);
-    expect(await page.evaluate(() => window.getSelection()?.toString() ?? ""))
-      .toBe("");
-
-    await scene.dispatchEvent("wheel", { deltaY: -360 });
-
-    const cameraAfterZoom = await readCameraState(scene);
-
-    expect(cameraAfterZoom.distance).toBeLessThan(cameraAfterDrag.distance);
-
-    await searchInput.fill(candidate.name);
-    await searchHud
-      .getByRole("option", { name: candidate.name, exact: true })
-      .click();
-    await expect(focusedCandidate).toBeVisible();
-    const cameraBeforeNavigation = await readCameraState(scene);
-    await focusedCandidate.focus();
-    await expect(focusedCandidate).toBeFocused();
-    await focusedCandidate.press("Enter");
-    await expect(page).toHaveURL(tagSearchUrl(candidate.id));
     await page.goBack();
     await expect(page).toHaveURL(appUrl("/"));
 
-    const returnedScene = page.getByRole("region", { name: "气泡标签场" });
-
-    await expect(returnedScene).toHaveAttribute(
-      "data-camera",
-      cameraBeforeNavigation.signature,
-    );
-    await expect(
-      tagNode(
-        returnedScene
-          .getByRole("list", { name: "全部标签" }),
-        candidate,
-      ),
-    ).toHaveAttribute("data-tag-id", candidate.id);
-
-    await page
-      .getByRole("region", { name: "气泡标签场" })
-      .getByRole("list", { name: "全部标签" })
-      .getByRole("button", { name: approved.name, exact: true })
-      .click();
-    await expect(page).toHaveURL(tagSearchUrl(approved.id));
-    await page.goBack();
-    await expect(page).toHaveURL(appUrl("/"));
-
-    const restoredScene = page.getByRole("region", { name: "气泡标签场" });
-
-    await restoredScene
-      .getByRole("button", { name: "重置视角", exact: true })
-      .click();
-    await expect(restoredScene).toHaveAttribute("data-camera", "0.420|-0.280|8.800");
-    await expect(page).toHaveURL(appUrl("/"));
-
-    const searchRecordsQuery = `事务日志如何保持顺序 ${marker}`;
+    const recordQuery = "事件消费如何保持幂等";
     const restoredSearch = page
-      .getByRole("main", { name: "首页" })
       .getByRole("search", { name: "首页搜索" })
       .getByRole("searchbox", { name: "定位标签或搜索记录" });
 
-    await restoredSearch.fill(searchRecordsQuery);
+    await restoredSearch.fill(recordQuery);
     await restoredSearch.press("Enter");
-    await expect(page).toHaveURL(recordSearchUrl(searchRecordsQuery));
+    await expect(page).toHaveURL(recordSearchUrl(recordQuery));
+
     await page.goBack();
-    await expect(page).toHaveURL(appUrl("/"));
-
-    const lostContextScene = page.getByRole("region", {
-      name: "气泡标签场",
-    });
-
-    await lostContextScene.locator("canvas").dispatchEvent("webglcontextlost", {
-      cancelable: true,
-    });
-    await expectDataState(lostContextScene, "dom-2d");
-    await expect(
-      lostContextScene.getByRole("status", { name: "渲染模式" }),
-    ).toContainText("正在使用简化视图");
-
-    const tagsAfterContextLoss = lostContextScene.getByRole("list", {
-      name: "全部标签",
-    });
-    const [higherUseBox, lowerUseBox] = await Promise.all([
-      tagNode(tagsAfterContextLoss, highUseTag)
-        .locator("[data-bubble-core]")
-        .boundingBox(),
-      tagNode(tagsAfterContextLoss, candidate)
-        .locator("[data-bubble-core]")
-        .boundingBox(),
-    ]);
-
-    expect(higherUseBox?.width ?? 0).toBeGreaterThan(lowerUseBox?.width ?? 0);
-
-    for (const tag of seeded.tags) {
-      await expect(tagNode(tagsAfterContextLoss, tag)).toBeVisible();
-    }
-
-    const fallbackPage = await context.newPage();
-
-    await disableWebGl2(fallbackPage);
-    await fallbackPage.goto(appUrl("/"));
-    await expect(fallbackPage).toHaveURL(appUrl("/"));
-
-    const fallbackScene = fallbackPage.getByRole("region", {
-      name: "气泡标签场",
-    });
-    const fallbackTags = fallbackScene.getByRole("list", {
-      name: "全部标签",
-    });
-
-    await expectDataState(fallbackScene, "pastel-space");
-    await expectDataState(fallbackScene, "dom-2d");
-    await expectDataState(fallbackScene, "static-motion");
-    await expectBox(fallbackScene, {
-      x: 0,
-      y: 60,
-      width: 1_600,
-      height: 940,
-    });
-    await expectNoPageScroll(fallbackPage);
-    await expect(
-      fallbackScene.getByRole("status", { name: "渲染模式" }),
-    ).toContainText("正在使用简化视图");
-
-    for (const tag of seeded.tags) {
-      const node = tagNode(fallbackTags, tag);
-
-      await expectTagNode(node, tag);
-      await expect(node).toBeVisible();
-    }
-
-    await tagNode(fallbackTags, approved).focus();
-    await tagNode(fallbackTags, approved).press("Enter");
-    await expect(fallbackPage).toHaveURL(tagSearchUrl(approved.id));
-    await expect(
-      fallbackPage.getByRole("region", { name: "标签硬筛选" }),
-    ).toContainText(approved.name);
+    await page
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("button", { name: "新建记录", exact: true })
+      .click();
+    await expect(page.getByRole("dialog", { name: "新建记录" }))
+      .toBeVisible();
   });
 
-  test("a high-density field keeps every tag operable while reducing default label work", async ({
+  test("Escape closes only the new-record dialog and preserves the selected network node", async ({
     page,
-    request,
   }) => {
-    const marker = `home-lod-${randomUUID().slice(0, 8)}`;
-    const tagCount = 601;
+    const fixture = homeNetworkFixture();
 
-    await seedDenseTagRecord(request, marker, tagCount);
+    await installHomeNetworkRoutes(page, fixture);
+    await page.goto(appUrl("/"));
+
+    const home = page.getByRole("main", { name: "首页" });
+    const networkSearch = home.getByRole("search", {
+      name: "首页网络节点搜索",
+    });
+
+    await selectNetworkSearchResult(
+      networkSearch,
+      networkSearch.getByRole("searchbox", { name: "搜索网络节点" }),
+      fixture.conceptA,
+    );
+
+    const drawer = page.getByRole("region", { name: "节点详情" });
+
+    await expect(drawer).toBeVisible();
+    await page
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("button", { name: "新建记录", exact: true })
+      .click();
+
+    const dialog = page.getByRole("dialog", { name: "新建记录" });
+
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(drawer).toBeVisible();
+    await expectNetworkQuery(page, { node: fixture.conceptA.key });
+
+    const filters = home.locator("details.home-network-filters");
+
+    await filters.locator("summary").click();
+    await expect(filters).toHaveAttribute("open", "");
+    await page.keyboard.press("Escape");
+    await expect(filters).not.toHaveAttribute("open", "");
+    await expect(drawer).toBeVisible();
+
+    const homeSearch = home.getByRole("search", { name: "首页搜索" });
+    const homeSearchbox = homeSearch.getByRole("searchbox", {
+      name: "定位标签或搜索记录",
+    });
+
+    await homeSearchbox.fill(fixture.tag.name);
+    await expect(homeSearch.getByRole("region", { name: "搜索建议" }))
+      .toBeVisible();
+    await expect(homeSearchbox).toHaveAttribute(
+      "aria-controls",
+      "home-search-suggestions",
+    );
+    await expect(homeSearchbox).toHaveAttribute("aria-expanded", "true");
+    await homeSearchbox.press("Escape");
+    await expect(homeSearch.getByRole("region", { name: "搜索建议" }))
+      .toHaveCount(0);
+    await expect(homeSearchbox).toHaveAttribute("aria-expanded", "false");
+    await expect(homeSearchbox).toHaveValue(fixture.tag.name);
+    await expect(drawer).toBeVisible();
+  });
+
+  test("reports a truncated path search without claiming that no path exists", async ({
+    page,
+  }) => {
+    const fixture = homeNetworkFixture();
+
+    await installHomeNetworkRoutes(page, fixture, { pathTruncated: true });
+    await page.goto(homeStateUrl(fixture));
+
+    await expect(page.getByRole("status", { name: "路径探索结果" }))
+      .toHaveText(
+        "路径探索已达到查询预算，暂时无法确认是否存在真实路径。请缩短范围后重试。",
+      );
+  });
+
+  test("WebGL2 creation failure preserves node, path, filters, and drawer in the canonical 2D view", async ({
+    page,
+  }) => {
+    const fixture = homeNetworkFixture();
+
     await disableWebGl2(page);
-    await page.goto(appUrl("/"));
+    await installHomeNetworkRoutes(page, fixture);
+    await page.goto(homeStateUrl(fixture));
 
-    const scene = page.getByRole("region", { name: "气泡标签场" });
-    const tagList = scene.getByRole("list", { name: "全部标签" });
-    const tags = tagList.getByRole("button");
-    const seededTags = tagList.getByRole("button", {
-      name: new RegExp(marker, "u"),
-    });
+    const home = page.getByRole("main", { name: "首页" });
+    const stage = home.getByRole("region", { name: "真实 3D 知识网络" });
 
-    await expect(scene).toHaveAttribute("data-lod", "compact");
-    await expect(seededTags).toHaveCount(tagCount);
-    await expect
-      .poll(() =>
-        tags.evaluateAll((buttons) =>
-          buttons.every((button) => !(button as HTMLButtonElement).disabled),
-        ),
-      )
-      .toBe(true);
-
-    const hiddenLabelNode = scene
-      .locator('.tag-node-list button[data-label="lod-hidden"]')
-      .first();
-    const hiddenLabelName = await hiddenLabelNode.getAttribute("aria-label");
-
-    expect(hiddenLabelName).not.toBeNull();
-    await expect(hiddenLabelNode).toBeEnabled();
-    await expect(hiddenLabelNode.locator("strong")).toHaveCSS("opacity", "0");
-    await hiddenLabelNode.focus();
-
-    const focusedNode = scene.getByRole("button", {
-      name: hiddenLabelName ?? "",
-      exact: true,
-    });
-
-    await expect(focusedNode).toBeFocused();
-    await expect(focusedNode.locator("strong")).toHaveCSS("opacity", "1");
-
-    const focusedTagId = await focusedNode.getAttribute("data-tag-id");
-
-    expect(focusedTagId).not.toBeNull();
-    await focusedNode.press("Enter");
-    await expect(page).toHaveURL(tagSearchUrl(focusedTagId ?? ""));
-  });
-});
-
-test.describe("home bubble tag field live motion", () => {
-  test.use({
-    contextOptions: { reducedMotion: "no-preference" },
-    viewport: { width: 1_600, height: 1_000 },
-  });
-
-  test("the field auto-rotates only while the user is not inspecting a tag", async ({
-    page,
-    request,
-  }) => {
-    const tagName = `运动信号 ${randomUUID().slice(0, 8)}`;
-
-    await seedSaveOnlyTag(request, tagName);
-    await page.goto(appUrl("/"));
-
-    const scene = page.getByRole("region", { name: "气泡标签场" });
-    const node = scene
-      .getByRole("list", { name: "全部标签" })
-      .getByRole("button", { name: tagName, exact: true });
-
-    await expectDataState(scene, "webgl2");
-    await expectDataState(scene, "live-motion");
-
-    const initialYaw = await scene.getAttribute("data-camera-yaw");
-
-    await expect
-      .poll(() => scene.getAttribute("data-camera-yaw"))
-      .not.toBe(initialYaw);
-
-    await node.hover();
-    await page.waitForTimeout(100);
-
-    const pausedYaw = await scene.getAttribute("data-camera-yaw");
-
-    await page.waitForTimeout(240);
-    await expect(scene).toHaveAttribute("data-camera-yaw", pausedYaw ?? "");
-
-    await node.focus();
-    await page.waitForTimeout(240);
-    await expect(scene).toHaveAttribute("data-camera-yaw", pausedYaw ?? "");
-  });
-});
-
-test.describe("home bubble tag field at the minimum supported viewport", () => {
-  test.use({
-    contextOptions: { reducedMotion: "reduce" },
-    viewport: { width: 1_280, height: 800 },
-  });
-
-  test("keeps the complete field and both HUD controls inside 1280px", async ({
-    page,
-    request,
-  }) => {
-    const tagName = `最小视口 ${randomUUID().slice(0, 8)}`;
-
-    await seedSaveOnlyTag(request, tagName);
-    await page.goto(appUrl("/"));
-
-    const navigation = page.getByRole("navigation", { name: "主导航" });
-    const scene = page.getByRole("region", { name: "气泡标签场" });
-    const search = page.getByRole("search", { name: "首页搜索" });
-
-    await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
-    await expectBox(scene, { x: 0, y: 60, width: 1_280, height: 740 });
-    await expectNoPageScroll(page, { height: 800, width: 1_280 });
-    await expect(search).toBeVisible();
+    await expect(stage).toHaveAttribute("data-renderer", "2d");
     await expect(
-      scene.getByRole("button", { name: "重置视角", exact: true }),
+      home.getByRole("group", { name: "真实知识网络图幅" }),
     ).toBeVisible();
+    await expectFallbackState(page, fixture);
+  });
+
+  test("context loss and a later 3D frame exception both preserve state while falling back to 2D", async ({
+    context,
+    page,
+  }) => {
+    const fixture = homeNetworkFixture();
+
+    await installHomeNetworkRoutes(page, fixture);
+    await page.goto(homeStateUrl(fixture));
+
+    const home = page.getByRole("main", { name: "首页" });
+    const stage = home.getByRole("region", { name: "真实 3D 知识网络" });
+    const canvas = stage.locator(
+      'canvas[aria-label="真实知识网络 3D 图幅"]',
+    );
+
+    await expect(stage).toHaveAttribute("data-renderer", "webgl2");
+    await expect(canvas).toBeVisible();
+    await canvas.dispatchEvent("webglcontextlost", { cancelable: true });
+    await expect(stage).toHaveAttribute("data-renderer", "2d");
     await expect(
-      scene
-        .getByRole("list", { name: "全部标签" })
-        .getByRole("button", { name: tagName, exact: true }),
+      home.getByRole("group", { name: "真实知识网络图幅" }),
+    ).toBeVisible();
+    await expectFallbackState(page, fixture);
+
+    const frameFailurePage = await context.newPage();
+
+    await installArmedWebGlFrameFailure(frameFailurePage);
+    await installHomeNetworkRoutes(frameFailurePage, fixture);
+    await frameFailurePage.goto(homeStateUrl(fixture));
+
+    const frameStage = frameFailurePage
+      .getByRole("main", { name: "首页" })
+      .getByRole("region", { name: "真实 3D 知识网络" });
+
+    await expect(frameStage).toHaveAttribute("data-renderer", "webgl2");
+    await frameFailurePage.evaluate(() => {
+      (
+        window as unknown as Window & {
+          __armHome3dFrameFailure: () => void;
+        }
+      ).__armHome3dFrameFailure();
+    });
+    await frameFailurePage.setViewportSize({ width: 1_590, height: 1_000 });
+
+    await expect(frameStage).toHaveAttribute("data-renderer", "2d");
+    await expect(
+      frameFailurePage.getByRole("group", { name: "真实知识网络图幅" }),
+    ).toBeVisible();
+    await expectFallbackState(frameFailurePage, fixture);
+  });
+
+  test("a Worker failure after the 3D-to-2D fallback keeps the same state in the keyboard list", async ({
+    page,
+  }) => {
+    const fixture = homeNetworkFixture();
+
+    await disableWebGl2(page);
+    await breakNetworkLayoutWorker(page);
+    await installHomeNetworkRoutes(page, fixture);
+    await page.goto(homeStateUrl(fixture));
+
+    const home = page.getByRole("main", { name: "首页" });
+    const stage = home.getByRole("region", { name: "真实 3D 知识网络" });
+    const list = home.getByRole("region", { name: "网络等价列表" });
+
+    await expect(stage).toHaveAttribute("data-renderer", "list");
+    await expect(list).toBeVisible();
+    await expect(
+      list.getByRole("button", { name: `打开节点：${fixture.conceptA.label}` }),
     ).toBeEnabled();
+    await expect(
+      home.getByRole("button", { name: "切换到图幅视图" }),
+    ).toBeDisabled();
+    await expectFallbackState(page, fixture);
+  });
+
+  test("reduced motion renders on demand without a continuous idle RAF loop", async ({
+    page,
+  }) => {
+    const fixture = homeNetworkFixture();
+
+    await auditAnimationFrames(page);
+    await installHomeNetworkRoutes(page, fixture);
+    await page.goto(appUrl("/"));
+
+    const stage = page.getByRole("region", { name: "真实 3D 知识网络" });
+
+    await expect(stage).toHaveAttribute("data-renderer", "webgl2");
+    await expect(stage).toHaveAttribute("data-motion", "reduce");
+    await expect(stage).toHaveAttribute("data-node-count", "3");
     await expect
-      .poll(() => visibleLabelOverlaps(scene))
-      .toEqual([]);
+      .poll(() => readRafAudit(page))
+      .toMatchObject({ pending: 0 });
+    await page.waitForTimeout(120);
+    const idleStart = await readRafAudit(page);
 
-    const focusedNode = scene
-      .getByRole("list", { name: "全部标签" })
-      .getByRole("button", { name: tagName, exact: true });
+    await page.waitForTimeout(320);
+    const idleEnd = await readRafAudit(page);
 
-    await focusedNode.focus();
-    await expect(focusedNode.locator("strong")).toHaveCSS("opacity", "1");
-    await expect(focusedNode.locator("strong")).toHaveText(tagName);
+    expect(idleEnd.pending).toBe(0);
+    expect(idleEnd.requested).toBe(idleStart.requested);
   });
 });
 
-function tagNode(list: Locator, tag: SeededTag): Locator {
-  return list.getByRole("button", { name: tag.name, exact: true });
+interface HomeNetworkFixture {
+  conceptA: NetworkNode;
+  conceptB: NetworkNode;
+  concepts: NetworkNode[];
+  edges: NetworkEdge[];
+  initialEdges: NetworkEdge[];
+  nodes: NetworkNode[];
+  path: NetworkPath;
+  tag: { id: string; name: string };
 }
 
-async function expectTagNode(node: Locator, tag: SeededTag): Promise<void> {
-  await expect(node).toHaveCount(1);
-  await expect(node).toBeEnabled();
-  await expect(node).toHaveAttribute("data-tag-id", tag.id);
-  await expectDataState(node, tag.approval);
-  await expectDataState(
-    node,
-    tag.approval === "approved" ? "complete-ring" : "dashed-ring",
+function homeNetworkFixture(): HomeNetworkFixture {
+  const conceptA = networkConcept(
+    ids.conceptA,
+    "变更数据捕获",
+    "从事务日志中稳定发布可订阅的领域变化。",
+    3,
   );
-}
-
-async function expectDataState(locator: Locator, token: string): Promise<void> {
-  await expect(locator).toHaveAttribute(
-    "data-state",
-    new RegExp(`(?:^|\\s)${token}(?:\\s|$)`, "u"),
+  const conceptB = networkConcept(
+    ids.conceptB,
+    "幂等事件消费",
+    "消费者用稳定键抵抗重复投递。",
+    2,
   );
+  const conceptC = networkConcept(
+    ids.conceptC,
+    "离线结果校验",
+    "离线核对发布结果与源数据是否一致。",
+    1,
+  );
+  const pointA = networkPoint(
+    ids.pointA,
+    "提交事务与写出日志必须保持同一原子边界",
+    "业务变化与待发布事件在同一事务内落库。",
+  );
+  const pointB = networkPoint(
+    ids.pointB,
+    "消费端以事件键实现幂等",
+    "重复事件使用同一事件键并只产生一次业务效果。",
+  );
+  const pointC = networkPoint(
+    ids.pointC,
+    "检查点记录连续消费位置",
+    "消费位置只在业务处理成功后推进。",
+  );
+  const pointD = networkPoint(
+    ids.pointD,
+    "离线校验不替代在线投递",
+    "离线核验用于发现偏差，不伪装成事件投递链路。",
+  );
+  const membershipA = networkMembership(
+    "43000000-0000-4000-8000-000000000001",
+    conceptA.key,
+    pointA.key,
+  );
+  const membershipB = networkMembership(
+    "43000000-0000-4000-8000-000000000002",
+    conceptB.key,
+    pointB.key,
+  );
+  const membershipC = networkMembership(
+    "43000000-0000-4000-8000-000000000003",
+    conceptB.key,
+    pointC.key,
+  );
+  const membershipD = networkMembership(
+    "43000000-0000-4000-8000-000000000004",
+    conceptC.key,
+    pointD.key,
+  );
+  const knowledgeRelation = networkRelation(
+    "knowledge_relation",
+    "44000000-0000-4000-8000-000000000001",
+    pointA.key,
+    pointB.key,
+    "extends",
+    true,
+    "原子写出向幂等消费延伸。",
+  );
+  const conceptRelation = networkRelation(
+    "concept_relation",
+    "45000000-0000-4000-8000-000000000001",
+    conceptA.key,
+    conceptC.key,
+    "contrasts",
+    false,
+    "在线传播与离线校验承担不同职责。",
+  );
+  const concepts = [conceptA, conceptB, conceptC];
+  const nodes = [...concepts, pointA, pointB, pointC, pointD];
+  const edges = [
+    membershipA,
+    membershipB,
+    membershipC,
+    membershipD,
+    knowledgeRelation,
+    conceptRelation,
+  ];
+  const path: NetworkPath = {
+    nodes: [conceptA, pointA, pointB, conceptB],
+    edges: [membershipA, knowledgeRelation, membershipB],
+    steps: [
+      { ...membershipA, traversalDirection: "undirected" },
+      { ...knowledgeRelation, traversalDirection: "forward" },
+      { ...membershipB, traversalDirection: "undirected" },
+    ],
+  };
+
+  return {
+    conceptA,
+    conceptB,
+    concepts,
+    edges,
+    initialEdges: [conceptRelation],
+    nodes,
+    path,
+    tag: {
+      id: ids.tag,
+      name: "事务事件",
+    },
+  };
 }
 
-async function expectNoPageScroll(
+async function installHomeNetworkRoutes(
   page: Page,
-  expected = { height: 1_000, width: 1_600 },
+  fixture: HomeNetworkFixture,
+  options: { pathTruncated?: boolean } = {},
+): Promise<void> {
+  await page.route("**/api/v1/tag-field", async (route) => {
+    await route.fulfill({
+      json: {
+        items: [
+          {
+            id: fixture.tag.id,
+            name: fixture.tag.name,
+            approval: "approved",
+            recordCount: 2,
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/api/v1/network/nodes/search**", async (route) => {
+    const url = new URL(route.request().url());
+    const query = (url.searchParams.get("q") ?? "").trim().toLocaleLowerCase();
+    const type = url.searchParams.get("type") ?? "all";
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "20", 10);
+    const matching = fixture.nodes.filter(
+      (node) =>
+        (type === "all" || node.type === type) &&
+        (node.label.toLocaleLowerCase().includes(query) || node.key === query),
+    );
+
+    await route.fulfill({
+      json: {
+        items: matching.slice(0, limit),
+        limit,
+        truncated: matching.length > limit,
+      },
+    });
+  });
+  await page.route("**/api/v1/network/path**", async (route) => {
+    const url = new URL(route.request().url());
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const path =
+      !options.pathTruncated &&
+      from === fixture.conceptA.key && to === fixture.conceptB.key
+        ? fixture.path
+        : null;
+
+    await route.fulfill({
+      json: {
+        path,
+        maxDepth: 6,
+        truncated: options.pathTruncated ?? false,
+        visited: options.pathTruncated ? 1_000 : path ? 7 : 3,
+      },
+    });
+  });
+  await page.route("**/api/v1/network/subgraph**", async (route) => {
+    const url = new URL(route.request().url());
+    const root = url.searchParams.get("root");
+    const expanded = root !== null;
+    const graph: NetworkGraph = {
+      root,
+      nodes: expanded ? fixture.nodes : fixture.concepts,
+      edges: expanded ? fixture.edges : fixture.initialEdges,
+      limits: { depth: expanded ? 1 : 0, edgeLimit: 600, nodeLimit: 300 },
+      truncated: false,
+      truncation: { edges: false, nodes: false },
+    };
+
+    await route.fulfill({ json: graph });
+  });
+}
+
+async function selectNetworkSearchResult(
+  search: Locator,
+  searchbox: Locator,
+  node: NetworkNode,
+): Promise<void> {
+  await searchbox.fill(node.label);
+  await searchbox.press("Enter");
+  await search
+    .getByRole("button", { name: `选择搜索结果：${node.label}` })
+    .click();
+}
+
+async function expectFallbackState(
+  page: Page,
+  fixture: HomeNetworkFixture,
+): Promise<void> {
+  await expect(
+    page.getByRole("alert", { name: "首页网络渲染状态" }),
+  ).toContainText(/已切换/u);
+  await expect(
+    page
+      .getByRole("region", { name: "节点详情" })
+      .getByRole("heading", { name: fixture.conceptA.label }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status", { name: "路径探索结果" }),
+  ).toHaveText("已找到 3 步真实路径。可逐边核验方向与来源。");
+  await expectNetworkQuery(page, {
+    from: fixture.conceptA.key,
+    node: fixture.conceptA.key,
+    q: fixture.conceptA.label,
+    relation: ["concept_membership", "knowledge_relation"],
+    to: fixture.conceptB.key,
+    type: ["concept", "knowledge_point"],
+  });
+}
+
+async function expectNetworkQuery(
+  page: Page,
+  expected: {
+    from?: string | null;
+    node?: string | null;
+    q?: string | null;
+    relation?: string[];
+    to?: string | null;
+    type?: string[];
+  },
 ): Promise<void> {
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const scrollingElement = document.scrollingElement;
+        const search = new URLSearchParams(window.location.search);
 
         return {
-          height: scrollingElement?.scrollHeight ?? 0,
-          scrollX: window.scrollX,
-          scrollY: window.scrollY,
-          width: scrollingElement?.scrollWidth ?? 0,
+          from: search.get("from"),
+          node: search.get("node"),
+          q: search.get("q"),
+          relation: search.getAll("relation"),
+          to: search.get("to"),
+          type: search.getAll("type"),
         };
       }),
     )
-    .toEqual({
-      height: expected.height,
-      scrollX: 0,
-      scrollY: 0,
-      width: expected.width,
-    });
-}
-
-async function expectWebGlCanvasToOwnTheField(scene: Locator): Promise<void> {
-  const canvas = scene.locator("canvas");
-
-  await expect(canvas).toBeVisible();
-  await expect
-    .poll(() =>
-      canvas.evaluate((element) => {
-        const style = getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-
-        return {
-          height: Math.round(rect.height),
-          opacity: Number(style.opacity),
-          width: Math.round(rect.width),
-        };
-      }),
-    )
-    .toEqual({ height: 940, opacity: 1, width: 1_600 });
-}
-
-async function expectEnergyNode(
-  node: Locator,
-  ring: "complete" | "dashed",
-): Promise<void> {
-  const energy = node.locator("[data-bubble-core]");
-  const stateRing = node.locator("[data-bubble-ring]");
-
-  await expect(energy).toBeVisible();
-  await expect(stateRing).toBeVisible();
-  await expect(energy).toHaveCSS("border-radius", "50%");
-  await expect(stateRing).toHaveAttribute("data-ring", ring);
-
-  const energyBox = await energy.boundingBox();
-  const buttonBox = await node.boundingBox();
-
-  expect(energyBox?.width ?? 0).toBeGreaterThanOrEqual(38);
-  expect(energyBox?.height).toBeCloseTo(energyBox?.width ?? 0, 0);
-  expect(buttonBox?.width ?? 0).toBeLessThan(220);
-}
-
-async function readCameraState(scene: Locator): Promise<{
-  distance: number;
-  pitch: number;
-  signature: string;
-  yaw: number;
-}> {
-  const signature = await scene.getAttribute("data-camera");
-
-  expect(signature).toMatch(/^-?\d+\.\d{3}\|-?\d+\.\d{3}\|\d+\.\d{3}$/u);
-
-  const [yaw, pitch, distance] = (signature ?? "").split("|").map(Number);
-
-  return {
-    distance: distance ?? Number.NaN,
-    pitch: pitch ?? Number.NaN,
-    signature: signature ?? "",
-    yaw: yaw ?? Number.NaN,
-  };
-}
-
-async function dragScene(
-  page: Page,
-  scene: Locator,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): Promise<void> {
-  const box = await scene.boundingBox();
-
-  expect(box).not.toBeNull();
-
-  if (!box) {
-    return;
-  }
-
-  await page.mouse.move(box.x + from.x, box.y + from.y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + to.x, box.y + to.y, { steps: 5 });
-  await page.mouse.up();
-}
-
-async function visibleLabelOverlaps(scene: Locator): Promise<string[]> {
-  return scene.locator(".tag-node-list strong").evaluateAll((labels) => {
-    const visible = labels
-      .map((label) => ({
-        name: label.textContent?.trim() ?? "",
-        opacity: Number(getComputedStyle(label).opacity),
-        rect: label.getBoundingClientRect(),
-      }))
-      .filter(
-        (label) =>
-          label.opacity > 0.05 &&
-          label.rect.width > 0 &&
-          label.rect.height > 0,
-      );
-    const overlaps: string[] = [];
-
-    for (let leftIndex = 0; leftIndex < visible.length; leftIndex += 1) {
-      for (
-        let rightIndex = leftIndex + 1;
-        rightIndex < visible.length;
-        rightIndex += 1
-      ) {
-        const left = visible[leftIndex];
-        const right = visible[rightIndex];
-
-        if (!left || !right) {
-          continue;
-        }
-
-        const intersects =
-          left.rect.left < right.rect.right + 2 &&
-          left.rect.right + 2 > right.rect.left &&
-          left.rect.top < right.rect.bottom + 2 &&
-          left.rect.bottom + 2 > right.rect.top;
-
-        if (intersects) {
-          overlaps.push(`${left.name} / ${right.name}`);
-        }
-      }
-    }
-
-    return overlaps;
-  });
+    .toMatchObject(expected);
 }
 
 async function disableWebGl2(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
 
-    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    HTMLCanvasElement.prototype.getContext = function getContext(
+      this: HTMLCanvasElement,
+      contextId: string,
+      options?: unknown,
+    ) {
+      if (contextId === "webgl2") {
+        return null;
+      }
+
+      return originalGetContext.call(this, contextId, options);
+    } as typeof HTMLCanvasElement.prototype.getContext;
+  });
+}
+
+async function breakNetworkLayoutWorker(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "Worker", {
       configurable: true,
-      value(this: HTMLCanvasElement, contextId: string, ...options: unknown[]) {
-        if (contextId === "webgl2") {
-          return null;
+      value: class BrokenNetworkWorker {
+        constructor() {
+          throw new Error("E2E forced home network Worker failure");
         }
-
-        return Reflect.apply(nativeGetContext, this, [contextId, ...options]);
       },
     });
   });
 }
 
-async function seedTagUniverse(
-  request: APIRequestContext,
-  marker: string,
-): Promise<{ tags: SeededTag[] }> {
-  await enableDeterministicFakeConfiguration(request);
+async function installArmedWebGlFrameFailure(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let armed = false;
+    let thrown = false;
+    const maybeThrow = () => {
+      if (armed && !thrown) {
+        thrown = true;
+        throw new Error("E2E forced home 3D frame failure");
+      }
+    };
+    const prototype = WebGL2RenderingContext.prototype;
+    const drawArrays = prototype.drawArrays;
+    const drawElements = prototype.drawElements;
+    const drawArraysInstanced = prototype.drawArraysInstanced;
+    const drawElementsInstanced = prototype.drawElementsInstanced;
 
-  const sharedTagName = `跨记录主题 ${marker}`;
-  let sharedTag: { id: string; name: string } | null = null;
-
-  for (const [index, tagName] of [
-    `分布式系统 ${marker}`,
-    `数据库变更 ${marker}`,
-  ].entries()) {
-    const created = await request.post(appUrl("/api/v1/records"), {
-      data: {
-        text: `首页标签场记录 ${index + 1} ${marker}`,
-        myTags: [{ name: tagName }, sharedTag ?? { name: sharedTagName }],
-        processing: "save_only",
+    prototype.drawArrays = function drawArraysWithFailure(
+      mode: number,
+      first: number,
+      count: number,
+    ) {
+      maybeThrow();
+      return drawArrays.call(this, mode, first, count);
+    };
+    prototype.drawElements = function drawElementsWithFailure(
+      mode: number,
+      count: number,
+      type: number,
+      offset: number,
+    ) {
+      maybeThrow();
+      return drawElements.call(this, mode, count, type, offset);
+    };
+    prototype.drawArraysInstanced = function drawArraysInstancedWithFailure(
+      mode: number,
+      first: number,
+      count: number,
+      instanceCount: number,
+    ) {
+      maybeThrow();
+      return drawArraysInstanced.call(
+        this,
+        mode,
+        first,
+        count,
+        instanceCount,
+      );
+    };
+    prototype.drawElementsInstanced = function drawElementsInstancedWithFailure(
+      mode: number,
+      count: number,
+      type: number,
+      offset: number,
+      instanceCount: number,
+    ) {
+      maybeThrow();
+      return drawElementsInstanced.call(
+        this,
+        mode,
+        count,
+        type,
+        offset,
+        instanceCount,
+      );
+    };
+    Object.defineProperty(window, "__armHome3dFrameFailure", {
+      configurable: true,
+      value: () => {
+        armed = true;
       },
     });
-
-    expect(created.status()).toBe(201);
-
-    const body = (await created.json()) as {
-      record: { myTags: Array<{ id: string; name: string }> };
-    };
-
-    sharedTag =
-      body.record.myTags.find((tag) => tag.name === sharedTagName) ?? null;
-    expect(sharedTag).not.toBeNull();
-  }
-
-  const source = await request.post(appUrl("/api/v1/records"), {
-    data: {
-      text: `CDC 读取数据库事务日志 ${marker}。\n事务日志保留增量变更顺序 ${marker}。`,
-      myTags: [{ name: `AI 整理来源 ${marker}` }],
-      processing: "save_only",
-    },
   });
+}
 
-  expect(source.status()).toBe(201);
+async function auditAnimationFrames(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const request = window.requestAnimationFrame.bind(window);
+    const cancel = window.cancelAnimationFrame.bind(window);
+    const pending = new Set<number>();
+    let requested = 0;
+    let completed = 0;
 
-  const sourceBody = (await source.json()) as { record: { id: string } };
-  const organized = await request.post(
-    appUrl(`/api/v1/records/${sourceBody.record.id}/organize`),
-    { data: { handling: "automatic" } },
-  );
-
-  expect(organized.status()).toBe(202);
-
-  const organizedBody = (await organized.json()) as { task: { id: string } };
-
-  await expectTaskSucceeded(request, organizedBody.task.id);
-
-  const [detailResponse, approvedResponse] = await Promise.all([
-    request.get(appUrl(`/api/v1/records/${sourceBody.record.id}`)),
-    request.get(appUrl("/api/v1/tags")),
-  ]);
-
-  expect(detailResponse.status()).toBe(200);
-  expect(approvedResponse.status()).toBe(200);
-
-  const detail = (await detailResponse.json()) as {
-    organizedItems: Array<{ tags: Array<{ id: string; name: string }> }>;
-  };
-  const approvedBody = (await approvedResponse.json()) as {
-    items: Array<{ id: string; name: string }>;
-  };
-  const approvedIds = new Set(approvedBody.items.map((tag) => tag.id));
-  const candidates = new Map<string, SeededTag>();
-
-  for (const tag of detail.organizedItems.flatMap((item) => item.tags)) {
-    if (!approvedIds.has(tag.id)) {
-      candidates.set(tag.id, {
-        id: tag.id,
-        name: tag.name,
-        approval: "candidate",
+    window.requestAnimationFrame = (callback: FrameRequestCallback) => {
+      requested += 1;
+      const id = request((time) => {
+        pending.delete(id);
+        completed += 1;
+        callback(time);
       });
-    }
-  }
 
-  expect(candidates.size).toBeGreaterThan(0);
+      pending.add(id);
+      return id;
+    };
+    window.cancelAnimationFrame = (id: number) => {
+      pending.delete(id);
+      cancel(id);
+    };
+    Object.defineProperty(window, "__readHomeRafAudit", {
+      configurable: true,
+      value: () => ({ completed, pending: pending.size, requested }),
+    });
+  });
+}
+
+async function readRafAudit(page: Page): Promise<{
+  completed: number;
+  pending: number;
+  requested: number;
+}> {
+  return page.evaluate(() =>
+    (
+      window as unknown as Window & {
+        __readHomeRafAudit: () => {
+          completed: number;
+          pending: number;
+          requested: number;
+        };
+      }
+    ).__readHomeRafAudit(),
+  );
+}
+
+function networkConcept(
+  id: string,
+  label: string,
+  description: string,
+  revisionNumber: number,
+): NetworkNode {
+  return {
+    id,
+    key: `concept:${id}`,
+    type: "concept",
+    label,
+    description,
+    source: {
+      kind: "concept_revision",
+      revisionId: id.replace("41000000", "41100000"),
+      revisionNumber,
+    },
+  };
+}
+
+function networkPoint(
+  id: string,
+  label: string,
+  description: string,
+): NetworkNode {
+  return {
+    id,
+    key: `knowledge_point:${id}`,
+    type: "knowledge_point",
+    label,
+    description,
+    source: {
+      kind: "knowledge_point",
+      recordId: "46000000-0000-4000-8000-000000000001",
+      recordTitle: "事件驱动系统的可靠发布与消费",
+      fragmentRevisionId: "47000000-0000-4000-8000-000000000001",
+      analysisRevisionId: "48000000-0000-4000-8000-000000000001",
+    },
+  };
+}
+
+function networkMembership(
+  id: string,
+  source: string,
+  target: string,
+): NetworkEdge {
+  return {
+    edgeKey: `concept_membership:${id}`,
+    kind: "concept_membership",
+    relationType: "membership",
+    source,
+    target,
+    directed: false,
+    description: null,
+    confirmation: null,
+    sourceRecord: {
+      kind: "concept_membership",
+      id,
+      origin: "manual",
+      createdAt: "2099-08-11T08:00:00.000Z",
+    },
+  };
+}
+
+function networkRelation(
+  kind: "concept_relation" | "knowledge_relation",
+  id: string,
+  source: string,
+  target: string,
+  relationType: string,
+  directed: boolean,
+  description: string,
+): NetworkEdge {
+  const confirmationKind =
+    kind === "concept_relation"
+      ? "concept_relation_confirmation"
+      : "knowledge_relation_confirmation";
 
   return {
-    tags: [
-      ...approvedBody.items.map((tag) => ({
-        ...tag,
-        approval: "approved" as const,
-      })),
-      ...candidates.values(),
-    ],
+    edgeKey: `${kind}:${id}`,
+    kind,
+    relationType,
+    source,
+    target,
+    directed,
+    description,
+    confirmation: {
+      id: id.replace(/^4/u, "5"),
+      relationId: id,
+      confirmedAt: "2099-08-11T08:00:00.000Z",
+    },
+    sourceRecord: {
+      kind: confirmationKind,
+      id: id.replace(/^4/u, "5"),
+      relationId: id,
+      confirmedAt: "2099-08-11T08:00:00.000Z",
+      reason: "E2E 合同中的人工确认来源。",
+      confidence: 0.91,
+    },
   };
 }
 
-async function seedSaveOnlyTag(
-  request: APIRequestContext,
-  tagName: string,
-): Promise<void> {
-  const response = await request.post(appUrl("/api/v1/records"), {
-    data: {
-      myTags: [{ name: tagName }],
-      processing: "save_only",
-      text: `首页气泡标签场 ${tagName}`,
-    },
+function homeStateUrl(fixture: HomeNetworkFixture): string {
+  const search = new URLSearchParams({
+    node: fixture.conceptA.key,
+    from: fixture.conceptA.key,
+    to: fixture.conceptB.key,
+    q: fixture.conceptA.label,
   });
 
-  expect(response.status()).toBe(201);
-}
-
-async function seedDenseTagRecord(
-  request: APIRequestContext,
-  marker: string,
-  tagCount: number,
-): Promise<void> {
-  const response = await request.post(appUrl("/api/v1/records"), {
-    data: {
-      myTags: Array.from({ length: tagCount }, (_, index) => ({
-        name: `LOD ${marker} ${String(index + 1).padStart(4, "0")}`,
-      })),
-      processing: "save_only",
-      text: `首页高密度标签场 ${marker}`,
-    },
-    timeout: 30_000,
-  });
-
-  expect(response.status()).toBe(201);
-}
-
-async function enableDeterministicFakeConfiguration(
-  request: APIRequestContext,
-): Promise<void> {
-  // These loopback-only endpoints cannot reach a paid service. E2E_FAKE_AI=1
-  // intercepts both endpoint checks and organization before fetch.
-  const saved = await request.put(appUrl("/api/v1/model-config/draft"), {
-    data: {
-      text: {
-        baseUrl: "http://127.0.0.1:9/e2e-text/v1",
-        model: "deepseek-v4-flash",
-        apiKey: "e2e-fake-text-key",
-      },
-      embedding: {
-        baseUrl: "http://127.0.0.1:9/e2e-embedding/v1",
-        model: "BAAI/bge-m3",
-        apiKey: "e2e-fake-embedding-key",
-      },
-    },
-  });
-
-  expect(saved.status()).toBe(200);
-
-  for (const kind of ["text", "embedding"] as const) {
-    const tested = await request.post(
-      appUrl(`/api/v1/model-config/draft/tests/${kind}`),
-    );
-
-    expect(tested.status()).toBe(200);
-    expect(await tested.json()).toMatchObject({ kind, status: "passed" });
-  }
-
-  const activated = await request.post(
-    appUrl("/api/v1/model-config/draft/activate"),
-  );
-
-  expect(activated.status()).toBe(200);
-}
-
-async function expectTaskSucceeded(
-  request: APIRequestContext,
-  taskId: string,
-): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const response = await request.get(
-      appUrl(`/api/v1/ai-tasks/${encodeURIComponent(taskId)}`),
-    );
-
-    expect(response.status()).toBe(200);
-
-    const body = (await response.json()) as {
-      task: { status: "queued" | "running" | "succeeded" | "failed" };
-    };
-
-    if (body.task.status === "succeeded") {
-      return;
-    }
-
-    if (body.task.status === "failed") {
-      throw new Error(`deterministic AI task ${taskId} failed`);
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-
-  throw new Error(`deterministic AI task ${taskId} did not succeed`);
+  search.append("type", "concept");
+  search.append("type", "knowledge_point");
+  search.append("relation", "concept_membership");
+  search.append("relation", "knowledge_relation");
+  return appUrl(`/?${search.toString()}`);
 }
 
 function tagSearchUrl(tagId: string): string {
-  const url = new URL("/search", appBaseUrl);
+  const search = new URLSearchParams({ tag: tagId });
 
-  url.searchParams.set("tag", tagId);
-
-  return url.toString();
+  return appUrl(`/search?${search.toString()}`);
 }
 
 function recordSearchUrl(query: string): string {
-  const url = new URL("/search", appBaseUrl);
+  const search = new URLSearchParams({ q: query });
 
-  url.searchParams.set("q", query);
-
-  return url.toString();
+  return appUrl(`/search?${search.toString()}`);
 }
 
 function appUrl(pathname: string): string {
