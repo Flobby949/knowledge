@@ -102,6 +102,7 @@ pnpm run dev
 ## 设计与领域文档
 
 - [产品需求](PRD.md)
+- [V2 → V3 晋级路线](docs/V3-ROADMAP.md)
 - [领域上下文](CONTEXT.md)
 - [设计规范](DESIGN.md)
 - [架构决策记录](docs/adr)

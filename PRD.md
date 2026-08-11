@@ -168,6 +168,8 @@ V1 唯一支持并验收的操作体验是 PC Web，包括记录整理、AI 审�
 
 说明：V1 已生成基础 AI 候选标签；V2 的标签增强指同义词归一、批量治理和跨知识点建议，不是第一次引入标签。
 
+V2 收尾至 V3 的分阶段实施顺序、阶段边界和逐阶段验收门见 [`docs/V3-ROADMAP.md`](docs/V3-ROADMAP.md)。该路线细化交付顺序，不替代本 PRD 的最终范围和完成标准。
+
 ## 7. 核心领域模型
 
 ### 7.1 Knowledge Fragment 与 Fragment Revision

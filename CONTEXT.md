@@ -24,9 +24,21 @@ _Avoid_: 知识碎片、概念
 经用户确认、用于长期聚合多个知识点的认知节点；它在 V3 才进入正式产品模型。
 _Avoid_: AI 标签、主题标签、自动聚类
 
+**概念候选（Concept Candidate）**:
+AI 基于多个确切知识点提出的可审查概念建议；它包含建议名称、描述、成员和理由，用户确认前不是 Concept，也不进入正式知识网络。
+_Avoid_: 自动 Concept、聚类结果、AI 标签
+
+**概念归属（Concept Membership）**:
+用户确认的 Concept 与一个确切知识点之间的可撤销关联；端点不再生效时仍保留历史，但需要复核且不进入默认有效网络。
+_Avoid_: Tag Assignment、自动分类、知识点所有权
+
 **知识网络（Knowledge Network）**:
-由已确认的知识点、概念及知识关系组成的个人认知网络。
+由已确认的知识点、Concept、Concept Membership、Knowledge Relation 和 Concept Relation 组成的个人认知网络。
 _Avoid_: 未经确认的 AI 关系图、自动知识图谱
+
+**知识网络路径（Knowledge Network Path）**:
+在有效知识网络中由真实节点和已确认关系构成的有序可核验路径；它是已有事实的遍历结果，不是 AI 推理补全。
+_Avoid_: AI 推理链、推荐路线、语义相似解释
 
 ## AI 与用户修正
 
@@ -167,6 +179,10 @@ _Avoid_: 知识关系、图谱边
 **知识关系（Knowledge Relation）**:
 用户确认（可先修改类型或描述）后的知识点之间语义联系，才可参与正式关联结果和后续分析；撤销只结束该关系，不删除两端知识点。重新分析不会静默删除已确认关系，但端点不再生效或内容已变化时需要提示复核。
 _Avoid_: 关系建议、相似度结果
+
+**概念关系（Concept Relation）**:
+用户确认后的两个 Concept 之间的可撤销语义联系；未经确认的 AI 建议不属于 Concept Relation，也不能进入正式知识网络。
+_Avoid_: Concept Membership、关系建议、聚类邻接
 
 ## 知识分析
 
