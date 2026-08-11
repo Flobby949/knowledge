@@ -76,7 +76,7 @@ export function SettingsPage() {
       <main aria-label="设置" className="settings-main">
         <header className="settings-heading">
           <div>
-            <p>INSTANCE CONTROL</p>
+            <p>实例偏好</p>
             <h1>设置</h1>
           </div>
           <nav aria-label="设置分区" className="settings-anchors">
@@ -264,7 +264,7 @@ function ModelSettingsPanel({
   return (
     <section aria-label="AI 模型" className="settings-panel" id="model-settings">
       <PanelHeading
-        eyebrow="MODEL CONFIGURATION"
+        eyebrow="模型配置"
         summary="文本推理与 Embedding 使用各自独立的服务地址、模型和凭据。"
         title="AI 模型"
       />
@@ -944,7 +944,7 @@ function DataManagementPanel() {
   return (
     <section aria-label="数据管理" className="settings-panel data-panel" id="data-settings">
       <PanelHeading
-        eyebrow="DATA OPERATIONS"
+        eyebrow="数据操作"
         summary="导出不包含模型密钥、日志、Embedding 或可重新生成的缓存。"
         title="数据管理"
       />

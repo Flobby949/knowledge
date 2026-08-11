@@ -20,7 +20,7 @@
 
 .ai-task-page-heading p {
   margin: 0 0 3px;
-  color: #6a7c99;
+  color: #946f82;
   font-size: 12px;
   font-weight: 650;
 }
@@ -37,7 +37,7 @@
   display: block;
   max-width: 68ch;
   margin-top: 8px;
-  color: #5c6d88;
+  color: #836172;
   font-size: 13px;
 }
 
@@ -54,7 +54,7 @@
 }
 
 .ai-task-status-filter > span {
-  color: #667793;
+  color: #8f6a7d;
   font-size: 12px;
   font-weight: 650;
 }
@@ -71,7 +71,7 @@
 
 .ai-task-status-filter:focus-within {
   border-color: var(--signal);
-  box-shadow: 0 0 0 2px rgba(0, 95, 249, 0.12);
+  box-shadow: 0 0 0 2px rgba(198, 61, 104, 0.12);
 }
 
 .ai-task-list-heading {
@@ -79,13 +79,13 @@
   align-items: center;
   justify-content: space-between;
   min-height: 64px;
-  color: #536681;
+  color: #7a5a6a;
   font-size: 13px;
   font-weight: 650;
 }
 
 .ai-task-list-heading output {
-  color: #71809a;
+  color: #987385;
   font-size: 12px;
   font-weight: 500;
 }
@@ -160,7 +160,7 @@
 }
 
 .ai-task-row-state strong.is-running {
-  color: #175db6;
+  color: #923b67;
 }
 
 .ai-task-row-state strong.is-failed {
@@ -173,7 +173,7 @@
 
 .ai-task-row-state time {
   grid-column: 2;
-  color: #7a88a0;
+  color: #9e7c8d;
   font-size: 11px;
 }
 
@@ -190,7 +190,7 @@
 
 .ai-task-row-content > p {
   margin: 5px 0 0;
-  color: #657590;
+  color: #8d687a;
   font-size: 12px;
 }
 
@@ -245,14 +245,14 @@
 }
 
 .ai-task-row-actions a {
-  color: #3d5272;
-  background: #fbfcfe;
+  color: #654a58;
+  background: #fdfcfc;
   border: 1px solid var(--border);
 }
 
 .ai-task-row-actions a:hover {
-  color: #174f9e;
-  border-color: #a6bdd8;
+  color: #81345b;
+  border-color: #ccb3bc;
 }
 
 .ai-task-row-actions button {
@@ -263,19 +263,19 @@
 }
 
 .ai-task-row-actions button:hover:not(:disabled) {
-  background: #0054dc;
+  background: #9c406e;
 }
 
 .ai-task-row-actions button:disabled {
-  color: #91a0bc;
-  background: #e7ecf4;
-  border-color: #d8e0eb;
+  color: #b499a3;
+  background: #f2e9ec;
+  border-color: #e7dce0;
   cursor: wait;
 }
 
 .ai-task-row-actions > span {
   padding-top: 8px;
-  color: #60718b;
+  color: #876476;
   font-size: 12px;
   white-space: nowrap;
 }
@@ -293,7 +293,7 @@
 .ai-task-page-feedback {
   padding: 32px;
   margin: 0;
-  color: #687995;
+  color: #916c7f;
   text-align: center;
 }
 
@@ -312,7 +312,7 @@
   width: 50px;
   height: 50px;
   place-items: center;
-  border: 1px solid #9ab0cd;
+  border: 1px solid #c0a7b1;
   border-radius: 50%;
 }
 
@@ -320,7 +320,7 @@
   position: absolute;
   inset: 7px -4px;
   transform: rotate(-28deg);
-  border: 1px solid #c3d2e5;
+  border: 1px solid #ddcbd2;
   border-radius: 50%;
   content: "";
 }
@@ -328,7 +328,7 @@
 .ai-task-empty-signal i {
   width: 12px;
   height: 12px;
-  background: #c7d7eb;
+  background: #e3cfd7;
   border-radius: 50%;
 }
 
@@ -339,7 +339,7 @@
 
 .ai-task-empty p {
   margin: 4px 0 0;
-  color: #687995;
+  color: #916c7f;
   font-size: 13px;
 }
 

@@ -18,7 +18,7 @@ type SeededTag = {
   approval: "approved" | "candidate";
 };
 
-test.describe("home neural tag field", () => {
+test.describe("home bubble tag field", () => {
   test.use({
     contextOptions: { reducedMotion: "reduce" },
     viewport: { width: 1_600, height: 1_000 },
@@ -30,7 +30,7 @@ test.describe("home neural tag field", () => {
     await page.goto(appUrl("/"));
 
     const home = page.getByRole("main", { name: "首页" });
-    const scene = home.getByRole("region", { name: "神经标签场" });
+    const scene = home.getByRole("region", { name: "气泡标签场" });
     const emptyState = scene
       .getByRole("status")
       .filter({ hasText: "记录第一条知识，让网络开始生长" });
@@ -61,7 +61,7 @@ test.describe("home neural tag field", () => {
     }
   });
 
-  test("every tag remains identifiable and operable in the motion-safe universe and its WebGL2 fallback", async ({
+  test("every tag remains identifiable and operable in the motion-safe field and its WebGL2 fallback", async ({
     context,
     page,
     request,
@@ -74,7 +74,7 @@ test.describe("home neural tag field", () => {
 
     const navigation = page.getByRole("navigation", { name: "主导航" });
     const home = page.getByRole("main", { name: "首页" });
-    const scene = home.getByRole("region", { name: "神经标签场" });
+    const scene = home.getByRole("region", { name: "气泡标签场" });
     const tagList = scene.getByRole("list", { name: "全部标签" });
     const searchHud = home.getByRole("search", { name: "首页搜索" });
     const resetView = scene.getByRole("button", {
@@ -90,7 +90,7 @@ test.describe("home neural tag field", () => {
     });
     await expect(page.getByRole("main")).toHaveCount(1);
     await expect(
-      page.getByRole("region", { name: "神经标签场" }),
+      page.getByRole("region", { name: "气泡标签场" }),
     ).toHaveCount(1);
     await expectBox(scene, {
       x: 0,
@@ -99,7 +99,7 @@ test.describe("home neural tag field", () => {
       height: 940,
     });
     await expectNoPageScroll(page);
-    await expectDataState(scene, "deep-space");
+    await expectDataState(scene, "pastel-space");
     await expectDataState(scene, "webgl2");
     await expectDataState(scene, "static-motion");
     await expectWebGlCanvasToOwnTheField(scene);
@@ -144,7 +144,7 @@ test.describe("home neural tag field", () => {
       approved,
       "the public record flow must create an approved tag",
     ).toBeDefined();
-    expect(highUseTag, "the universe must include a higher-use tag").toBeDefined();
+    expect(highUseTag, "the field must include a higher-use tag").toBeDefined();
 
     if (!candidate || !approved || !highUseTag) {
       return;
@@ -210,7 +210,7 @@ test.describe("home neural tag field", () => {
     await page.goBack();
     await expect(page).toHaveURL(appUrl("/"));
 
-    const returnedScene = page.getByRole("region", { name: "神经标签场" });
+    const returnedScene = page.getByRole("region", { name: "气泡标签场" });
 
     await expect(returnedScene).toHaveAttribute(
       "data-camera",
@@ -225,7 +225,7 @@ test.describe("home neural tag field", () => {
     ).toHaveAttribute("data-tag-id", candidate.id);
 
     await page
-      .getByRole("region", { name: "神经标签场" })
+      .getByRole("region", { name: "气泡标签场" })
       .getByRole("list", { name: "全部标签" })
       .getByRole("button", { name: approved.name, exact: true })
       .click();
@@ -233,7 +233,7 @@ test.describe("home neural tag field", () => {
     await page.goBack();
     await expect(page).toHaveURL(appUrl("/"));
 
-    const restoredScene = page.getByRole("region", { name: "神经标签场" });
+    const restoredScene = page.getByRole("region", { name: "气泡标签场" });
 
     await restoredScene
       .getByRole("button", { name: "重置视角", exact: true })
@@ -254,7 +254,7 @@ test.describe("home neural tag field", () => {
     await expect(page).toHaveURL(appUrl("/"));
 
     const lostContextScene = page.getByRole("region", {
-      name: "神经标签场",
+      name: "气泡标签场",
     });
 
     await lostContextScene.locator("canvas").dispatchEvent("webglcontextlost", {
@@ -270,10 +270,10 @@ test.describe("home neural tag field", () => {
     });
     const [higherUseBox, lowerUseBox] = await Promise.all([
       tagNode(tagsAfterContextLoss, highUseTag)
-        .locator("[data-energy-core]")
+        .locator("[data-bubble-core]")
         .boundingBox(),
       tagNode(tagsAfterContextLoss, candidate)
-        .locator("[data-energy-core]")
+        .locator("[data-bubble-core]")
         .boundingBox(),
     ]);
 
@@ -290,13 +290,13 @@ test.describe("home neural tag field", () => {
     await expect(fallbackPage).toHaveURL(appUrl("/"));
 
     const fallbackScene = fallbackPage.getByRole("region", {
-      name: "神经标签场",
+      name: "气泡标签场",
     });
     const fallbackTags = fallbackScene.getByRole("list", {
       name: "全部标签",
     });
 
-    await expectDataState(fallbackScene, "deep-space");
+    await expectDataState(fallbackScene, "pastel-space");
     await expectDataState(fallbackScene, "dom-2d");
     await expectDataState(fallbackScene, "static-motion");
     await expectBox(fallbackScene, {
@@ -336,7 +336,7 @@ test.describe("home neural tag field", () => {
     await disableWebGl2(page);
     await page.goto(appUrl("/"));
 
-    const scene = page.getByRole("region", { name: "神经标签场" });
+    const scene = page.getByRole("region", { name: "气泡标签场" });
     const tagList = scene.getByRole("list", { name: "全部标签" });
     const tags = tagList.getByRole("button");
     const seededTags = tagList.getByRole("button", {
@@ -379,13 +379,13 @@ test.describe("home neural tag field", () => {
   });
 });
 
-test.describe("home neural tag field live motion", () => {
+test.describe("home bubble tag field live motion", () => {
   test.use({
     contextOptions: { reducedMotion: "no-preference" },
     viewport: { width: 1_600, height: 1_000 },
   });
 
-  test("the universe auto-rotates only while the user is not inspecting a tag", async ({
+  test("the field auto-rotates only while the user is not inspecting a tag", async ({
     page,
     request,
   }) => {
@@ -394,7 +394,7 @@ test.describe("home neural tag field live motion", () => {
     await seedSaveOnlyTag(request, tagName);
     await page.goto(appUrl("/"));
 
-    const scene = page.getByRole("region", { name: "神经标签场" });
+    const scene = page.getByRole("region", { name: "气泡标签场" });
     const node = scene
       .getByRole("list", { name: "全部标签" })
       .getByRole("button", { name: tagName, exact: true });
@@ -422,7 +422,7 @@ test.describe("home neural tag field live motion", () => {
   });
 });
 
-test.describe("home neural tag field at the minimum supported viewport", () => {
+test.describe("home bubble tag field at the minimum supported viewport", () => {
   test.use({
     contextOptions: { reducedMotion: "reduce" },
     viewport: { width: 1_280, height: 800 },
@@ -438,7 +438,7 @@ test.describe("home neural tag field at the minimum supported viewport", () => {
     await page.goto(appUrl("/"));
 
     const navigation = page.getByRole("navigation", { name: "主导航" });
-    const scene = page.getByRole("region", { name: "神经标签场" });
+    const scene = page.getByRole("region", { name: "气泡标签场" });
     const search = page.getByRole("search", { name: "首页搜索" });
 
     await expectBox(navigation, { x: 0, y: 0, width: 1_280, height: 60 });
@@ -538,8 +538,8 @@ async function expectEnergyNode(
   node: Locator,
   ring: "complete" | "dashed",
 ): Promise<void> {
-  const energy = node.locator("[data-energy-core]");
-  const stateRing = node.locator("[data-node-ring]");
+  const energy = node.locator("[data-bubble-core]");
+  const stateRing = node.locator("[data-bubble-ring]");
 
   await expect(energy).toBeVisible();
   await expect(stateRing).toBeVisible();
@@ -758,7 +758,7 @@ async function seedSaveOnlyTag(
     data: {
       myTags: [{ name: tagName }],
       processing: "save_only",
-      text: `首页神经标签场 ${tagName}`,
+      text: `首页气泡标签场 ${tagName}`,
     },
   });
 

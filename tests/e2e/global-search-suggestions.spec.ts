@@ -75,7 +75,7 @@ test.describe("global search suggestions", () => {
       url.pathname === "/" && url.searchParams.get("tag") === tagId,
     );
 
-    const tagField = page.getByRole("region", { name: "神经标签场" });
+    const tagField = page.getByRole("region", { name: "气泡标签场" });
     const focusedTag = tagField
       .getByRole("list", { name: "全部标签" })
       .getByRole("button", { name: tagName, exact: true });

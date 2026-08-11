@@ -16,13 +16,13 @@ test.beforeEach(async ({ request }) => {
   await ensureVisualFixture(request, appBaseUrl);
 });
 
-test("Home / 首页神经标签场 · 1600×1000 基线与 1280×800 几何", async ({
+test("Home / 首页气泡标签场 · 1600×1000 基线与 1280×800 几何", async ({
   page,
 }) => {
   await page.goto(`${appBaseUrl}/`);
 
   const navigation = page.getByRole("navigation", { name: "主导航" });
-  const field = page.getByRole("region", { name: "神经标签场" });
+  const field = page.getByRole("region", { name: "气泡标签场" });
   const focusedTag = field.getByRole("button", {
     name: visualFixture.focusedTagName,
     exact: true,
@@ -342,7 +342,7 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
   const cards = atlas.getByRole("button");
 
   await expect(cards).toHaveCount(10);
-  await expect(atlas.locator("[data-energy-core], .tag-node-energy"))
+  await expect(atlas.locator("[data-bubble-core], .tag-node-energy"))
     .toHaveCount(0);
   await atlas.getByRole("button", {
     name: visualFixture.primaryTagName,

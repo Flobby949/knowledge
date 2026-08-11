@@ -21,7 +21,7 @@
 .settings-heading p,
 .settings-panel-heading > div > p {
   margin: 0 0 2px;
-  color: #6a7c99;
+  color: #946f82;
   font-size: 11px;
   font-weight: 680;
   letter-spacing: 0.1em;
@@ -44,8 +44,8 @@
 .settings-anchors a {
   min-height: 38px;
   padding: 7px 14px;
-  color: #405372;
-  background: #fbfcfe;
+  color: #664d59;
+  background: #fdfcfc;
   border: 1px solid var(--border);
   border-radius: 7px;
   font-size: 13px;
@@ -74,7 +74,7 @@
 .settings-panel-heading > p {
   max-width: 620px;
   margin: 0;
-  color: #5c6d88;
+  color: #836172;
   font-size: 13px;
   text-align: right;
 }
@@ -86,21 +86,21 @@
   gap: 20px;
   padding: 16px 20px;
   margin: 0 0 18px;
-  background: #f9fbfe;
+  background: #fdfafb;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
 
 .handling-preference-copy h3 {
   margin: 0;
-  color: #1b2a45;
+  color: #3b2630;
   font-size: 15px;
   font-weight: 680;
 }
 
 .handling-preference-copy p {
   margin: 4px 0 0;
-  color: #687895;
+  color: #916c7f;
   font-size: 12px;
   line-height: 1.55;
 }
@@ -120,21 +120,21 @@
   min-height: 42px;
   gap: 9px;
   padding: 8px 11px;
-  color: #3c4f6e;
+  color: #624955;
   background: #fff;
-  border: 1px solid #d5dfed;
+  border: 1px solid #e8dadf;
   border-radius: 6px;
   cursor: pointer;
 }
 
 .handling-preference-options label:has(input:checked) {
-  color: #064fac;
-  background: #f2f7ff;
-  border-color: #7da9e4;
+  color: #743e59;
+  background: #fcf5f8;
+  border-color: #ca97aa;
 }
 
 .handling-preference-options label:focus-within {
-  outline: 3px solid rgb(5 99 253 / 18%);
+  outline: 3px solid rgb(198 61 104 / 18%);
   outline-offset: 1px;
 }
 
@@ -153,7 +153,7 @@
 .handling-preference output {
   grid-column: 3;
   grid-row: 1 / span 2;
-  color: #58708f;
+  color: #856274;
   font-size: 12px;
   font-weight: 650;
   line-height: 1.5;
@@ -169,7 +169,7 @@
 }
 
 .analysis-prompt-setting {
-  border-color: #c4d5ec;
+  border-color: #e3cdd5;
 }
 
 .analysis-prompt-heading,
@@ -186,20 +186,20 @@
 
 .analysis-prompt-heading h3 {
   margin: 0;
-  color: #1b2a45;
+  color: #3b2630;
   font-size: 16px;
   font-weight: 680;
 }
 
 .analysis-prompt-heading p {
   margin: 3px 0 0;
-  color: #687895;
+  color: #916c7f;
   font-size: 12px;
 }
 
 .analysis-prompt-heading output {
   flex: 0 0 auto;
-  color: #58708f;
+  color: #856274;
   font-size: 12px;
   font-weight: 650;
 }
@@ -214,7 +214,7 @@
 }
 
 .analysis-prompt-field > span {
-  color: #53647f;
+  color: #795969;
   font-size: 12px;
   font-weight: 650;
 }
@@ -224,9 +224,9 @@
   min-height: 176px;
   padding: 12px 13px;
   resize: vertical;
-  color: #243653;
-  background: #fbfcfe;
-  border: 1px solid #becce0;
+  color: #47303c;
+  background: #fdfcfc;
+  border: 1px solid #d8c7cd;
   border-radius: 6px;
   outline: 0;
   font: inherit;
@@ -237,12 +237,12 @@
 .analysis-prompt-field textarea:focus {
   background: #fff;
   border-color: var(--signal);
-  box-shadow: 0 0 0 2px rgba(0, 95, 249, 0.1);
+  box-shadow: 0 0 0 2px rgba(198, 61, 104, 0.1);
 }
 
 .analysis-prompt-field textarea:disabled {
-  color: #7b899f;
-  background: #f1f4f8;
+  color: #9e7c8d;
+  background: #f7f2f4;
   cursor: not-allowed;
 }
 
@@ -254,7 +254,7 @@
 .analysis-prompt-footer > p {
   max-width: 75ch;
   margin: 0;
-  color: #65758e;
+  color: #8c677a;
   font-size: 12px;
   line-height: 1.55;
 }
@@ -290,7 +290,7 @@
 }
 
 .configuration-group.candidate {
-  border-color: #c4d5ec;
+  border-color: #e3cdd5;
 }
 
 .configuration-group-heading {
@@ -308,12 +308,12 @@
 
 .configuration-group-heading p {
   margin: 3px 0 0;
-  color: #687895;
+  color: #916c7f;
   font-size: 12px;
 }
 
 .configuration-group-heading > span {
-  color: #536681;
+  color: #7a5a6a;
   font-size: 13px;
   font-weight: 650;
 }
@@ -340,8 +340,8 @@
 .model-endpoint-card {
   min-width: 0;
   padding: 18px;
-  background: #fbfcfe;
-  border: 1px solid #dbe3ee;
+  background: #fdfcfc;
+  border: 1px solid #eadfe3;
   border-radius: 7px;
 }
 
@@ -371,7 +371,7 @@
 }
 
 .endpoint-card-heading > span {
-  color: #60728d;
+  color: #886577;
   font-size: 12px;
 }
 
@@ -379,17 +379,17 @@
   display: block;
   width: 15px;
   height: 15px;
-  border: 1.5px solid #3b5f8e;
+  border: 1.5px solid #7d4c65;
 }
 
 .endpoint-glyph.text {
   border-radius: 50%;
-  box-shadow: inset 0 0 0 3px #fbfcfe, inset 0 0 0 5px var(--signal);
+  box-shadow: inset 0 0 0 3px #fdfcfc, inset 0 0 0 5px var(--signal);
 }
 
 .endpoint-glyph.embedding {
   transform: rotate(45deg);
-  border-color: #5072a1;
+  border-color: #916079;
 }
 
 .current-endpoint-values {
@@ -405,7 +405,7 @@
 }
 
 .current-endpoint-values dt {
-  color: #6d7d97;
+  color: #956f82;
   font-size: 12px;
 }
 
@@ -413,7 +413,7 @@
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  color: #243653;
+  color: #47303c;
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -431,7 +431,7 @@
 }
 
 .model-endpoint-card > label > span {
-  color: #53647f;
+  color: #795969;
   font-size: 12px;
   font-weight: 600;
 }
@@ -441,14 +441,14 @@
   height: 40px;
   padding: 0 11px;
   background: white;
-  border: 1px solid #becce0;
+  border: 1px solid #d8c7cd;
   border-radius: 6px;
   outline: 0;
 }
 
 .model-endpoint-card input:focus {
   border-color: var(--signal);
-  box-shadow: 0 0 0 2px rgba(0, 95, 249, 0.1);
+  box-shadow: 0 0 0 2px rgba(198, 61, 104, 0.1);
 }
 
 .model-endpoint-card input[aria-invalid="true"] {
@@ -465,7 +465,7 @@
 .credential-row [aria-label="连接测试状态"] {
   margin-left: auto;
   margin-right: 12px;
-  color: #60728d;
+  color: #886577;
 }
 
 .credential-row [role="status"] {
@@ -523,7 +523,7 @@
 
 .data-operation-content > p:not(.operation-status):not(.operation-error) {
   margin: 0;
-  color: #65758e;
+  color: #8c677a;
   font-size: 13px;
 }
 
@@ -545,15 +545,15 @@
 }
 
 .data-operation-actions button:disabled {
-  color: #8492aa;
-  background: #eef2f7;
-  border-color: #d9e1ec;
+  color: #a78797;
+  background: #f6eff2;
+  border-color: #e8dde1;
   cursor: not-allowed;
 }
 
 .export-download-link {
-  color: #174e9e;
-  border-color: #b6c9e5;
+  color: #81345b;
+  border-color: #d9c2cb;
 }
 
 .operation-state-line {
@@ -562,7 +562,7 @@
   gap: 14px;
   min-height: 24px;
   margin-top: 8px;
-  color: #526681;
+  color: #795a6a;
   font-size: 12px;
 }
 
@@ -571,7 +571,7 @@
 }
 
 .operation-state-line time {
-  color: #6b7b94;
+  color: #936c80;
 }
 
 .operation-status,
@@ -583,7 +583,7 @@
 }
 
 .operation-status {
-  color: #526681;
+  color: #795a6a;
 }
 
 .operation-error {
@@ -595,7 +595,7 @@
 }
 
 .search-health-line [aria-label="语义索引状态"] {
-  color: #3f5d86;
+  color: #784d63;
 }
 
 .restore-actions {
@@ -605,7 +605,7 @@
 .restore-file-picker {
   display: grid;
   gap: 4px;
-  color: #52647f;
+  color: #785969;
   font-size: 11px;
   font-weight: 650;
 }
@@ -614,9 +614,9 @@
   width: 250px;
   min-height: 40px;
   padding: 5px 7px;
-  color: #435673;
-  background: #fbfcfe;
-  border: 1px solid #becce0;
+  color: #694d5b;
+  background: #fdfcfc;
+  border: 1px solid #d8c7cd;
   border-radius: 6px;
   font-size: 12px;
 }
@@ -624,8 +624,8 @@
 .restore-file-picker input::file-selector-button {
   min-height: 28px;
   margin-right: 8px;
-  color: #234b80;
-  background: #edf3fb;
+  color: #693a52;
+  background: #f8f0f3;
   border: 0;
   border-radius: 4px;
   cursor: pointer;

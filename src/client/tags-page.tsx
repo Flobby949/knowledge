@@ -516,7 +516,7 @@ export function TagsPage() {
         <main aria-label="标签图鉴" className="tag-atlas-main">
           <header className="tag-atlas-heading">
             <div>
-              <p>VOCABULARY INDEX</p>
+              <p>个人词汇</p>
               <h1>标签图鉴</h1>
             </div>
             <div className="tag-atlas-heading-actions">
