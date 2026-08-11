@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 4,
+  formatVersion: 5,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -262,8 +262,55 @@ interface CoverageItemRecordSnapshotRow extends DomainRow {
   record_id: string;
 }
 
+interface ConceptSnapshotRow extends DomainRow {
+  id: string;
+  current_revision_id: string;
+  normalized_name: string;
+  archived_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+interface ConceptRevisionSnapshotRow extends DomainRow {
+  id: string;
+  concept_id: string;
+  revision_number: number;
+  display_name: string;
+  normalized_name: string;
+  description: string;
+  created_at: Timestamp;
+}
+
+interface ConceptMembershipSnapshotRow extends DomainRow {
+  id: string;
+  concept_id: string;
+  knowledge_point_id: string;
+  origin: "USER";
+  created_at: Timestamp;
+  removed_at: Timestamp | null;
+}
+
+type ConceptActivityKind =
+  | "CREATED"
+  | "UPDATED"
+  | "ARCHIVED"
+  | "RESTORED"
+  | "MEMBER_ADDED"
+  | "MEMBER_REMOVED"
+  | "MEMBER_RESTORED";
+
+interface ConceptActivitySnapshotRow extends DomainRow {
+  id: string;
+  concept_id: string;
+  sequence_number: number;
+  kind: ConceptActivityKind;
+  revision_id: string | null;
+  membership_id: string | null;
+  occurred_at: Timestamp;
+}
+
 interface DomainSnapshot {
-  formatVersion: 4;
+  formatVersion: 5;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
@@ -286,10 +333,15 @@ interface DomainSnapshot {
   coverageAnalysisItems: CoverageAnalysisItemSnapshotRow[];
   coverageItemPoints: CoverageItemPointSnapshotRow[];
   coverageItemRecords: CoverageItemRecordSnapshotRow[];
+  concepts: ConceptSnapshotRow[];
+  conceptRevisions: ConceptRevisionSnapshotRow[];
+  conceptMemberships: ConceptMembershipSnapshotRow[];
+  conceptActivity: ConceptActivitySnapshotRow[];
 }
 
 interface ParsedSnapshot {
   snapshot: DomainSnapshot;
+  sourceFormatVersion: 4 | 5;
 }
 
 interface ExportRow {
@@ -405,7 +457,7 @@ export function registerDataTransferRoutes(
          VALUES ($1, 'VALID', $2, $3, $4, $5, $6)`,
         [
           inspectionId,
-          manifest.formatVersion,
+          parsed.sourceFormatVersion,
           parsed.snapshot.records.length,
           canRestore,
           canRestore ? null : "INSTANCE_NOT_EMPTY",
@@ -417,7 +469,7 @@ export function registerDataTransferRoutes(
         inspection: {
           id: inspectionId,
           status: "valid",
-          formatVersion: manifest.formatVersion,
+          formatVersion: parsed.sourceFormatVersion,
           recordCount: parsed.snapshot.records.length,
           canRestore,
           ...(canRestore ? {} : { blockingReason: "INSTANCE_NOT_EMPTY" }),
@@ -660,8 +712,20 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
           AND analysis.status IN ('SUCCEEDED', 'FAILED')
         ORDER BY link.item_id, link.record_id`,
     );
+    const concepts = await client.query(
+      "SELECT * FROM concepts ORDER BY created_at, id",
+    );
+    const conceptRevisions = await client.query(
+      "SELECT * FROM concept_revisions ORDER BY concept_id, revision_number",
+    );
+    const conceptMemberships = await client.query(
+      "SELECT * FROM concept_memberships ORDER BY concept_id, created_at, id",
+    );
+    const conceptActivity = await client.query(
+      "SELECT * FROM concept_activity ORDER BY concept_id, sequence_number",
+    );
     const snapshot: DomainSnapshot = {
-      formatVersion: 4,
+      formatVersion: 5,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
@@ -684,6 +748,10 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       coverageAnalysisItems: coverageAnalysisItems.rows,
       coverageItemPoints: coverageItemPoints.rows,
       coverageItemRecords: coverageItemRecords.rows,
+      concepts: concepts.rows,
+      conceptRevisions: conceptRevisions.rows,
+      conceptMemberships: conceptMemberships.rows,
+      conceptActivity: conceptActivity.rows,
     };
 
     await client.query("COMMIT");
@@ -715,7 +783,7 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
 
   if (
     !isDomainRow(publicManifest) ||
-    publicManifest.formatVersion !== 4 ||
+    (publicManifest.formatVersion !== 4 && publicManifest.formatVersion !== 5) ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -755,7 +823,10 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
     }
   }
 
-  return { snapshot };
+  return {
+    snapshot,
+    sourceFormatVersion: publicManifest.formatVersion,
+  };
 }
 
 function validateDomainSnapshot(value: unknown): DomainSnapshot {
@@ -763,11 +834,11 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     throw new Error("domain snapshot must be an object");
   }
 
-  if (value.formatVersion !== 4) {
+  if (value.formatVersion !== 4 && value.formatVersion !== 5) {
     throw new Error("domain snapshot version is unsupported");
   }
 
-  requireExactKeys(value, [
+  const baseKeys = [
     "formatVersion",
     "records",
     "fragmentRevisions",
@@ -791,68 +862,113 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     "coverageItemPoints",
     "coverageAnalysisRecords",
     "coverageItemRecords",
-  ]);
+  ];
+  const conceptKeys = [
+    "concepts",
+    "conceptRevisions",
+    "conceptMemberships",
+    "conceptActivity",
+  ];
 
-  const records = requireRows(value.records, "records");
+  requireExactKeys(
+    value,
+    value.formatVersion === 5 ? [...baseKeys, ...conceptKeys] : baseKeys,
+  );
+
+  const normalizedValue: DomainRow =
+    value.formatVersion === 4
+      ? {
+          ...value,
+          formatVersion: 5,
+          concepts: [],
+          conceptRevisions: [],
+          conceptMemberships: [],
+          conceptActivity: [],
+        }
+      : value;
+
+  const records = requireRows(normalizedValue.records, "records");
   const fragmentRevisions = requireRows(
-    value.fragmentRevisions,
+    normalizedValue.fragmentRevisions,
     "fragmentRevisions",
   );
-  const tags = requireRows(value.tags, "tags");
-  const tagAssignments = requireRows(value.tagAssignments, "tagAssignments");
-  const tagAliases = requireRows(value.tagAliases, "tagAliases");
-  const tagMerges = requireRows(value.tagMerges, "tagMerges");
-  const analyses = requireRows(value.analyses, "analyses");
-  const knowledgePoints = requireRows(value.knowledgePoints, "knowledgePoints");
-  const evidenceSpans = requireRows(value.evidenceSpans, "evidenceSpans");
-  const corrections = requireRows(value.corrections, "corrections");
+  const tags = requireRows(normalizedValue.tags, "tags");
+  const tagAssignments = requireRows(
+    normalizedValue.tagAssignments,
+    "tagAssignments",
+  );
+  const tagAliases = requireRows(normalizedValue.tagAliases, "tagAliases");
+  const tagMerges = requireRows(normalizedValue.tagMerges, "tagMerges");
+  const analyses = requireRows(normalizedValue.analyses, "analyses");
+  const knowledgePoints = requireRows(
+    normalizedValue.knowledgePoints,
+    "knowledgePoints",
+  );
+  const evidenceSpans = requireRows(
+    normalizedValue.evidenceSpans,
+    "evidenceSpans",
+  );
+  const corrections = requireRows(normalizedValue.corrections, "corrections");
   const overviewCorrections = requireRows(
-    value.overviewCorrections,
+    normalizedValue.overviewCorrections,
     "overviewCorrections",
   );
   const duplicateSuggestions = requireRows(
-    value.duplicateSuggestions,
+    normalizedValue.duplicateSuggestions,
     "duplicateSuggestions",
   );
   const duplicateConsolidations = requireRows(
-    value.duplicateConsolidations,
+    normalizedValue.duplicateConsolidations,
     "duplicateConsolidations",
   );
   const relationSuggestions = requireRows(
-    value.relationSuggestions,
+    normalizedValue.relationSuggestions,
     "relationSuggestions",
   );
   const relationSuggestionEvidence = requireRows(
-    value.relationSuggestionEvidence,
+    normalizedValue.relationSuggestionEvidence,
     "relationSuggestionEvidence",
   );
   const knowledgeRelations = requireRows(
-    value.knowledgeRelations,
+    normalizedValue.knowledgeRelations,
     "knowledgeRelations",
   );
   const coverageAnalyses = requireRows(
-    value.coverageAnalyses,
+    normalizedValue.coverageAnalyses,
     "coverageAnalyses",
   );
   const coverageAnalysisPoints = requireRows(
-    value.coverageAnalysisPoints,
+    normalizedValue.coverageAnalysisPoints,
     "coverageAnalysisPoints",
   );
   const coverageAnalysisRecords = requireRows(
-    value.coverageAnalysisRecords,
+    normalizedValue.coverageAnalysisRecords,
     "coverageAnalysisRecords",
   );
   const coverageAnalysisItems = requireRows(
-    value.coverageAnalysisItems,
+    normalizedValue.coverageAnalysisItems,
     "coverageAnalysisItems",
   );
   const coverageItemPoints = requireRows(
-    value.coverageItemPoints,
+    normalizedValue.coverageItemPoints,
     "coverageItemPoints",
   );
   const coverageItemRecords = requireRows(
-    value.coverageItemRecords,
+    normalizedValue.coverageItemRecords,
     "coverageItemRecords",
+  );
+  const concepts = requireRows(normalizedValue.concepts, "concepts");
+  const conceptRevisions = requireRows(
+    normalizedValue.conceptRevisions,
+    "conceptRevisions",
+  );
+  const conceptMemberships = requireRows(
+    normalizedValue.conceptMemberships,
+    "conceptMemberships",
+  );
+  const conceptActivity = requireRows(
+    normalizedValue.conceptActivity,
+    "conceptActivity",
   );
 
   records.forEach(validateRecordRow);
@@ -877,8 +993,12 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
   coverageAnalysisItems.forEach(validateCoverageAnalysisItemRow);
   coverageItemPoints.forEach(validateCoverageItemPointRow);
   coverageItemRecords.forEach(validateCoverageItemRecordRow);
+  concepts.forEach(validateConceptRow);
+  conceptRevisions.forEach(validateConceptRevisionRow);
+  conceptMemberships.forEach(validateConceptMembershipRow);
+  conceptActivity.forEach(validateConceptActivityRow);
 
-  const snapshot = value as unknown as DomainSnapshot;
+  const snapshot = normalizedValue as unknown as DomainSnapshot;
 
   validateSnapshotReferences(snapshot);
 
@@ -1463,6 +1583,119 @@ function validateCoverageItemRecordRow(row: DomainRow): void {
   requireUuid(row, "record_id");
 }
 
+function validateConceptRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "current_revision_id",
+    "normalized_name",
+    "archived_at",
+    "created_at",
+    "updated_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "current_revision_id");
+  requireNonEmptyString(row, "normalized_name");
+  requireNullableTimestamp(row, "archived_at");
+  requireTimestamp(row, "created_at");
+  requireTimestamp(row, "updated_at");
+
+  if (
+    timestampValue(row.updated_at) < timestampValue(row.created_at) ||
+    (row.archived_at !== null &&
+      timestampValue(row.archived_at) < timestampValue(row.created_at))
+  ) {
+    throw new Error("concept lifecycle is invalid");
+  }
+}
+
+function validateConceptRevisionRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "concept_id",
+    "revision_number",
+    "display_name",
+    "normalized_name",
+    "description",
+    "created_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "concept_id");
+  requireInteger(row, "revision_number", 1);
+  requireNonEmptyString(row, "display_name");
+  requireNonEmptyString(row, "normalized_name");
+  requireNonEmptyString(row, "description");
+  requireTimestamp(row, "created_at");
+}
+
+function validateConceptMembershipRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "concept_id",
+    "knowledge_point_id",
+    "origin",
+    "created_at",
+    "removed_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "concept_id");
+  requireUuid(row, "knowledge_point_id");
+  requireEnum(row, "origin", ["USER"]);
+  requireTimestamp(row, "created_at");
+  requireNullableTimestamp(row, "removed_at");
+
+  if (
+    row.removed_at !== null &&
+    timestampValue(row.removed_at) < timestampValue(row.created_at)
+  ) {
+    throw new Error("concept membership lifecycle is invalid");
+  }
+}
+
+function validateConceptActivityRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "concept_id",
+    "sequence_number",
+    "kind",
+    "revision_id",
+    "membership_id",
+    "occurred_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "concept_id");
+  requireInteger(row, "sequence_number", 1);
+  requireEnum(row, "kind", [
+    "CREATED",
+    "UPDATED",
+    "ARCHIVED",
+    "RESTORED",
+    "MEMBER_ADDED",
+    "MEMBER_REMOVED",
+    "MEMBER_RESTORED",
+  ]);
+  requireNullableUuid(row, "revision_id");
+  requireNullableUuid(row, "membership_id");
+  requireTimestamp(row, "occurred_at");
+
+  const revisionActivity = row.kind === "CREATED" || row.kind === "UPDATED";
+  const membershipActivity =
+    row.kind === "MEMBER_ADDED" ||
+    row.kind === "MEMBER_REMOVED" ||
+    row.kind === "MEMBER_RESTORED";
+
+  if (
+    (revisionActivity &&
+      (row.revision_id === null || row.membership_id !== null)) ||
+    (membershipActivity &&
+      (row.revision_id !== null || row.membership_id === null)) ||
+    (!revisionActivity &&
+      !membershipActivity &&
+      (row.revision_id !== null || row.membership_id !== null))
+  ) {
+    throw new Error("concept activity target is invalid");
+  }
+}
+
 function requireRelationType(row: DomainRow, key: string): void {
   requireEnum(row, key, [
     "SIMILAR",
@@ -1614,6 +1847,34 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
       `${row.record_id ?? row.knowledge_point_id}:${row.tag_id}`,
     "tag assignment target",
   );
+  assertUnique(snapshot.concepts, (row) => row.id, "concept id");
+  assertUnique(
+    snapshot.concepts,
+    (row) => row.normalized_name,
+    "concept name",
+  );
+  assertUnique(snapshot.conceptRevisions, (row) => row.id, "concept revision id");
+  assertUnique(
+    snapshot.conceptRevisions,
+    (row) => `${row.concept_id}:${row.revision_number}`,
+    "concept revision number",
+  );
+  assertUnique(
+    snapshot.conceptMemberships,
+    (row) => row.id,
+    "concept membership id",
+  );
+  assertUnique(
+    snapshot.conceptMemberships,
+    (row) => `${row.concept_id}:${row.knowledge_point_id}`,
+    "concept membership point",
+  );
+  assertUnique(snapshot.conceptActivity, (row) => row.id, "concept activity id");
+  assertUnique(
+    snapshot.conceptActivity,
+    (row) => `${row.concept_id}:${row.sequence_number}`,
+    "concept activity sequence",
+  );
 
   const records = new Map(snapshot.records.map((row) => [row.id, row]));
   const revisions = new Map(
@@ -1637,6 +1898,124 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   const coverageItems = new Map(
     snapshot.coverageAnalysisItems.map((row) => [row.id, row]),
   );
+  const concepts = new Map(snapshot.concepts.map((row) => [row.id, row]));
+  const conceptRevisions = new Map(
+    snapshot.conceptRevisions.map((row) => [row.id, row]),
+  );
+  const conceptMemberships = new Map(
+    snapshot.conceptMemberships.map((row) => [row.id, row]),
+  );
+
+  for (const revision of snapshot.conceptRevisions) {
+    if (!concepts.has(revision.concept_id)) {
+      throw new Error("concept revision reference is invalid");
+    }
+  }
+
+  for (const concept of snapshot.concepts) {
+    const revisionsForConcept = snapshot.conceptRevisions
+      .filter((revision) => revision.concept_id === concept.id)
+      .sort((left, right) => left.revision_number - right.revision_number);
+    const currentRevision = conceptRevisions.get(concept.current_revision_id);
+
+    if (
+      revisionsForConcept.length === 0 ||
+      revisionsForConcept.some(
+        (revision, index) => revision.revision_number !== index + 1,
+      ) ||
+      !currentRevision ||
+      currentRevision.concept_id !== concept.id ||
+      currentRevision.normalized_name !== concept.normalized_name ||
+      revisionsForConcept.at(-1)?.id !== currentRevision.id
+    ) {
+      throw new Error("concept current revision is invalid");
+    }
+  }
+
+  for (const membership of snapshot.conceptMemberships) {
+    if (
+      !concepts.has(membership.concept_id) ||
+      !points.has(membership.knowledge_point_id)
+    ) {
+      throw new Error("concept membership reference is invalid");
+    }
+  }
+
+  for (const concept of snapshot.concepts) {
+    const activity = snapshot.conceptActivity
+      .filter((entry) => entry.concept_id === concept.id)
+      .sort((left, right) => left.sequence_number - right.sequence_number);
+    const firstRevision = snapshot.conceptRevisions.find(
+      (revision) =>
+        revision.concept_id === concept.id && revision.revision_number === 1,
+    );
+
+    if (
+      activity.length === 0 ||
+      activity.some((entry, index) => entry.sequence_number !== index + 1) ||
+      activity[0]?.kind !== "CREATED" ||
+      activity[0]?.revision_id !== firstRevision?.id
+    ) {
+      throw new Error("concept activity sequence is invalid");
+    }
+
+    const lifecycleActivity = activity.filter(
+      (entry) => entry.kind === "ARCHIVED" || entry.kind === "RESTORED",
+    );
+    const latestLifecycle = lifecycleActivity.at(-1);
+
+    if (
+      (concept.archived_at === null && latestLifecycle?.kind === "ARCHIVED") ||
+      (concept.archived_at !== null && latestLifecycle?.kind !== "ARCHIVED")
+    ) {
+      throw new Error("concept archive activity is invalid");
+    }
+  }
+
+  for (const entry of snapshot.conceptActivity) {
+    const revision = entry.revision_id
+      ? conceptRevisions.get(entry.revision_id)
+      : undefined;
+    const membership = entry.membership_id
+      ? conceptMemberships.get(entry.membership_id)
+      : undefined;
+
+    if (
+      !concepts.has(entry.concept_id) ||
+      (entry.revision_id !== null && revision?.concept_id !== entry.concept_id) ||
+      (entry.membership_id !== null &&
+        membership?.concept_id !== entry.concept_id)
+    ) {
+      throw new Error("concept activity reference is invalid");
+    }
+  }
+
+  for (const revision of snapshot.conceptRevisions) {
+    const matchingActivity = snapshot.conceptActivity.filter(
+      (entry) => entry.revision_id === revision.id,
+    );
+    const expectedKind = revision.revision_number === 1 ? "CREATED" : "UPDATED";
+
+    if (matchingActivity.length !== 1 || matchingActivity[0]?.kind !== expectedKind) {
+      throw new Error("concept revision activity is invalid");
+    }
+  }
+
+  for (const membership of snapshot.conceptMemberships) {
+    const membershipActivity = snapshot.conceptActivity
+      .filter((entry) => entry.membership_id === membership.id)
+      .sort((left, right) => left.sequence_number - right.sequence_number);
+
+    if (
+      membershipActivity[0]?.kind !== "MEMBER_ADDED" ||
+      (membership.removed_at === null &&
+        membershipActivity.at(-1)?.kind === "MEMBER_REMOVED") ||
+      (membership.removed_at !== null &&
+        membershipActivity.at(-1)?.kind !== "MEMBER_REMOVED")
+    ) {
+      throw new Error("concept membership activity is invalid");
+    }
+  }
 
   for (const alias of snapshot.tagAliases) {
     const tag = tags.get(alias.tag_id);
@@ -2170,6 +2549,10 @@ function isTimestamp(value: unknown): value is string {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
 }
 
+function timestampValue(value: unknown): number {
+  return Date.parse(value as string);
+}
+
 async function restoreSnapshot(
   client: PoolClient,
   snapshot: DomainSnapshot,
@@ -2271,6 +2654,40 @@ async function restoreSnapshot(
     "analysis_revision_id",
     "raw_label",
   ], snapshot.tagAssignments);
+  await insertRows(client, "concepts", [
+    "id",
+    "current_revision_id",
+    "normalized_name",
+    "archived_at",
+    "created_at",
+    "updated_at",
+  ], snapshot.concepts);
+  await insertRows(client, "concept_revisions", [
+    "id",
+    "concept_id",
+    "revision_number",
+    "display_name",
+    "normalized_name",
+    "description",
+    "created_at",
+  ], snapshot.conceptRevisions);
+  await insertRows(client, "concept_memberships", [
+    "id",
+    "concept_id",
+    "knowledge_point_id",
+    "origin",
+    "created_at",
+    "removed_at",
+  ], snapshot.conceptMemberships);
+  await insertRows(client, "concept_activity", [
+    "id",
+    "concept_id",
+    "sequence_number",
+    "kind",
+    "revision_id",
+    "membership_id",
+    "occurred_at",
+  ], snapshot.conceptActivity);
   await insertRows(client, "duplicate_suggestions", [
     "id",
     "source_a_type",
@@ -2401,7 +2818,8 @@ async function insertRows(
 async function instanceHasDomainData(pool: Pool | PoolClient): Promise<boolean> {
   const result = await pool.query<{ has_data: boolean }>(
     `SELECT EXISTS (SELECT 1 FROM records)
-         OR EXISTS (SELECT 1 FROM tags) AS has_data`,
+         OR EXISTS (SELECT 1 FROM tags)
+         OR EXISTS (SELECT 1 FROM concepts) AS has_data`,
   );
 
   return result.rows[0]?.has_data ?? false;

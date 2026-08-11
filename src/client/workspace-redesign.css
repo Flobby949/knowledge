@@ -53,6 +53,7 @@ html[data-theme="scifi"] {
 .tags-shell,
 .settings-shell,
 .insights-shell,
+.concepts-shell,
 .ai-task-page-shell {
   --signal: var(--workspace-accent);
   --signal-hover: var(--workspace-accent-hover);
@@ -255,6 +256,7 @@ html[data-theme="scifi"] {
 
 .settings-main,
 .insights-main,
+.concepts-main,
 .ai-task-page-main {
   width: auto;
   margin-right: 40px;
@@ -264,6 +266,7 @@ html[data-theme="scifi"] {
 .records-main,
 .settings-shell,
 .insights-shell,
+.concepts-shell,
 .ai-task-page-shell {
   background: var(--workspace-canvas);
 }

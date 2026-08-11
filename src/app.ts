@@ -12,6 +12,7 @@ import {
   type CoverageGenerator,
 } from "./coverage-generator.js";
 import { registerCoverageRoutes } from "./coverage-routes.js";
+import { registerConceptRoutes } from "./concept-routes.js";
 import {
   embedOpenAICompatibleText,
   type EmbedText,
@@ -412,6 +413,7 @@ export async function buildApp(
     generateCoverage:
       options.generateCoverage ?? generateOpenAICompatibleCoverage,
   });
+  registerConceptRoutes(app, { pool });
 
   app.post<{ Body: CreateRecordBody }>(
     "/api/v1/records",

@@ -187,6 +187,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   border-radius: 10px;
 }
 
+.home-navigation .global-search {
+  width: 420px;
+}
+
 .global-search input, .toolbar-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
 .global-search input::placeholder, .toolbar-search input::placeholder { color: #806a78; }
 .global-search-suggestions {
@@ -493,6 +497,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width: 1350px) {
   .app-navigation { padding-inline: 24px; }
   .global-search { width: 340px; }
+  .home-navigation .global-search { left: 53%; width: 300px; }
   .nav-primary > a:not(.brand-mark), .settings-link { min-width: 62px; padding-inline: 10px; }
   .records-toolbar { width: calc(100% - 48px); margin-inline: 24px; grid-template-columns: minmax(0, 1fr) 108px 120px 120px 142px; gap: 12px; }
   .records-masonry { width: calc(100% - 48px); margin-inline: 24px; }

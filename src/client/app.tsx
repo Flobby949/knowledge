@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AiTaskPage } from "./ai-task-page.js";
+import { ConceptsPage } from "./concepts-page.js";
 import { HomePage } from "./home-page.js";
 import { InsightsPage } from "./insights-page.js";
 import { RecordDetailPage } from "./record-detail-page.js";
@@ -15,6 +16,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/ai-tasks" element={<AiTaskPage />} />
+      <Route path="/concepts" element={<ConceptsPage />} />
       <Route path="/records" element={<RecordsPage />} />
       <Route path="/records/:recordId" element={<RecordDetailPage />} />
       <Route path="/insights" element={<InsightsPage />} />

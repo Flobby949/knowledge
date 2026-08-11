@@ -106,6 +106,10 @@ async function resetKnowledgeInstance(pool: Pool): Promise<void> {
          data_exports,
          coverage_analyses,
          model_configurations,
+         concept_activity,
+         concept_memberships,
+         concept_revisions,
+         concepts,
          records,
          tags
        RESTART IDENTITY CASCADE`,

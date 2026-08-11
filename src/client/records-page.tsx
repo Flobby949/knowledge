@@ -832,6 +832,10 @@ export function AppNavigation({
             <NavigationGlyph kind="tags" />
             <span className="nav-link-label">标签</span>
           </Link>
+          <Link aria-current={location.pathname.startsWith("/concepts") ? "page" : undefined} className={location.pathname.startsWith("/concepts") ? "active" : undefined} to="/concepts">
+            <NavigationGlyph kind="concepts" />
+            <span className="nav-link-label">概念</span>
+          </Link>
           <Link aria-current={location.pathname.startsWith("/insights") ? "page" : undefined} className={location.pathname.startsWith("/insights") ? "active" : undefined} to="/insights">
             <NavigationGlyph kind="insights" />
             <span className="nav-link-label">发现</span>
@@ -930,7 +934,14 @@ export function AppNavigation({
 function NavigationGlyph({
   kind,
 }: {
-  kind: "home" | "insights" | "records" | "review" | "settings" | "tags";
+    kind:
+      | "concepts"
+      | "home"
+      | "insights"
+      | "records"
+      | "review"
+      | "settings"
+      | "tags";
 }) {
   const common = {
     "aria-hidden": true,
@@ -982,6 +993,16 @@ function NavigationGlyph({
         <circle cx="5.5" cy="17.5" r="2" />
         <circle cx="18.5" cy="17.5" r="2" />
         <path d="m10.8 6.8-4.1 8.8M13.2 6.8l4.1 8.8M7.5 17.5h9" />
+      </svg>
+    );
+  }
+
+  if (kind === "concepts") {
+    return (
+      <svg {...common}>
+        <circle cx="8" cy="8" r="3.5" />
+        <circle cx="16" cy="16" r="3.5" />
+        <path d="m10.5 10.5 3 3M14.5 5.5l4-2M5.5 14.5l-2 4" />
       </svg>
     );
   }

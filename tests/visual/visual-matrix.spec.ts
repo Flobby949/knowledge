@@ -434,6 +434,50 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
   await expectBox(cards.nth(2), { x: 547.67, width: 218.33, height: 128 }, 3);
 });
 
+test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", async ({
+  page,
+}) => {
+  await page.goto(`${appBaseUrl}/concepts`);
+
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+  const main = page.getByRole("main", { name: "知识概念" });
+  const workbench = page.locator(".concept-workbench");
+  const catalog = page.getByRole("complementary", {
+    name: "Concept 图册索引",
+  });
+  const stage = page.locator(".concept-stage");
+  const detail = page.getByRole("region", { name: "Concept 详情" });
+
+  await expect(
+    detail.getByRole("heading", { name: "变更数据捕获", exact: true }),
+  ).toBeVisible();
+  await expect(detail.getByRole("article", { name: /Membership/u })).toHaveCount(
+    3,
+  );
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(main, { x: 116, y: 72, width: 1_444 });
+  await expectBox(workbench, { x: 116, width: 1_444 });
+  await expectBox(catalog, { x: 117, width: 324 });
+  await expectBox(stage, { x: 441, width: 1_118 });
+  await expect(page).toHaveScreenshot(snapshotName(theme, "concepts"), {
+    animations: "disabled",
+    caret: "hide",
+    fullPage: false,
+    mask: [page.locator(".concept-definition-plate dl")],
+    maxDiffPixels: 500,
+  });
+
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(main, { x: 116, y: 72, width: 1_124 });
+  await expectBox(workbench, { x: 116, width: 1_124 });
+  await expectBox(catalog, { x: 117, width: 292 });
+  await expectBox(stage, { x: 409, width: 830 });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBe(1_280);
+});
+
 test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制台", async ({
   page,
 }) => {

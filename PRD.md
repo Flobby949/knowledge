@@ -291,6 +291,10 @@ Concept 是用户确认后的长期认知节点，用于聚合多个知识点。
 - AI 可以提出 Concept Candidate，但不能直接创建正式 Concept；
 - 用户也可以主动创建 Concept；
 - Concept Candidate、Concept 确认和知识点归属都属于 V3；
+- V3.0 的 Concept 必须具有用户确认的名称和自足描述，名称在独立于 Tag 的 Concept 命名空间内按 NFKC、空白归一和拉丁字母大小写无关规则唯一；
+- 用户主动创建 Concept 时必须选择至少两个当前生效且未排除的知识点，后续成员减少不会自动删除或归档 Concept；
+- Concept 名称和描述的每次修改都保留不可变版本；Concept 只支持可恢复归档，V3.0 不提供永久删除；
+- Concept Membership 绑定一个确切知识点并保留加入、移除和恢复历史；端点退出生效后只提示复核，不自动迁移；
 - V1/V2 的任何功能不得依赖 Concept 已存在。
 
 ## 8. 整体业务架构
@@ -669,6 +673,13 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-CON-01` V3 可以生成 Concept Candidate；
 - `FR-CON-02` 只有用户确认后才能创建正式 Concept；
 - `FR-CON-03` V3 支持基于确认关系与 Concept 的图谱展示和路径探索。
+- `FR-CON-04` V3.0 用户可以从至少两个当前生效且未排除的 Knowledge Point 主动创建 Concept；名称和描述均为必填，规范化同名 Concept 不得重复；
+- `FR-CON-05` 用户可以修改 Concept 名称和描述，每次修改保留不可变 Concept Revision，且不得改变 Concept 稳定身份；
+- `FR-CON-06` 用户可以为未归档 Concept 增加、移除和恢复 Concept Membership；Membership 始终绑定原 Knowledge Point，操作不得改写或删除知识点；
+- `FR-CON-07` Knowledge Point 被排除、不再属于当前生效分析或所属 Record 归档时，既有 Membership 必须保留并标记需要复核，不得自动迁移到新知识点；
+- `FR-CON-08` Concept 可以归档和恢复；归档保留全部版本、Membership 与操作历史并退出默认列表，V3.0 不提供永久删除；
+- `FR-CON-09` Concept 名称使用与 Tag 相同的 NFKC、Unicode 空白和拉丁字母大小写归一规则，但 Concept 与 Tag 使用独立命名空间；
+- `FR-CON-10` V3.0 不创建 Concept Candidate、Concept Relation、图谱或路径 API，也不改变 V2 Knowledge Relation 类型集合。
 
 ### 10.7 完整导出与恢复
 
@@ -1254,7 +1265,7 @@ PC Web 全局采用横向顶部导航，不使用常驻或可折叠侧边栏。�
 
 ### 16.2 V2 完成标准
 
-- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；当前完整导出格式 4 可以把全部 V2 领域事实无损恢复到 V2 空实例。格式 4 是首个承诺长期恢复兼容的导出格式，后续已发布格式必须继续支持格式 4 及之后的备份，格式 1–3 不属于兼容范围；
+- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；V2 以完整导出格式 4 完成无损往返，V3.0 当前格式 5 在此基础上增加全部 Concept 事实，并继续把格式 4 适配为空 Concept 集合。格式 4 是首个承诺长期恢复兼容的导出格式，格式 1–3 不属于兼容范围；
 - 用户能为已认可标签维护别名，并能把一个或多个同义标签合并到主标签后撤销；合并前后的 Tag 身份、Assignment 来源和历史版本均不丢失，有效展示与检索按主标签聚合；
 - 系统能提示重复知识并提供不丢来源的合并建议；
 - 系统能生成带理由、证据和置信度的关系建议；
@@ -1422,5 +1433,5 @@ PC Web 全局采用横向顶部导航，不使用常驻或可折叠侧边栏。�
 - V2 的最终关系类型集合；
 - 重复知识的合并交互与“主知识点”规则；
 - 知识分析所用领域框架的来源与维护方式；
-- V3 Concept 的详细字段、别名和层级关系；
+- V3.0 之后的 Concept 别名、层级和合并规则；
 - 除纯文本外，网页、PDF、图片和第三方数据源的导入优先级；

@@ -47,6 +47,17 @@ export async function ensureVisualFixture(
 
   expect(restored.status()).toBe(201);
 
+  const concept = await request.post(`${appBaseUrl}/api/v1/concepts`, {
+    data: {
+      name: "变更数据捕获",
+      description:
+        "通过读取事务日志识别增量变化，并以有序事件向下游传播，避免周期轮询造成的负载与延迟。",
+      knowledgePointIds: [stableUuid(6, 1), stableUuid(6, 2), stableUuid(6, 3)],
+    },
+  });
+
+  expect(concept.status()).toBe(201);
+
   await configureDeterministicFakeModels(request, appBaseUrl);
   fixtureReady = true;
 }

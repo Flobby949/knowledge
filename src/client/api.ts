@@ -434,6 +434,199 @@ export interface ModelConfigurationState {
   canActivate: boolean;
 }
 
+export interface ConceptSummary {
+  activeMembershipCount: number;
+  archivedAt: string | null;
+  createdAt: string;
+  description: string;
+  id: string;
+  lifecycle: "active" | "archived";
+  name: string;
+  reviewMembershipCount: number;
+  revisionNumber: number;
+  updatedAt: string;
+}
+
+export interface ConceptSource {
+  body: string;
+  id: string;
+  recordId: string;
+  recordTitle: string;
+  title: string;
+}
+
+export interface ConceptDetail {
+  activity: Array<{
+    kind:
+      | "archived"
+      | "created"
+      | "member_added"
+      | "member_removed"
+      | "member_restored"
+      | "restored"
+      | "updated";
+    membershipId: string | null;
+    occurredAt: string;
+    revisionId: string | null;
+    sequenceNumber: number;
+  }>;
+  concept: Omit<
+    ConceptSummary,
+    "activeMembershipCount" | "reviewMembershipCount"
+  >;
+  memberships: Array<{
+    createdAt: string;
+    id: string;
+    needsReview: boolean;
+    origin: "user";
+    point: ConceptSource & { current: boolean };
+    removedAt: string | null;
+    status: "active" | "removed";
+  }>;
+  revisions: Array<{
+    createdAt: string;
+    description: string;
+    id: string;
+    name: string;
+    revisionNumber: number;
+  }>;
+}
+
+export async function listConcepts(options: {
+  archive?: "active" | "archived" | "all";
+  q?: string;
+  signal?: AbortSignal;
+} = {}): Promise<ConceptSummary[]> {
+  const search = new URLSearchParams();
+
+  if (options.archive) {
+    search.set("archive", options.archive);
+  }
+
+  if (options.q) {
+    search.set("q", options.q);
+  }
+
+  const response = await fetch(
+    `/api/v1/concepts${search.size ? `?${search.toString()}` : ""}`,
+    options.signal ? { signal: options.signal } : undefined,
+  );
+  const body = await parseConceptResponse<{ items: ConceptSummary[] }>(response);
+
+  return body.items;
+}
+
+export async function listConceptSources(
+  query = "",
+  signal?: AbortSignal,
+): Promise<ConceptSource[]> {
+  const search = new URLSearchParams();
+
+  if (query) {
+    search.set("q", query);
+  }
+
+  const response = await fetch(
+    `/api/v1/concept-sources${search.size ? `?${search.toString()}` : ""}`,
+    signal ? { signal } : undefined,
+  );
+  const body = await parseConceptResponse<{ items: ConceptSource[] }>(response);
+
+  return body.items;
+}
+
+export async function getConceptDetail(id: string): Promise<ConceptDetail> {
+  const response = await fetch(`/api/v1/concepts/${encodeURIComponent(id)}`);
+  const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
+
+  return body.detail;
+}
+
+export async function createConcept(input: {
+  description: string;
+  knowledgePointIds: string[];
+  name: string;
+}): Promise<ConceptDetail> {
+  const response = await fetch("/api/v1/concepts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
+
+  return body.detail;
+}
+
+export async function updateConcept(
+  id: string,
+  input: { description: string; name: string },
+): Promise<ConceptDetail> {
+  const response = await fetch(`/api/v1/concepts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
+
+  return body.detail;
+}
+
+export async function addConceptMembership(
+  conceptId: string,
+  knowledgePointId: string,
+): Promise<ConceptDetail> {
+  const response = await fetch(
+    `/api/v1/concepts/${encodeURIComponent(conceptId)}/memberships`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ knowledgePointId }),
+    },
+  );
+  const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
+
+  return body.detail;
+}
+
+export async function removeConceptMembership(
+  conceptId: string,
+  membershipId: string,
+): Promise<ConceptDetail> {
+  const response = await fetch(
+    `/api/v1/concepts/${encodeURIComponent(conceptId)}/memberships/${encodeURIComponent(membershipId)}`,
+    { method: "DELETE" },
+  );
+  const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
+
+  return body.detail;
+}
+
+export async function restoreConceptMembership(
+  conceptId: string,
+  membershipId: string,
+): Promise<ConceptDetail> {
+  const response = await fetch(
+    `/api/v1/concepts/${encodeURIComponent(conceptId)}/memberships/${encodeURIComponent(membershipId)}/restore`,
+    { method: "POST" },
+  );
+  const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
+
+  return body.detail;
+}
+
+export async function setConceptArchived(
+  conceptId: string,
+  archived: boolean,
+): Promise<ConceptDetail> {
+  const response = await fetch(
+    `/api/v1/concepts/${encodeURIComponent(conceptId)}/${archived ? "archive" : "restore"}`,
+    { method: "POST" },
+  );
+  const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
+
+  return body.detail;
+}
+
 export async function listRecords(options: {
   archive?: "active" | "archived" | "all";
   cursor?: string;
@@ -1236,6 +1429,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 async function parseTagResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    throw new Error(await tagErrorMessage(response));
+  }
+
+  return (await response.json()) as T;
+}
+
+async function parseConceptResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     throw new Error(await tagErrorMessage(response));
   }

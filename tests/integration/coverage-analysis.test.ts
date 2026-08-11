@@ -62,6 +62,10 @@ describe("V2 experimental record coverage analysis", () => {
   let database: PreparedTestDatabase;
   let pool: Pool;
   let releaseSlowAnalysis: (() => void) | null = null;
+  let markSlowAnalysisStarted: (() => void) | null = null;
+  const slowAnalysisStarted = new Promise<void>((resolve) => {
+    markSlowAnalysisStarted = resolve;
+  });
   let retryShouldSucceed = false;
   const testModelEndpoint = vi.fn(async () => ({ status: "passed" as const }));
   const embedText = vi.fn<EmbedText>(async () => [1, 0, 0]);
@@ -86,8 +90,10 @@ describe("V2 experimental record coverage analysis", () => {
   });
   const generateCoverage = vi.fn<CoverageGenerator>(async (input) => {
     if (input.topic === "慢速覆盖") {
+      await new Promise((resolve) => setTimeout(resolve, 25));
       await new Promise<void>((resolve) => {
         releaseSlowAnalysis = resolve;
+        markSlowAnalysisStarted?.();
       });
     }
 
@@ -169,6 +175,7 @@ describe("V2 experimental record coverage analysis", () => {
 
     expect(listedTask?.status).toMatch(/queued|running/u);
 
+    await slowAnalysisStarted;
     releaseSlowAnalysis?.();
     const completed = await waitForCoverage(app, task.id, "succeeded");
 
