@@ -4,6 +4,7 @@ import { AiTaskPage } from "./ai-task-page.js";
 import { ConceptsPage } from "./concepts-page.js";
 import { HomePage } from "./home-page.js";
 import { InsightsPage } from "./insights-page.js";
+import { NetworkPage } from "./network-page.js";
 import { RecordDetailPage } from "./record-detail-page.js";
 import { RecordsPage } from "./records-page.js";
 import { ReviewPage } from "./review-page.js";
@@ -20,6 +21,7 @@ export function App() {
       <Route path="/records" element={<RecordsPage />} />
       <Route path="/records/:recordId" element={<RecordDetailPage />} />
       <Route path="/insights" element={<InsightsPage />} />
+      <Route path="/network" element={<NetworkPage />} />
       <Route path="/review" element={<ReviewPage />} />
       <Route path="/search" element={<SearchPage />} />
       <Route path="/settings" element={<SettingsPage />} />

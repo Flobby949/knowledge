@@ -247,7 +247,220 @@ describe("V3.2 knowledge network", () => {
     );
   }, 30_000);
 
-  it("returns explicit 422 budget errors for bounded subgraph and neighbor reads", async () => {
+  it("searches both current node types and excludes nodes outside the effective network", async () => {
+    const marker = `network-search-${randomUUID().slice(0, 8)}`;
+    const conceptPoint = await seedCurrentKnowledgePoint(
+      pool,
+      `concept-source-${randomUUID().slice(0, 8)}`,
+    );
+    const concept = await seedConcept(pool, `${marker}-concept`, conceptPoint.id);
+    const point = await seedCurrentKnowledgePoint(pool, `${marker}-point`);
+    const descriptionPoint = await seedCurrentKnowledgePoint(
+      pool,
+      `description-source-${randomUUID().slice(0, 8)}`,
+    );
+    const descriptionConcept = await seedConcept(
+      pool,
+      `description-concept-${randomUUID().slice(0, 8)}`,
+      descriptionPoint.id,
+      { description: `${marker} only in concept description` },
+    );
+    const bodyPoint = await seedCurrentKnowledgePoint(
+      pool,
+      `body-point-${randomUUID().slice(0, 8)}`,
+      { body: `${marker} only in knowledge point body` },
+    );
+    const archivedConceptPoint = await seedCurrentKnowledgePoint(
+      pool,
+      `archived-source-${randomUUID().slice(0, 8)}`,
+    );
+    const archivedConcept = await seedConcept(
+      pool,
+      `${marker}-archived-concept`,
+      archivedConceptPoint.id,
+    );
+    const oldPoint = await seedCurrentKnowledgePoint(pool, `${marker}-old`);
+    const excludedPoint = await seedCurrentKnowledgePoint(
+      pool,
+      `${marker}-excluded`,
+    );
+    const archivedRecordPoint = await seedCurrentKnowledgePoint(
+      pool,
+      `${marker}-archived-record`,
+    );
+
+    await pool.query("UPDATE concepts SET archived_at = now() WHERE id = $1", [
+      archivedConcept.id,
+    ]);
+    await pool.query(
+      `UPDATE ai_analysis_revisions
+          SET status = 'SUPERSEDED'
+        WHERE id = (
+          SELECT analysis_revision_id FROM knowledge_points WHERE id = $1
+        )`,
+      [oldPoint.id],
+    );
+    await pool.query(
+      "UPDATE knowledge_points SET usage_status = 'EXCLUDED' WHERE id = $1",
+      [excludedPoint.id],
+    );
+    await pool.query(
+      `UPDATE records
+          SET archived_at = now()
+        WHERE id = (SELECT record_id FROM knowledge_points WHERE id = $1)`,
+      [archivedRecordPoint.id],
+    );
+
+    const allResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/network/nodes/search?q=${encodeURIComponent(marker)}`,
+    });
+
+    expect(allResponse.statusCode).toBe(200);
+    expect(allResponse.json()).toMatchObject({
+      limit: 20,
+      truncated: false,
+      items: expect.arrayContaining([
+        {
+          key: `concept:${concept.id}`,
+          type: "concept",
+          id: concept.id,
+          label: `${marker}-concept`,
+          description: `${marker}-concept的稳定定义。`,
+          source: {
+            kind: "concept_revision",
+            revisionId: concept.revisionId,
+            revisionNumber: 1,
+          },
+        },
+        expect.objectContaining({
+          key: `concept:${descriptionConcept.id}`,
+          type: "concept",
+          source: expect.objectContaining({ kind: "concept_revision" }),
+        }),
+        {
+          key: `knowledge_point:${point.id}`,
+          type: "knowledge_point",
+          id: point.id,
+          label: point.title,
+          description: point.body,
+          source: {
+            kind: "knowledge_point",
+            recordId: expect.any(String),
+            recordTitle: `${marker}-point`,
+            fragmentRevisionId: expect.any(String),
+            analysisRevisionId: expect.any(String),
+          },
+        },
+        expect.objectContaining({
+          key: `knowledge_point:${bodyPoint.id}`,
+          type: "knowledge_point",
+          description: `${marker} only in knowledge point body`,
+        }),
+      ]),
+    });
+    const allKeys = (
+      allResponse.json() as { items: Array<{ key: string }> }
+    ).items.map(({ key }) => key);
+
+    expect(allKeys).not.toContain(`concept:${archivedConcept.id}`);
+    expect(allKeys).not.toContain(`knowledge_point:${oldPoint.id}`);
+    expect(allKeys).not.toContain(`knowledge_point:${excludedPoint.id}`);
+    expect(allKeys).not.toContain(`knowledge_point:${archivedRecordPoint.id}`);
+
+    const conceptsOnly = await app.inject({
+      method: "GET",
+      url:
+        `/api/v1/network/nodes/search?q=${encodeURIComponent(marker)}` +
+        "&type=concept",
+    });
+    const pointsOnly = await app.inject({
+      method: "GET",
+      url:
+        `/api/v1/network/nodes/search?q=${encodeURIComponent(marker)}` +
+        "&type=knowledge_point",
+    });
+
+    expect(
+      (conceptsOnly.json() as { items: Array<{ type: string }> }).items.every(
+        ({ type }) => type === "concept",
+      ),
+    ).toBe(true);
+    expect(
+      (pointsOnly.json() as { items: Array<{ type: string }> }).items.every(
+        ({ type }) => type === "knowledge_point",
+      ),
+    ).toBe(true);
+  }, 30_000);
+
+  it("ranks title prefixes before description matches and uses stable keys to truncate ties", async () => {
+    const query = `rank-${randomUUID().slice(0, 8)}`;
+    const conceptSource = await seedCurrentKnowledgePoint(
+      pool,
+      `rank-concept-source-${randomUUID().slice(0, 8)}`,
+    );
+    const tiedConcept = await seedConcept(pool, query, conceptSource.id, {
+      description: "same body",
+    });
+    const tiedPoint = await seedCurrentKnowledgePoint(
+      pool,
+      `rank-point-source-${randomUUID().slice(0, 8)}`,
+      { body: "same body", title: query },
+    );
+    const descriptionSource = await seedCurrentKnowledgePoint(
+      pool,
+      `rank-description-source-${randomUUID().slice(0, 8)}`,
+    );
+    const descriptionOnly = await seedConcept(
+      pool,
+      `not-a-prefix-${randomUUID().slice(0, 8)}`,
+      descriptionSource.id,
+      { description: query },
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url:
+        `/api/v1/network/nodes/search?q=${encodeURIComponent(query)}` +
+        "&type=all&limit=2",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [
+        expect.objectContaining({ key: `concept:${tiedConcept.id}` }),
+        expect.objectContaining({ key: `knowledge_point:${tiedPoint.id}` }),
+      ],
+      limit: 2,
+      truncated: true,
+    });
+  }, 30_000);
+
+  it("rejects invalid network node search parameters with an explicit 422", async () => {
+    const invalidUrls = [
+      "/api/v1/network/nodes/search",
+      "/api/v1/network/nodes/search?q=%20%20",
+      `/api/v1/network/nodes/search?q=${"x".repeat(201)}`,
+      "/api/v1/network/nodes/search?q=node&type=tag",
+      "/api/v1/network/nodes/search?q=node&limit=0",
+      "/api/v1/network/nodes/search?q=node&limit=51",
+      "/api/v1/network/nodes/search?q=node&limit=1.5",
+    ];
+
+    for (const url of invalidUrls) {
+      const response = await app.inject({ method: "GET", url });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toEqual({
+        error: {
+          code: "NETWORK_QUERY_INVALID",
+          message: expect.any(String),
+        },
+      });
+    }
+  });
+
+  it("returns explicit 422 budget errors for bounded network reads", async () => {
     const point = await seedCurrentKnowledgePoint(pool, "预算读取");
     const concept = await seedConcept(pool, "预算概念", point.id);
     const blocker = await pool.connect();
@@ -256,15 +469,19 @@ describe("V3.2 knowledge network", () => {
       await blocker.query("BEGIN");
       await blocker.query("LOCK TABLE concepts IN ACCESS EXCLUSIVE MODE");
 
-      const [subgraph, neighbors] = await Promise.all([
+      const [subgraph, neighbors, search] = await Promise.all([
         app.inject({ method: "GET", url: "/api/v1/network/subgraph" }),
         app.inject({
           method: "GET",
           url: `/api/v1/network/nodes/concept:${concept.id}/neighbors`,
         }),
+        app.inject({
+          method: "GET",
+          url: "/api/v1/network/nodes/search?q=%E9%A2%84%E7%AE%97",
+        }),
       ]);
 
-      for (const response of [subgraph, neighbors]) {
+      for (const response of [subgraph, neighbors, search]) {
         expect(response.statusCode).toBe(422);
         expect(response.json()).toMatchObject({
           error: { code: "NETWORK_GRAPH_BUDGET_EXCEEDED" },
@@ -286,6 +503,7 @@ interface SeededPoint {
 async function seedCurrentKnowledgePoint(
   pool: Pool,
   label: string,
+  options?: { body?: string; title?: string },
 ): Promise<SeededPoint> {
   const client = await pool.connect();
   const recordId = randomUUID();
@@ -294,8 +512,8 @@ async function seedCurrentKnowledgePoint(
   const tagId = randomUUID();
   const point: SeededPoint = {
     id: randomUUID(),
-    title: `${label}知识点`,
-    body: `${label}的自包含正文。`,
+    title: options?.title ?? `${label}知识点`,
+    body: options?.body ?? `${label}的自包含正文。`,
   };
 
   try {
@@ -361,7 +579,7 @@ async function seedConcept(
   pool: Pool,
   name: string,
   pointId: string,
-  options?: { id: string },
+  options?: { description?: string; id?: string },
 ) {
   const client = await pool.connect();
   const conceptId = options?.id ?? randomUUID();
@@ -380,7 +598,12 @@ async function seedConcept(
          (id, concept_id, revision_number, display_name, normalized_name,
           description)
        VALUES ($1, $2, 1, $3, $3, $4)`,
-      [revisionId, conceptId, name, `${name}的稳定定义。`],
+      [
+        revisionId,
+        conceptId,
+        name,
+        options?.description ?? `${name}的稳定定义。`,
+      ],
     );
     await client.query(
       `INSERT INTO concept_memberships

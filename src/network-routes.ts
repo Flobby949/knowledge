@@ -24,6 +24,14 @@ interface NeighborQuery {
   nodeLimit?: string;
 }
 
+type NodeSearchType = "all" | NodeType;
+
+interface NodeSearchQuery {
+  limit?: string;
+  q?: string;
+  type?: string;
+}
+
 interface PathQuery {
   from?: string;
   maxDepth?: string;
@@ -107,6 +115,20 @@ interface GraphLimits {
   nodeLimit: number;
 }
 
+interface NetworkNodeSearchRow {
+  analysis_revision_id: string | null;
+  description: string;
+  fragment_revision_id: string | null;
+  id: string;
+  key: string;
+  label: string;
+  record_id: string | null;
+  record_title: string | null;
+  revision_id: string | null;
+  revision_number: number | null;
+  type: NodeType;
+}
+
 const DEFAULT_NODE_LIMIT = 100;
 const DEFAULT_EDGE_LIMIT = 200;
 const DEFAULT_LOCAL_DEPTH = 1;
@@ -117,6 +139,8 @@ const DEFAULT_PATH_DEPTH = 6;
 const MAX_PATH_DEPTH = 6;
 const MAX_PATH_VISITED = 1_000;
 const MAX_PATH_EDGE_SCAN = 10_000;
+const DEFAULT_NODE_SEARCH_LIMIT = 20;
+const MAX_NODE_SEARCH_LIMIT = 50;
 
 export function registerNetworkRoutes(
   app: FastifyInstance,
@@ -174,6 +198,44 @@ export function registerNetworkRoutes(
       }
 
       return { root: root.key, ...graph };
+    },
+  );
+
+  app.get<{ Querystring: NodeSearchQuery }>(
+    "/api/v1/network/nodes/search",
+    async (request, reply) => {
+      const query = request.query.q?.trim() ?? "";
+      const type = request.query.type ?? "all";
+      const limit = parseInteger(
+        request.query.limit,
+        DEFAULT_NODE_SEARCH_LIMIT,
+        1,
+        MAX_NODE_SEARCH_LIMIT,
+      );
+
+      if (
+        query.length < 1 ||
+        query.length > 200 ||
+        (type !== "all" && type !== "concept" && type !== "knowledge_point") ||
+        limit === null
+      ) {
+        return invalidQuery(
+          reply,
+          "q 去除首尾空白后必须为 1 到 200 个字符，type 必须是 all、concept 或 knowledge_point，limit 必须是 1 到 50 的整数。",
+        );
+      }
+
+      try {
+        return await withNetworkSnapshot(pool, (client) =>
+          searchNetworkNodes(client, query, type, limit),
+        );
+      } catch (error) {
+        if (isStatementTimeout(error)) {
+          return graphBudgetExceeded(reply);
+        }
+
+        throw error;
+      }
     },
   );
 
@@ -351,6 +413,111 @@ function graphBudgetExceeded(reply: FastifyReply) {
       code: "NETWORK_GRAPH_BUDGET_EXCEEDED",
       message: "网络读取超过 2 秒数据库预算，请缩小图范围。",
     },
+  });
+}
+
+async function searchNetworkNodes(
+  database: Database,
+  query: string,
+  type: NodeSearchType,
+  limit: number,
+) {
+  const result = await database.query<NetworkNodeSearchRow>(
+    `WITH current_nodes AS (
+       SELECT 'concept'::text AS type,
+              concept.id,
+              'concept:' || concept.id::text AS key,
+              revision.display_name AS label,
+              revision.description,
+              revision.id AS revision_id,
+              revision.revision_number,
+              NULL::uuid AS record_id,
+              NULL::text AS record_title,
+              NULL::uuid AS fragment_revision_id,
+              NULL::uuid AS analysis_revision_id
+         FROM concepts AS concept
+         INNER JOIN concept_revisions AS revision
+           ON revision.id = concept.current_revision_id
+        WHERE $2::text IN ('all', 'concept')
+          AND concept.archived_at IS NULL
+
+       UNION ALL
+
+       SELECT 'knowledge_point'::text AS type,
+              point.id,
+              'knowledge_point:' || point.id::text AS key,
+              COALESCE(correction.title, point.ai_title) AS label,
+              COALESCE(correction.body, point.ai_body) AS description,
+              NULL::uuid AS revision_id,
+              NULL::integer AS revision_number,
+              point.record_id,
+              COALESCE(overview.title, analysis.title) AS record_title,
+              point.fragment_revision_id,
+              point.analysis_revision_id
+         FROM knowledge_points AS point
+         INNER JOIN ai_analysis_revisions AS analysis
+           ON analysis.id = point.analysis_revision_id
+          AND analysis.status = 'ACTIVE'
+         INNER JOIN records AS record
+           ON record.id = point.record_id
+          AND record.current_analysis_revision_id = analysis.id
+          AND record.archived_at IS NULL
+         LEFT JOIN knowledge_point_corrections AS correction
+           ON correction.knowledge_point_id = point.id
+         LEFT JOIN record_overview_corrections AS overview
+           ON overview.record_id = record.id
+          AND overview.analysis_revision_id = analysis.id
+        WHERE $2::text IN ('all', 'knowledge_point')
+          AND point.publication_status IN ('AUTO_PUBLISHED', 'CONFIRMED')
+          AND point.usage_status = 'INCLUDED'
+     )
+     SELECT type,
+            id,
+            key,
+            label,
+            description,
+            revision_id,
+            revision_number,
+            record_id,
+            record_title,
+            fragment_revision_id,
+            analysis_revision_id
+       FROM current_nodes
+      WHERE strpos(lower(label), lower($1)) > 0
+         OR strpos(lower(description), lower($1)) > 0
+      ORDER BY starts_with(lower(label), lower($1)) DESC,
+               GREATEST(
+                 similarity(lower(label), lower($1)),
+                 similarity(lower(description), lower($1))
+               ) DESC,
+               key
+      LIMIT $3`,
+    [query, type, limit + 1],
+  );
+  const items = result.rows.slice(0, limit).map(publicSearchNode);
+
+  return { items, limit, truncated: result.rows.length > limit };
+}
+
+function publicSearchNode(row: NetworkNodeSearchRow): NetworkNode {
+  if (row.type === "concept") {
+    return publicConceptNode({
+      id: row.id,
+      title: row.label,
+      description: row.description,
+      revision_id: row.revision_id!,
+      revision_number: row.revision_number!,
+    });
+  }
+
+  return publicKnowledgePointNode({
+    id: row.id,
+    title: row.label,
+    body: row.description,
+    record_id: row.record_id!,
+    record_title: row.record_title!,
+    fragment_revision_id: row.fragment_revision_id!,
+    analysis_revision_id: row.analysis_revision_id!,
   });
 }
 

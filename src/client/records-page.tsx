@@ -789,6 +789,10 @@ export function AppNavigation({
             <NavigationGlyph kind="concepts" />
             <span className="nav-link-label">概念</span>
           </Link>
+          <Link aria-current={location.pathname.startsWith("/network") ? "page" : undefined} className={location.pathname.startsWith("/network") ? "active" : undefined} to="/network">
+            <NavigationGlyph kind="network" />
+            <span className="nav-link-label">网络</span>
+          </Link>
           <Link aria-current={location.pathname.startsWith("/insights") ? "page" : undefined} className={location.pathname.startsWith("/insights") ? "active" : undefined} to="/insights">
             <NavigationGlyph kind="insights" />
             <span className="nav-link-label">发现</span>
@@ -819,6 +823,7 @@ function NavigationGlyph({
       | "concepts"
       | "home"
       | "insights"
+      | "network"
       | "records"
       | "review"
       | "settings"
@@ -884,6 +889,18 @@ function NavigationGlyph({
         <circle cx="8" cy="8" r="3.5" />
         <circle cx="16" cy="16" r="3.5" />
         <path d="m10.5 10.5 3 3M14.5 5.5l4-2M5.5 14.5l-2 4" />
+      </svg>
+    );
+  }
+
+  if (kind === "network") {
+    return (
+      <svg {...common}>
+        <circle cx="6" cy="7" r="2.5" />
+        <circle cx="18" cy="6" r="2.5" />
+        <circle cx="12" cy="18" r="3" />
+        <path d="m8.4 7.4 7.2-.8M7.5 9l3.2 6.4M16.5 8.3l-3.2 7.1" />
+        <circle cx="12" cy="18" r="1" />
       </svg>
     );
   }

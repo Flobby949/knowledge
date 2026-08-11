@@ -671,6 +671,190 @@ test("Concept Relations / 概念关系 · 1600×1000 双定义审查台与 1280�
   ).toBe(1_280);
 });
 
+test("Network / 知识网络 · 1600×1000 制图台与 1280×800 开合抽屉几何", async ({
+  page,
+}) => {
+  const conceptA = networkConcept(
+    "41000000-0000-4000-8000-000000000001",
+    "变更数据捕获",
+    "读取事务日志获得增量变化，并以有序事件向下游传播。",
+    1,
+  );
+  const conceptB = networkConcept(
+    "41000000-0000-4000-8000-000000000002",
+    "事件驱动协作",
+    "生产者发布领域事件，消费者按稳定契约订阅并幂等处理。",
+    2,
+  );
+  const conceptC = networkConcept(
+    "41000000-0000-4000-8000-000000000003",
+    "一致性校验",
+    "使用在线与离线校验核对增量链路的最终结果。",
+    3,
+  );
+  const pointA = networkPoint(
+    "42000000-0000-4000-8000-000000000001",
+    "CDC 捕获增量变化",
+    "CDC 读取数据库事务日志获取增量变化。",
+  );
+  const pointB = networkPoint(
+    "42000000-0000-4000-8000-000000000002",
+    "幂等消费处理重复事件",
+    "幂等处理避免重复投递破坏最终结果。",
+  );
+  const pointC = networkPoint(
+    "42000000-0000-4000-8000-000000000003",
+    "校验结果必须可追溯",
+    "校验记录保留输入、规则与异常处置历史。",
+  );
+  const pointD = networkPoint(
+    "42000000-0000-4000-8000-000000000004",
+    "轮询带来的性能问题",
+    "传统轮询会增加数据库负载并放大同步延迟。",
+  );
+  const membershipA = networkMembership(
+    "43000000-0000-4000-8000-000000000001",
+    conceptA.key,
+    pointA.key,
+  );
+  const membershipB = networkMembership(
+    "43000000-0000-4000-8000-000000000002",
+    conceptB.key,
+    pointB.key,
+  );
+  const membershipC = networkMembership(
+    "43000000-0000-4000-8000-000000000003",
+    conceptC.key,
+    pointC.key,
+  );
+  const membershipD = networkMembership(
+    "43000000-0000-4000-8000-000000000004",
+    conceptA.key,
+    pointD.key,
+  );
+  const knowledgeRelation = networkRelation(
+    "knowledge_relation",
+    "44000000-0000-4000-8000-000000000001",
+    pointA.key,
+    pointB.key,
+    "extends",
+    true,
+    "增量事实沿事件链路延伸为可消费变化。",
+  );
+  const conceptRelation = networkRelation(
+    "concept_relation",
+    "45000000-0000-4000-8000-000000000001",
+    conceptA.key,
+    conceptC.key,
+    "contrasts",
+    false,
+    "增量传播与结果校验承担不同但互补的职责。",
+  );
+  const conceptNodes = [conceptA, conceptB, conceptC];
+  const allNodes = [...conceptNodes, pointA, pointB, pointC, pointD];
+  const allEdges = [
+    membershipA,
+    membershipB,
+    membershipC,
+    membershipD,
+    knowledgeRelation,
+    conceptRelation,
+  ];
+  const path = {
+    nodes: [conceptA, pointA, pointB, conceptB],
+    edges: [membershipA, knowledgeRelation, membershipB],
+    steps: [
+      { ...membershipA, traversalDirection: "undirected" },
+      { ...knowledgeRelation, traversalDirection: "forward" },
+      { ...membershipB, traversalDirection: "undirected" },
+    ],
+  };
+
+  await page.route("**/api/v1/network/subgraph**", async (route) => {
+    const local = new URL(route.request().url()).searchParams.has("root");
+
+    await route.fulfill({
+      json: {
+        root: local ? conceptA.key : null,
+        nodes: local ? allNodes : conceptNodes,
+        edges: local ? allEdges : [conceptRelation],
+        limits: { depth: 1, edgeLimit: 200, nodeLimit: 100 },
+        truncated: false,
+        truncation: { nodes: false, edges: false },
+      },
+    });
+  });
+  await page.route("**/api/v1/network/path**", async (route) => {
+    await route.fulfill({
+      json: { path, maxDepth: 6, truncated: false, visited: 6 },
+    });
+  });
+  const params = new URLSearchParams({
+    from: conceptA.key,
+    node: conceptA.key,
+    to: conceptB.key,
+  });
+
+  await page.goto(`${appBaseUrl}/network?${params}`);
+
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+  const main = page.getByRole("main", { name: "知识网络" });
+  const stage = main.locator(".network-stage");
+  const canvas = main.getByRole("group", { name: "真实知识网络图幅" });
+  const drawer = page.getByRole("region", { name: "节点详情" });
+
+  await expect(drawer.getByRole("heading", { name: "变更数据捕获" }))
+    .toBeVisible();
+  await expect(main.getByRole("status", { name: "路径探索结果" }))
+    .toHaveText("已找到 3 步真实路径。可逐边核验方向与来源。");
+  await expect(main.locator('[data-path-edge="true"]')).toHaveCount(3);
+  await expect(canvas.getByRole("button")).toHaveCount(7);
+  expect(
+    (await canvas.locator(".network-node-label").first().boundingBox())?.height ?? 0,
+  ).toBeGreaterThanOrEqual(11);
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(main, { x: 76, y: 72, width: 1_524, height: 928 });
+  await expectBox(stage, { x: 76, y: 72, width: 1_044, height: 928 });
+  await expectBox(drawer, { x: 1_120, y: 72, width: 480, height: 928 });
+  await expect(page).toHaveScreenshot(snapshotName(theme, "network"), {
+    animations: "disabled",
+    caret: "hide",
+    fullPage: false,
+    maxDiffPixels: 500,
+  });
+
+  await main.getByRole("button", { name: "列表视图" }).click();
+  const relationList = main
+    .getByRole("region", { name: "网络等价列表" })
+    .getByRole("list");
+
+  await expect(relationList.getByText("路径 1", { exact: true })).toBeVisible();
+  await expect(relationList.getByText("路径 2", { exact: true })).toBeVisible();
+  await expect(relationList.getByText("路径 3", { exact: true })).toBeVisible();
+  await expect(relationList.getByText("路径 6", { exact: true })).toHaveCount(0);
+  await main.getByRole("button", { name: "图幅视图" }).click();
+  await expect(canvas).toBeVisible();
+
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await drawer.getByRole("button", { name: "关闭节点详情" }).click();
+  await expect(drawer).toHaveCount(0);
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(main, { x: 76, y: 72, width: 1_204, height: 728 });
+  await expectBox(stage, { x: 76, y: 72, width: 1_204, height: 728 });
+
+  await canvas.getByRole("button", { name: "打开节点：变更数据捕获" }).click();
+  const reopenedDrawer = page.getByRole("region", { name: "节点详情" });
+
+  await expectBox(stage, { x: 76, y: 72, width: 724, height: 728 });
+  await expectBox(reopenedDrawer, { x: 800, y: 72, width: 480, height: 728 });
+  expect(
+    (await canvas.locator(".network-node-label").first().boundingBox())?.height ?? 0,
+  ).toBeGreaterThanOrEqual(11);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBe(1_280);
+});
+
 test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制台", async ({
   page,
 }) => {
@@ -763,4 +947,98 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
   );
 });
   });
+}
+
+function networkConcept(
+  id: string,
+  label: string,
+  description: string,
+  revisionNumber: number,
+) {
+  return {
+    id,
+    key: `concept:${id}`,
+    type: "concept" as const,
+    label,
+    description,
+    source: {
+      kind: "concept_revision" as const,
+      revisionId: id.replace("41000000", "41100000"),
+      revisionNumber,
+    },
+  };
+}
+
+function networkPoint(id: string, label: string, description: string) {
+  return {
+    id,
+    key: `knowledge_point:${id}`,
+    type: "knowledge_point" as const,
+    label,
+    description,
+    source: {
+      kind: "knowledge_point" as const,
+      recordId: visualFixture.detailRecordId,
+      recordTitle: "CDC 如何避免数据库轮询",
+      fragmentRevisionId: "46000000-0000-4000-8000-000000000001",
+      analysisRevisionId: "47000000-0000-4000-8000-000000000001",
+    },
+  };
+}
+
+function networkMembership(id: string, source: string, target: string) {
+  return {
+    edgeKey: `concept_membership:${id}`,
+    kind: "concept_membership" as const,
+    relationType: "membership",
+    source,
+    target,
+    directed: false,
+    description: null,
+    confirmation: null,
+    sourceRecord: {
+      kind: "concept_membership" as const,
+      id,
+      origin: "manual",
+      createdAt: "2099-08-09T08:00:00.000Z",
+    },
+  };
+}
+
+function networkRelation(
+  kind: "concept_relation" | "knowledge_relation",
+  id: string,
+  source: string,
+  target: string,
+  relationType: string,
+  directed: boolean,
+  description: string,
+) {
+  const confirmationKind =
+    kind === "concept_relation"
+      ? "concept_relation_confirmation"
+      : "knowledge_relation_confirmation";
+
+  return {
+    edgeKey: `${kind}:${id}`,
+    kind,
+    relationType,
+    source,
+    target,
+    directed,
+    description,
+    confirmation: {
+      id: id.replace(/^4/u, "5"),
+      relationId: id,
+      confirmedAt: "2099-08-09T08:00:00.000Z",
+    },
+    sourceRecord: {
+      kind: confirmationKind,
+      id: id.replace(/^4/u, "5"),
+      relationId: id,
+      confirmedAt: "2099-08-09T08:00:00.000Z",
+      reason: "视觉基线中的真实确认来源。",
+      confidence: 0.88,
+    },
+  };
 }

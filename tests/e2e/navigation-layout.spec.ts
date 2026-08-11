@@ -29,6 +29,7 @@ for (const theme of ["macaron", "scifi"] as const) {
       "待审查",
       "标签",
       "概念",
+      "网络",
       "发现",
     ]) {
       await expect(

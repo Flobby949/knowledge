@@ -584,6 +584,88 @@ export interface ConceptRelationSuggestion {
   updatedAt: string;
 }
 
+export type NetworkNodeType = "concept" | "knowledge_point";
+export type NetworkEdgeKind =
+  | "concept_membership"
+  | "concept_relation"
+  | "knowledge_relation";
+export type NetworkTraversalDirection = "forward" | "reverse" | "undirected";
+
+export interface NetworkNode {
+  description?: string;
+  id: string;
+  key: string;
+  label: string;
+  source:
+    | {
+        kind: "concept_revision";
+        revisionId: string;
+        revisionNumber: number;
+      }
+    | {
+        analysisRevisionId: string;
+        fragmentRevisionId: string;
+        kind: "knowledge_point";
+        recordId: string;
+        recordTitle: string;
+      };
+  type: NetworkNodeType;
+}
+
+export interface NetworkEdge {
+  confirmation: null | {
+    confirmedAt: string;
+    id: string;
+    relationId: string;
+  };
+  description: string | null;
+  directed: boolean;
+  edgeKey: string;
+  kind: NetworkEdgeKind;
+  relationType: string;
+  source: string;
+  sourceRecord:
+    | {
+        createdAt: string;
+        id: string;
+        kind: "concept_membership";
+        origin: string;
+      }
+    | {
+        confidence: number;
+        confirmedAt: string;
+        id: string;
+        kind:
+          | "concept_relation_confirmation"
+          | "knowledge_relation_confirmation";
+        reason: string;
+        relationId: string;
+      };
+  target: string;
+}
+
+export interface NetworkGraph {
+  edges: NetworkEdge[];
+  limits: { depth: number; edgeLimit: number; nodeLimit: number };
+  nodes: NetworkNode[];
+  root: string | null;
+  truncated: boolean;
+  truncation: { edges: boolean; nodes: boolean };
+}
+
+export interface NetworkPath {
+  edges: NetworkEdge[];
+  nodes: NetworkNode[];
+  steps: Array<NetworkEdge & { traversalDirection: NetworkTraversalDirection }>;
+}
+
+export interface NetworkPathResult {
+  maxDepth: number;
+  path: NetworkPath | null;
+  truncated: boolean;
+  visited: number;
+}
+
 export async function listConcepts(options: {
   archive?: "active" | "archived" | "all";
   q?: string;
@@ -906,6 +988,69 @@ export async function listConceptRelations(
   }>(response);
 
   return body.items;
+}
+
+export async function getNetworkSubgraph(options: {
+  depth?: 0 | 1 | 2;
+  root?: string;
+  signal?: AbortSignal;
+} = {}): Promise<NetworkGraph> {
+  const search = new URLSearchParams();
+
+  if (options.root) {
+    search.set("root", options.root);
+  }
+
+  if (options.depth !== undefined) {
+    search.set("depth", String(options.depth));
+  }
+
+  const response = await fetch(
+    `/api/v1/network/subgraph${search.size ? `?${search.toString()}` : ""}`,
+    { ...(options.signal ? { signal: options.signal } : {}) },
+  );
+
+  return parseConceptResponse<NetworkGraph>(response);
+}
+
+export async function searchNetworkNodes(options: {
+  limit: number;
+  query: string;
+  signal?: AbortSignal;
+  type: "all" | NetworkNodeType;
+}): Promise<{ items: NetworkNode[]; limit: number; truncated: boolean }> {
+  const search = new URLSearchParams({
+    q: options.query,
+    type: options.type,
+    limit: String(options.limit),
+  });
+  const response = await fetch(`/api/v1/network/nodes/search?${search}`, {
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+
+  return parseConceptResponse<{
+    items: NetworkNode[];
+    limit: number;
+    truncated: boolean;
+  }>(response);
+}
+
+export async function getNetworkPath(options: {
+  from: string;
+  maxDepth?: number;
+  signal?: AbortSignal;
+  to: string;
+}): Promise<NetworkPathResult> {
+  const search = new URLSearchParams({
+    from: options.from,
+    to: options.to,
+    maxDepth: String(options.maxDepth ?? 6),
+  });
+  const response = await fetch(`/api/v1/network/path?${search}`, {
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+
+  return parseConceptResponse<NetworkPathResult>(response);
 }
 
 export async function listRecords(options: {
