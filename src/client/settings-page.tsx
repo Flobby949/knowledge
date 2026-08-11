@@ -1,8 +1,8 @@
 /*
  * THESIS: Settings is an operations ledger: explicit snapshots, independent endpoints, no secret theatre.
- * OWN-WORLD: Cold paper planes, thin blue-gray structure, graphite labels, and blue only for deliberate actions.
- * STORY: The user verifies the active pair, prepares both candidate endpoints, then manages durable data below.
- * FIRST VIEWPORT: 60px navigation, horizontal section anchors, paired current/candidate model cards, then operation rows.
+ * OWN-WORLD: Theme previews lead into either cloud-white berry controls or cold blue-gray archive controls.
+ * STORY: The user chooses an appearance, verifies the active model pair, prepares candidates, then manages durable data.
+ * FIRST VIEWPORT: 60px navigation, horizontal anchors, two theme choices, then paired model controls and operation rows.
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -23,6 +23,7 @@ import {
   updatePreferences,
   type DefaultAiHandling,
 } from "./preferences-api.js";
+import { useTheme, type AppTheme } from "./theme.js";
 import "./settings-page.css";
 
 const DEFAULT_TEXT_ENDPOINT = {
@@ -80,11 +81,13 @@ export function SettingsPage() {
             <h1>设置</h1>
           </div>
           <nav aria-label="设置分区" className="settings-anchors">
+            <a href="#appearance-settings">外观</a>
             <a href="#model-settings">AI 模型</a>
             <a href="#data-settings">数据管理</a>
           </nav>
         </header>
 
+        <AppearanceSettingsPanel />
         {loadError ? <p className="settings-load-error" role="alert">{loadError}</p> : null}
         {!configuration && !loadError ? <p role="status">正在载入设置…</p> : null}
         {configuration ? (
@@ -107,6 +110,69 @@ export function SettingsPage() {
         open={newRecordOpen}
       />
     </div>
+  );
+}
+
+function AppearanceSettingsPanel() {
+  const { setTheme, theme } = useTheme();
+  const choices: Array<{
+    description: string;
+    label: string;
+    theme: AppTheme;
+  }> = [
+    {
+      description: "云朵纸白、莓果文字与马卡龙气泡，适合明亮环境。",
+      label: "马卡龙气泡",
+      theme: "macaron",
+    },
+    {
+      description: "深空首页、神经膜节点与冷调档案内页，保留原始视觉。",
+      label: "科幻信号场",
+      theme: "scifi",
+    },
+  ];
+
+  return (
+    <section
+      aria-label="外观主题"
+      className="settings-panel appearance-settings-panel"
+      id="appearance-settings"
+    >
+      <PanelHeading
+        eyebrow="界面外观"
+        summary="选择会立即应用到全部页面，并保存在当前浏览器中。"
+        title="主题"
+      />
+      <fieldset className="theme-choice-grid">
+        <legend className="visually-hidden">选择界面主题</legend>
+        {choices.map((choice) => (
+          <label className="theme-choice" key={choice.theme}>
+            <input
+              checked={theme === choice.theme}
+              name="appearance-theme"
+              onChange={() => setTheme(choice.theme)}
+              type="radio"
+              value={choice.theme}
+            />
+            <span
+              aria-hidden="true"
+              className={`theme-choice-preview ${choice.theme}`}
+            >
+              <span />
+              <span />
+              <span />
+            </span>
+            <span className="theme-choice-copy">
+              <strong>{choice.label}</strong>
+              <span>{choice.description}</span>
+            </span>
+            <span className="theme-choice-state">
+              {theme === choice.theme ? "当前使用" : "切换"}
+            </span>
+          </label>
+        ))}
+      </fieldset>
+    </section>
   );
 }
 

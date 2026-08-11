@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-10T16:20:00.000Z",
-  "title": "Design System: 个人知识气泡图谱",
+  "generatedAt": "2026-08-11T00:45:00.000Z",
+  "title": "Design System: 个人知识双主题图谱",
   "extensions": {
     "colorMeta": {
       "strawberry": {
@@ -45,6 +45,24 @@
         "displayName": "莓果工作台阶梯",
         "canonical": "#766170",
         "tonalRamp": ["#331e29", "#4b3542", "#57404c", "#6e5260", "#766170", "#916c7f", "#9e4170", "#c5abb5", "#d8bbc8", "#e5d0d8", "#ecd9e2", "#f7f0f3", "#fff8fb"]
+      },
+      "space": {
+        "role": "theme-background",
+        "displayName": "科幻深空",
+        "canonical": "#00030b",
+        "tonalRamp": ["#00030b", "#020817", "#071126", "#081326", "#0b1533", "#263d5e", "#5b6987", "#dceaff"]
+      },
+      "signal-blue": {
+        "role": "theme-primary",
+        "displayName": "电蓝信号",
+        "canonical": "#005ff9",
+        "tonalRamp": ["#071126", "#174c95", "#0054dc", "#005ff9", "#3275cf", "#57a2ff", "#c8daf3", "#eaf2ff"]
+      },
+      "neural-cyan": {
+        "role": "theme-secondary",
+        "displayName": "神经青",
+        "canonical": "#39c6ff",
+        "tonalRamp": ["#123b75", "#1da9d8", "#39c6ff", "#75e6ff", "#dff8ff"]
       }
     },
     "typographyMeta": {
@@ -108,14 +126,15 @@
     }
   ],
   "narrative": {
-    "northStar": "可扩展的糖果色气泡图谱",
-    "overview": "可爱感来自颜色、比例、节奏和反馈，不依赖难以扩展的真实物件。首页与内页共享明亮纸白环境、深莓果正文和草莓焦点。",
-    "keyCharacteristics": ["图谱节点为代码原语", "高密度依靠 LOD 与搜索聚焦", "内页保持工作台密度", "V1 不绘制关系边"],
+    "northStar": "同一知识宇宙，两种完整视觉语言",
+    "overview": "马卡龙气泡与科幻信号场共享同一信息架构、坐标、LOD 和任务行为；主题只改变视觉材料并在浏览器中持久化。",
+    "keyCharacteristics": ["两套首页 WebGL 渲染器", "高密度依靠 LOD 与搜索聚焦", "内页布局与语义保持不变", "主题刷新无闪回"],
     "rules": [
       { "name": "Stable Identity", "body": "标签颜色由稳定身份决定，不表达分类或关系。", "section": "colors" },
-      { "name": "Honest Graph", "body": "V1 不用位置、连线或邻居高亮暗示关系。", "section": "components" }
+      { "name": "Honest Graph", "body": "V1 不用位置或科幻装饰信号线暗示真实关系。", "section": "components" },
+      { "name": "Theme Invariance", "body": "主题切换不改变内容、布局、状态、URL 或可访问语义。", "section": "components" }
     ],
-    "dos": ["使用真实中文长度验证密度。", "保持图谱和内页的同一颜色语言。"],
-    "donts": ["不要把节点做成真实甜点或手帐物件。", "不要使用深空科幻、霓虹或重玻璃效果。"]
+    "dos": ["使用真实中文长度验证密度。", "分别验证两套主题的首页和全部内页。"],
+    "donts": ["不要把节点做成真实甜点或手帐物件。", "不要把两套主题的节点、辉光或导航语法混在同一页面。"]
   }
 }

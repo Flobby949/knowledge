@@ -1,6 +1,6 @@
 /*
  * THESIS: Search is a verification table with a fixed reading drawer, never a modal interruption.
- * OWN-WORLD: Paper-white result groups, graphite text, hairline rules, and electric-blue match signals.
+ * OWN-WORLD: Paper-white result groups switch between berry-petal and graphite-blue signal languages without changing evidence.
  * STORY: A submitted query freezes a result sequence, then one record opens beside that stable context.
  * FIRST VIEWPORT: 60px global navigation, full result stage, and an optional 480px push drawer.
  */

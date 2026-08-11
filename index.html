@@ -11,6 +11,16 @@ FORM: 现代中文无衬线正文、克制圆角和轻偏移阴影；不依赖�
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
+    <script>
+      (() => {
+        try {
+          const stored = localStorage.getItem("knowledge.theme.v1");
+          document.documentElement.dataset.theme = stored === "scifi" ? "scifi" : "macaron";
+        } catch {
+          document.documentElement.dataset.theme = "macaron";
+        }
+      })();
+    </script>
     <title>知识库</title>
   </head>
   <body>

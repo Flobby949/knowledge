@@ -16,13 +16,29 @@ test.beforeEach(async ({ request }) => {
   await ensureVisualFixture(request, appBaseUrl);
 });
 
+const visualThemes = ["macaron", "scifi"] as const;
+
+function snapshotName(theme: (typeof visualThemes)[number], name: string) {
+  return theme === "macaron" ? `${name}.png` : `scifi-${name}.png`;
+}
+
+for (const theme of visualThemes) {
+  test.describe(theme, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.addInitScript((selectedTheme) => {
+        window.localStorage.setItem("knowledge.theme.v1", selectedTheme);
+      }, theme);
+    });
+
 test("Home / 首页气泡标签场 · 1600×1000 基线与 1280×800 几何", async ({
   page,
 }) => {
   await page.goto(`${appBaseUrl}/`);
 
   const navigation = page.getByRole("navigation", { name: "主导航" });
-  const field = page.getByRole("region", { name: "气泡标签场" });
+  const field = page.getByRole("region", {
+    name: theme === "scifi" ? "神经标签场" : "气泡标签场",
+  });
   const focusedTag = field.getByRole("button", {
     name: visualFixture.focusedTagName,
     exact: true,
@@ -35,7 +51,7 @@ test("Home / 首页气泡标签场 · 1600×1000 基线与 1280×800 几何", as
     .toContainText(`${visualFixture.focusedTagName} · AI 候选`);
   await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
   await expectBox(field, { x: 0, y: 60, width: 1_600, height: 940 });
-  await expect(page).toHaveScreenshot("home.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "home"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -70,7 +86,7 @@ test("Records / 记录库 · 1600×1000 基线与 1280×800 真瀑布流", async
     verticalGap: 16,
     minimumDistinctHeights: 3,
   });
-  await expect(page).toHaveScreenshot("records.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "records"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -131,7 +147,7 @@ test("New modal / 新建记录 · 1600×1000 基线与 1280×800 的 64/36 弹�
     ratioTolerance: 0.01,
     pixelTolerance: 2,
   });
-  await expect(page).toHaveScreenshot("new-record-modal.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "new-record-modal"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -178,7 +194,7 @@ test("Detail / 记录详情 · 1600×1000 基线与 1280×800 的 58/42 双滚�
     ratioTolerance: 0.005,
     pixelTolerance: 1,
   });
-  await expect(page).toHaveScreenshot("record-detail.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "record-detail"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -226,7 +242,7 @@ test("Review / 待审查 · 1600×1000 基线与 1280×800 的队列、58/42 工
     pixelTolerance: 2,
   });
   await expectBox(flow, { x: 30, y: 919, width: 1_540, height: 68 });
-  await expect(page).toHaveScreenshot("review.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "review"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -315,7 +331,7 @@ test("Search / 搜索 · 1600×1000 基线与 1280×800 的 480px 推挤抽屉",
   await expectBox(navigation, { x: 0, y: 0, width: 1_600, height: 60 });
   await expectBox(stage, { x: 0, y: 60, width: 1_120, height: 940 });
   await expectBox(drawer, { x: 1_120, y: 60, width: 480, height: 940 });
-  await expect(page).toHaveScreenshot("search-drawer.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "search-drawer"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -364,7 +380,7 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
   await expectBox(cards.first(), { x: 32, width: 341.33, height: 142 }, 3);
   await expectBox(cards.nth(1), { x: 389.33, width: 341.33, height: 142 }, 3);
   await expectBox(cards.nth(2), { x: 746.67, width: 341.33, height: 142 }, 3);
-  await expect(page).toHaveScreenshot("tags-drawer.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "tags-drawer"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -449,7 +465,7 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
     },
   );
   await expect(dataPanel).toBeVisible();
-  await expect(page).toHaveScreenshot("settings.png", {
+  await expect(page).toHaveScreenshot(snapshotName(theme, "settings"), {
     animations: "disabled",
     caret: "hide",
     fullPage: false,
@@ -472,3 +488,5 @@ test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制�
     },
   );
 });
+  });
+}

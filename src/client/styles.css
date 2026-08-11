@@ -22,6 +22,23 @@
   --danger: #b4233d;
 }
 
+html[data-theme="scifi"] {
+  color: #0b1533;
+  background: #f7f9fc;
+  --paper: #f7f9fc;
+  --surface: #ffffff;
+  --surface-soft: #f8fafd;
+  --text: #0b1533;
+  --muted: #5b6987;
+  --border: #d9e2ef;
+  --border-strong: #b8c7db;
+  --signal: #005ff9;
+  --signal-hover: #0054dc;
+  --signal-soft: #eaf2ff;
+  --success: #067647;
+  --danger: #d32f2f;
+}
+
 * { box-sizing: border-box; }
 
 html, body, #root { min-width: 1280px; min-height: 100%; margin: 0; }
@@ -96,6 +113,64 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brand-orbit::before, .dialog-orbit::before { position: absolute; inset: 6px; background: white; border: 1.5px solid rgb(198 61 104 / 45%); border-radius: 50%; content: ""; }
 .brand-orbit::after, .dialog-orbit::after { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; background: var(--signal); border: 1px solid white; border-radius: 50%; content: ""; }
 .nav-divider { display: block; width: 1px; height: 24px; margin: 0 8px; background: var(--border); }
+
+.theme-toggle-button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 160ms ease-out, border-color 160ms ease-out, transform 160ms ease-out;
+}
+
+.theme-toggle-button:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.theme-toggle-glyph {
+  position: relative;
+  display: block;
+  width: 22px;
+  height: 22px;
+  background: #ffd7e2;
+  border: 1.5px solid #f39bb4;
+  border-radius: 50%;
+  box-shadow: 0 3px 8px rgb(164 70 105 / 14%);
+}
+
+.theme-toggle-glyph::before {
+  position: absolute;
+  inset: 5px;
+  background: #fff;
+  border: 1px solid rgb(198 61 104 / 45%);
+  border-radius: 50%;
+  content: "";
+}
+
+.theme-toggle-button[data-active-theme="scifi"] {
+  background: #081326;
+  border-color: rgb(126 163 211 / 42%);
+}
+
+.theme-toggle-button[data-active-theme="scifi"] .theme-toggle-glyph {
+  background: #020817;
+  border-color: #39c6ff;
+  border-radius: 48% 52% 45% 55% / 55% 46% 54% 45%;
+  box-shadow: 0 0 11px rgb(57 198 255 / 55%);
+}
+
+.theme-toggle-button[data-active-theme="scifi"] .theme-toggle-glyph::before {
+  inset: 6px;
+  background: #39c6ff;
+  border: 0;
+  box-shadow: 0 0 7px #39c6ff;
+}
 
 .global-search {
   position: absolute;

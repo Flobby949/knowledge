@@ -1,6 +1,6 @@
 /*
  * THESIS: The detail surface is a verification desk, not a dashboard.
- * OWN-WORLD: Cold paper-white planes, graphite reading type, hairline blue-gray rules, and rare electric-blue signals.
+ * OWN-WORLD: Verification planes switch between cloud-white berry and cold paper-blue while evidence geometry stays fixed.
  * STORY: The user returns from the archive, confirms the exact saved source, and sees plainly that no knowledge was invented.
  * FIRST VIEWPORT: A 60px global navigation, 64px action strip, then a full-height 58/42 source-and-knowledge split.
  * FORM: Established-world precision archive; the product brief fixes this two-pane staging, so no concept seed applies.

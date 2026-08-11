@@ -21,6 +21,7 @@ import {
 } from "./api.js";
 import { AiTaskPulse } from "./ai-task-pulse.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
+import { ThemeToggleButton, useTheme } from "./theme.js";
 
 type ArchiveScope = "active" | "archived" | "all";
 type ProcessingFilter =
@@ -726,14 +727,14 @@ function isAbortError(error: unknown): boolean {
 export function AppNavigation({
   newRecordButton,
   onCreate,
-  theme = "light",
 }: {
   newRecordButton: React.RefObject<HTMLButtonElement | null>;
   onCreate: () => void;
-  theme?: "light" | "dark";
 }) {
+  const { theme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
+  const darkNavigation = theme === "scifi" && location.pathname === "/";
   const currentQuery = new URLSearchParams(location.search).get("q") ?? "";
   const [query, setQuery] = useState(currentQuery);
   const [tags, setTags] = useState<TagFieldItem[]>([]);
@@ -781,7 +782,11 @@ export function AppNavigation({
 
   return (
     <header className="app-header">
-      <nav aria-label="主导航" className={`app-navigation ${theme}`} data-testid="app-nav">
+      <nav
+        aria-label="主导航"
+        className={`app-navigation ${darkNavigation ? "dark" : "light"}`}
+        data-testid="app-nav"
+      >
         <div className="nav-primary">
           <Link aria-label="知识库首页" className="brand-mark" to="/">
             <span aria-hidden="true" className="brand-orbit" />
@@ -870,6 +875,7 @@ export function AppNavigation({
           <button ref={newRecordButton} className="primary-button" onClick={onCreate} type="button">
             新建记录
           </button>
+          <ThemeToggleButton />
           <span aria-hidden="true" className="nav-divider" />
           <Link aria-current={location.pathname.startsWith("/settings") ? "page" : undefined} className={location.pathname.startsWith("/settings") ? "settings-link active" : "settings-link"} to="/settings">设置</Link>
         </div>
