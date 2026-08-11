@@ -5,6 +5,8 @@ const appBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 test("knowledge discovery keeps every V2 decision explicit and reversible", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1_280, height: 800 });
+
   const sourceA = "00000000-0000-4000-8000-000000000101";
   const sourceB = "00000000-0000-4000-8000-000000000102";
   const recordA = "00000000-0000-4000-8000-000000000201";
@@ -56,22 +58,57 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
 
   await page.route("**/api/v1/relation-suggestions?status=*", async (route) => {
     const resolved = new URL(route.request().url()).searchParams.get("status") === "resolved";
-    const visible = resolved ? relationConfirmed : !relationConfirmed;
+    const resolvedItems = Array.from({ length: 7 }, (_, index) =>
+      relationSuggestion({
+        formalRelationId: `00000000-0000-4000-8000-0000000005${String(index + 1).padStart(2, "0")}`,
+        recordA,
+        recordB,
+        relationConfirmed: true,
+        relationId: `00000000-0000-4000-8000-0000000004${String(index + 1).padStart(2, "0")}`,
+        sourceA,
+        sourceB,
+      }),
+    ).map((suggestion, index) => {
+      if (index === 1) {
+        return {
+          ...suggestion,
+          relation: suggestion.relation
+            ? { ...suggestion.relation, removed: true }
+            : null,
+          status: "removed",
+        };
+      }
+
+      if (index === 2) {
+        return {
+          ...suggestion,
+          canDecide: false,
+          relation: null,
+          status: "rejected",
+        };
+      }
+
+      return suggestion;
+    });
 
     await route.fulfill({
       contentType: "application/json",
       json: {
-        items: visible
-          ? [relationSuggestion({
+        items: resolved
+          ? relationConfirmed
+            ? resolvedItems
+            : []
+          : relationConfirmed
+            ? []
+            : [relationSuggestion({
               formalRelationId,
               recordA,
               recordB,
-              relationConfirmed,
+              relationConfirmed: false,
               relationId,
               sourceA,
               sourceB,
-            })]
-          : [],
+            })],
       },
     });
   });
@@ -93,6 +130,32 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
           sourceA,
           sourceB,
         }),
+      },
+    });
+  });
+  await page.route("**/api/v1/records/*", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        editable: {
+          myTags: [
+            { id: "tag-cache", name: "缓存" },
+            { id: "tag-consistency", name: "一致性" },
+          ],
+          text: "使用版本号避免旧缓存覆盖新值，并在写入后主动失效相关缓存。",
+          textVersion: 1,
+        },
+        excludedItems: [],
+        id: recordA,
+        lifecycle: "active",
+        organization: { activity: "idle", task: null, view: "organized" },
+        organizedItems: [],
+        presentation: {
+          source: "ai",
+          summary: "版本化读取与缓存失效的实践记录。",
+          title: "缓存一致性笔记",
+        },
+        updatedAt: "2026-08-11T08:00:00.000Z",
       },
     });
   });
@@ -163,7 +226,12 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
   await main.getByRole("tab", { name: "关系审查" }).click();
   const relationCard = main.locator(".relation-card");
 
-  await expect(relationCard).toContainText("确认只新增关系，不拼接或改写");
+  await expect(relationCard).toContainText("只建立连接，不改写内容");
+  const rationale = relationCard.locator(".relation-rationale");
+  await expect(rationale).not.toHaveAttribute("open", "");
+  await rationale.getByText("判断依据").click();
+  await expect(rationale).toHaveAttribute("open", "");
+  await expect(rationale).toContainText("避免旧缓存覆盖新值");
   await relationCard.getByLabel("关系类型").selectOption("extends");
   await relationCard
     .getByLabel("关系描述")
@@ -172,6 +240,46 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
   await expect(
     main.getByRole("status").filter({ hasText: "知识点原文未改变" }),
   ).toBeVisible();
+
+  await main.getByRole("tab", { name: "已处理" }).click();
+  const relationHistory = main.locator(".relation-history");
+  const relationRows = relationHistory.locator(".relation-history-row");
+
+  await expect(relationRows).toHaveCount(6);
+  await expect(
+    relationHistory.locator(".relation-history-status.is-confirmed").first(),
+  ).toContainText("已确认");
+  await expect(
+    relationHistory.locator(".relation-history-status.is-removed"),
+  ).toContainText("已撤销");
+  await expect(
+    relationHistory.locator(".relation-history-status.is-rejected"),
+  ).toContainText("已忽略");
+  await expect(
+    relationRows.first().getByRole("button", { name: "撤销关系" }),
+  ).toBeVisible();
+
+  await relationRows
+    .first()
+    .getByRole("button", { name: "预览记录：缓存一致性笔记" })
+    .click();
+  const recordDrawer = page.getByRole("dialog", {
+    name: "记录预览：缓存一致性笔记",
+  });
+
+  await expect(recordDrawer).toContainText("版本化缓存读取");
+  await expect(recordDrawer).toContainText("版本化读取与缓存失效的实践记录");
+  await expect(
+    recordDrawer.getByRole("link", { name: "打开完整记录" }),
+  ).toHaveAttribute("href", `/records/${recordA}`);
+  await recordDrawer.getByRole("button", { name: "关闭记录预览" }).click();
+  await expect(recordDrawer).toBeHidden();
+
+  await relationHistory
+    .getByRole("button", { name: "下一页已处理关系" })
+    .click();
+  await expect(relationRows).toHaveCount(1);
+  await expect(relationHistory).toContainText("第 2 / 2 页");
 
   await main.getByRole("tab", { name: "覆盖分析" }).click();
   await main.getByRole("button", { name: "新建覆盖分析" }).click();

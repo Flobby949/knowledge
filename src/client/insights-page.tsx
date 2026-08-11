@@ -4,13 +4,14 @@
  * STORY: Scan, inspect both sides, decide, then revisit or undo without touching source history.
  * FIRST VIEWPORT: A 76px signal rail, 72px command bar, compact thesis header, three work tabs, and an evidence-first review list.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Link } from "react-router-dom";
 
 import {
   acceptDuplicateSuggestion,
   confirmRelationSuggestion,
   createCoverageAnalysis,
+  getRecordDetail,
   listCoverageAnalyses,
   listCoverageSources,
   listDuplicateSuggestions,
@@ -26,6 +27,7 @@ import {
   type CoverageSource,
   type DuplicateSuggestion,
   type KnowledgeRelationType,
+  type RecordDetail,
   type RelationSuggestion,
 } from "./api.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
@@ -34,6 +36,13 @@ import "./insights-page.css";
 
 type InsightTab = "coverage" | "duplicates" | "relations";
 type ReviewSection = "pending" | "resolved";
+type RelationEdit = { description: string; type: KnowledgeRelationType };
+type RelationPreviewHandler = (
+  point: RelationSuggestion["source"],
+  trigger: HTMLButtonElement,
+) => void;
+
+const RESOLVED_RELATION_PAGE_SIZE = 6;
 
 const RELATION_LABELS: Record<KnowledgeRelationType, string> = {
   analogy: "类比",
@@ -48,6 +57,7 @@ export function InsightsPage() {
   const [tab, setTab] = useState<InsightTab>("duplicates");
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const newRecordButton = useRef<HTMLButtonElement>(null);
+  const reviewingRelations = tab === "relations";
 
   return (
     <div className="insights-shell">
@@ -56,15 +66,19 @@ export function InsightsPage() {
         onCreate={() => setNewRecordOpen(true)}
       />
 
-      <main aria-label="知识发现" className="insights-main">
+      <main
+        aria-label="知识发现"
+        className={`insights-main${reviewingRelations ? " is-relation-review" : ""}`}
+      >
         <header className="insights-heading">
           <div>
-            <p>V2 · 人工治理</p>
-            <h1>知识发现</h1>
+            <p>{reviewingRelations ? "人工确认" : "V2 · 人工治理"}</p>
+            <h1>{reviewingRelations ? "把散落的知识连起来" : "知识发现"}</h1>
           </div>
           <p className="insights-thesis">
-            AI 负责召回和解释，你负责最后决定。这里的操作只新增可撤销的治理关系，
-            不删除原文、知识点或历史版本。
+            {reviewingRelations
+              ? "一次只判断一条。AI 提议，你来决定这段连接是否成立。"
+              : "AI 负责召回和解释，你负责最后决定。这里的操作只新增可撤销的治理关系，不删除原文、知识点或历史版本。"}
           </p>
         </header>
 
@@ -337,14 +351,19 @@ function DuplicatePanel() {
 function RelationPanel() {
   const [section, setSection] = useState<ReviewSection>("pending");
   const [items, setItems] = useState<RelationSuggestion[]>([]);
-  const [edits, setEdits] = useState<
-    Record<string, { description: string; type: KnowledgeRelationType }>
-  >({});
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [edits, setEdits] = useState<Record<string, RelationEdit>>({});
+  const [resolvedPage, setResolvedPage] = useState(0);
+  const [previewPoint, setPreviewPoint] = useState<
+    RelationSuggestion["source"] | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
+  const previewTrigger = useRef<HTMLButtonElement>(null);
+  const previewCloseButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -355,6 +374,9 @@ function RelationPanel() {
       .then((next) => {
         if (active) {
           setItems(next);
+          setActiveId((current) =>
+            next.some(({ id }) => id === current) ? current : (next[0]?.id ?? null),
+          );
           setEdits((current) => {
             const updated = { ...current };
 
@@ -385,6 +407,39 @@ function RelationPanel() {
     };
   }, [reload, section]);
 
+  useEffect(() => {
+    const lastPage = Math.max(
+      0,
+      Math.ceil(items.length / RESOLVED_RELATION_PAGE_SIZE) - 1,
+    );
+
+    setResolvedPage((current) => Math.min(current, lastPage));
+  }, [items.length]);
+
+  useEffect(() => {
+    if (!previewPoint) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() =>
+      previewCloseButton.current?.focus(),
+    );
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePreview();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [previewPoint]);
+
   async function scan() {
     setBusy("scan");
     setError("");
@@ -392,10 +447,10 @@ function RelationPanel() {
 
     try {
       const result = await scanRelationSuggestions();
+      changeSection("pending");
       setNotice(
         `扫描完成：召回 ${result.recalledPairs} 组，新增 ${result.suggestedRelations} 条建议，待审 ${result.pendingSuggestions} 条。`,
       );
-      setSection("pending");
       setReload((value) => value + 1);
     } catch (caught) {
       setError(errorMessage(caught, "关系扫描失败，请稍后重试。"));
@@ -428,6 +483,8 @@ function RelationPanel() {
         setNotice("正式关系已撤销，两个知识点仍保持原样。");
       }
 
+      setPreviewPoint(null);
+      previewTrigger.current = null;
       setReload((value) => value + 1);
     } catch (caught) {
       setError(errorMessage(caught, "操作失败，请刷新后重试。"));
@@ -436,16 +493,89 @@ function RelationPanel() {
     }
   }
 
+  const activeIndex = items.findIndex(({ id }) => id === activeId);
+  const suggestion = activeIndex >= 0 ? items[activeIndex] : (items[0] ?? null);
+
+  function moveTo(index: number) {
+    const next = items[index];
+
+    if (next) {
+      setActiveId(next.id);
+    }
+  }
+
+  function openPreview(
+    point: RelationSuggestion["source"],
+    trigger: HTMLButtonElement,
+  ) {
+    previewTrigger.current = trigger;
+    setPreviewPoint(point);
+  }
+
+  function closePreview() {
+    setPreviewPoint(null);
+    window.requestAnimationFrame(() => previewTrigger.current?.focus());
+  }
+
+  function changeSection(next: ReviewSection) {
+    if (next === section) {
+      return;
+    }
+
+    setLoading(true);
+    setItems([]);
+    setActiveId(null);
+    setResolvedPage(0);
+    setPreviewPoint(null);
+    previewTrigger.current = null;
+    setError("");
+    setNotice("");
+    setSection(next);
+  }
+
   return (
-    <div className="insight-workspace">
-      <WorkspaceToolbar
-        actionBusy={busy === "scan"}
-        actionLabel="扫描知识关系"
-        description="向量只负责召回候选，模型给出有证据的解释；关系类型、方向和描述最终由你确认。"
-        onAction={() => void scan()}
-        onSectionChange={setSection}
-        section={section}
-      />
+    <div className="insight-workspace relation-workspace">
+      <header className="relation-workspace-toolbar">
+        <div className="relation-queue-summary">
+          <strong>
+            {loading
+              ? "正在整理关系…"
+              : section === "pending"
+                ? `${items.length} 条待判断`
+                : `${items.length} 条处理记录`}
+          </strong>
+          <span>{section === "pending" ? "高置信度优先" : "随时可以撤销"}</span>
+        </div>
+        <div className="relation-toolbar-actions">
+          <div aria-label="审查状态" className="review-section-tabs" role="tablist">
+            <button
+              aria-selected={section === "pending"}
+              onClick={() => changeSection("pending")}
+              role="tab"
+              type="button"
+            >
+              待审查
+            </button>
+            <button
+              aria-selected={section === "resolved"}
+              onClick={() => changeSection("resolved")}
+              role="tab"
+              type="button"
+            >
+              已处理
+            </button>
+          </div>
+          <button
+            className="relation-scan-button"
+            disabled={busy === "scan"}
+            onClick={() => void scan()}
+            type="button"
+          >
+            <span aria-hidden="true">↻</span>
+            {busy === "scan" ? "扫描中…" : "扫描新关系"}
+          </button>
+        </div>
+      </header>
       <Feedback error={error} notice={notice} />
 
       {loading ? <LoadingCopy /> : null}
@@ -456,154 +586,480 @@ function RelationPanel() {
         />
       ) : null}
 
-      <div className="review-card-list">
-        {items.map((suggestion) => {
-          const edit = edits[suggestion.id] ?? {
+      {!loading && section === "pending" && suggestion ? (
+        <RelationReviewCard
+          activeIndex={activeIndex}
+          busy={busy === suggestion.id}
+          edit={edits[suggestion.id] ?? {
             description: suggestion.description,
             type: suggestion.type,
-          };
-
-          return (
-            <article className="review-card relation-card" key={suggestion.id}>
-              <header className="review-card-heading">
-                <div>
-                  <span className="signal-badge semantic">
-                    {Math.round(suggestion.confidence * 100)}% 置信度
-                  </span>
-                  <strong>{RELATION_LABELS[suggestion.type]}</strong>
-                </div>
-                <span>
-                  {suggestion.needsReview ? "来源已变化 · 需复核" : relationStatusLabel(suggestion.status)}
-                </span>
-              </header>
-
-              <p className="review-reason">{suggestion.reason}</p>
-              <div className="relation-flow" aria-label="关系方向">
-                <RelationPoint point={suggestion.source} side="起点" />
-                <span aria-hidden="true" className="relation-arrow">→</span>
-                <RelationPoint point={suggestion.target} side="终点" />
-              </div>
-
-              {section === "pending" ? (
-                <div className="relation-editor">
-                  <label>
-                    <span>关系类型</span>
-                    <select
-                      disabled={!suggestion.canDecide || busy === suggestion.id}
-                      onChange={(event) =>
-                        setEdits((current) => ({
-                          ...current,
-                          [suggestion.id]: {
-                            ...edit,
-                            type: event.target.value as KnowledgeRelationType,
-                          },
-                        }))
-                      }
-                      value={edit.type}
-                    >
-                      {Object.entries(RELATION_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>关系描述</span>
-                    <textarea
-                      disabled={!suggestion.canDecide || busy === suggestion.id}
-                      onChange={(event) =>
-                        setEdits((current) => ({
-                          ...current,
-                          [suggestion.id]: {
-                            ...edit,
-                            description: event.target.value,
-                          },
-                        }))
-                      }
-                      rows={3}
-                      value={edit.description}
-                    />
-                  </label>
-                </div>
-              ) : (
-                <p className="formal-relation-copy">
-                  <strong>
-                    {RELATION_LABELS[suggestion.relation?.type ?? suggestion.type]}
-                  </strong>
-                  {suggestion.relation?.description ?? suggestion.description}
-                </p>
-              )}
-
-              {section === "pending" ? (
-                <footer className="review-actions">
-                  <p>确认只新增关系，不拼接或改写两端知识点。</p>
-                  <div>
-                    <button
-                      className="secondary-button"
-                      disabled={busy === suggestion.id}
-                      onClick={() => void decide(suggestion, "reject")}
-                      type="button"
-                    >
-                      忽略建议
-                    </button>
-                    <button
-                      className="primary-button"
-                      disabled={
-                        busy === suggestion.id ||
-                        !suggestion.canDecide ||
-                        !edit.description.trim()
-                      }
-                      onClick={() => void decide(suggestion, "confirm")}
-                      type="button"
-                    >
-                      确认正式关系
-                    </button>
-                  </div>
-                </footer>
-              ) : suggestion.status === "confirmed" && suggestion.relation && !suggestion.relation.removed ? (
-                <footer className="review-actions">
-                  <p>撤销关系不会影响任何知识点或证据片段。</p>
-                  <button
-                    className="secondary-button"
-                    disabled={busy === suggestion.id}
-                    onClick={() => void decide(suggestion, "undo")}
-                    type="button"
-                  >
-                    撤销正式关系
-                  </button>
-                </footer>
-              ) : null}
-            </article>
-          );
-        })}
-      </div>
+          }}
+          itemCount={items.length}
+          onDecide={(decision) => void decide(suggestion, decision)}
+          onEdit={(edit) =>
+            setEdits((current) => ({
+              ...current,
+              [suggestion.id]: edit,
+            }))
+          }
+          onMove={moveTo}
+          onPreview={openPreview}
+          suggestion={suggestion}
+        />
+      ) : null}
+      {!loading && section === "resolved" && items.length > 0 ? (
+        <ResolvedRelationList
+          busyId={busy}
+          items={items}
+          onPageChange={setResolvedPage}
+          onPreview={openPreview}
+          onUndo={(suggestion) => void decide(suggestion, "undo")}
+          page={resolvedPage}
+        />
+      ) : null}
+      {previewPoint ? (
+        <RelationSourceDrawer
+          closeButton={previewCloseButton}
+          onClose={closePreview}
+          point={previewPoint}
+        />
+      ) : null}
     </div>
   );
 }
 
+function RelationReviewCard({
+  activeIndex,
+  busy,
+  edit,
+  itemCount,
+  onDecide,
+  onEdit,
+  onMove,
+  onPreview,
+  suggestion,
+}: {
+  activeIndex: number;
+  busy: boolean;
+  edit: RelationEdit;
+  itemCount: number;
+  onDecide: (decision: "confirm" | "reject") => void;
+  onEdit: (edit: RelationEdit) => void;
+  onMove: (index: number) => void;
+  onPreview: RelationPreviewHandler;
+  suggestion: RelationSuggestion;
+}) {
+  const evidenceCount =
+    suggestion.source.evidence.length + suggestion.target.evidence.length;
+
+  return (
+    <article className="relation-card relation-review-card">
+      <header className="relation-card-heading">
+        <div className="relation-suggestion-label">
+          <span aria-hidden="true" className="relation-suggestion-mark">✦</span>
+          <div>
+            <span>
+              {suggestion.needsReview
+                ? "来源已变化，需要复核"
+                : "AI 建议"}
+            </span>
+            <strong>这两条知识可能有关</strong>
+          </div>
+        </div>
+        <div className="relation-card-controls">
+          <span className="relation-confidence">
+            {Math.round(suggestion.confidence * 100)}% 置信度
+          </span>
+          {itemCount > 1 ? (
+            <nav className="relation-pager" aria-label="关系建议翻页">
+              <button
+                aria-label="上一条关系"
+                disabled={activeIndex <= 0}
+                onClick={() => onMove(activeIndex - 1)}
+                type="button"
+              >
+                ←
+              </button>
+              <span>{activeIndex + 1} / {itemCount}</span>
+              <button
+                aria-label="稍后处理，查看下一条关系"
+                disabled={activeIndex >= itemCount - 1}
+                onClick={() => onMove(activeIndex + 1)}
+                type="button"
+              >
+                稍后 →
+              </button>
+            </nav>
+          ) : null}
+        </div>
+      </header>
+
+      <div className="relation-stage" aria-label="关系方向" role="group">
+        <RelationPoint
+          onPreview={onPreview}
+          point={suggestion.source}
+          side="起点"
+        />
+        <div className="relation-bridge">
+          <span aria-hidden="true" className="relation-bridge-line" />
+          <label className="relation-type-control">
+            <span className="visually-hidden">关系类型</span>
+            <select
+              disabled={!suggestion.canDecide || busy}
+              onChange={(event) =>
+                onEdit({
+                  ...edit,
+                  type: event.target.value as KnowledgeRelationType,
+                })
+              }
+              value={edit.type}
+            >
+              {Object.entries(RELATION_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <span aria-hidden="true" className="relation-bridge-arrow">→</span>
+        </div>
+        <RelationPoint
+          onPreview={onPreview}
+          point={suggestion.target}
+          side="终点"
+        />
+      </div>
+
+      <label className="relation-description-control">
+        <span>关系描述</span>
+        <textarea
+          disabled={!suggestion.canDecide || busy}
+          onChange={(event) =>
+            onEdit({ ...edit, description: event.target.value })
+          }
+          rows={2}
+          value={edit.description}
+        />
+      </label>
+
+      <details className="relation-rationale">
+        <summary>
+          <span className="relation-rationale-label">判断依据</span>
+          <span className="relation-rationale-reason">{suggestion.reason}</span>
+          <span className="relation-rationale-count">
+            {evidenceCount} 处证据 <i aria-hidden="true">⌄</i>
+          </span>
+        </summary>
+        <div className="relation-evidence-grid">
+          <RelationEvidence point={suggestion.source} />
+          <RelationEvidence point={suggestion.target} />
+        </div>
+      </details>
+
+      <footer className="relation-decision-bar">
+        <span className={suggestion.canDecide ? "" : "is-warning"}>
+          <i aria-hidden="true">{suggestion.canDecide ? "✓" : "!"}</i>
+          {suggestion.canDecide
+            ? "只建立连接，不改写内容"
+            : "内容已变化，请重新扫描后判断"}
+        </span>
+        <div>
+          <button
+            className="secondary-button"
+            disabled={busy}
+            onClick={() => onDecide("reject")}
+            type="button"
+          >
+            忽略建议
+          </button>
+          <button
+            className="primary-button"
+            disabled={busy || !suggestion.canDecide || !edit.description.trim()}
+            onClick={() => onDecide("confirm")}
+            type="button"
+          >
+            确认正式关系
+          </button>
+        </div>
+      </footer>
+    </article>
+  );
+}
+
+function ResolvedRelationList({
+  busyId,
+  items,
+  onPageChange,
+  onPreview,
+  onUndo,
+  page,
+}: {
+  busyId: string;
+  items: RelationSuggestion[];
+  onPageChange: (page: number) => void;
+  onPreview: RelationPreviewHandler;
+  onUndo: (suggestion: RelationSuggestion) => void;
+  page: number;
+}) {
+  const pageCount = Math.max(
+    1,
+    Math.ceil(items.length / RESOLVED_RELATION_PAGE_SIZE),
+  );
+  const safePage = Math.min(page, pageCount - 1);
+  const pageStart = safePage * RESOLVED_RELATION_PAGE_SIZE;
+  const pageItems = items.slice(
+    pageStart,
+    pageStart + RESOLVED_RELATION_PAGE_SIZE,
+  );
+
+  return (
+    <section aria-label="已处理关系" className="relation-history">
+      <header className="relation-history-heading">
+        <span>处理状态</span>
+        <span>关联内容</span>
+        <span>操作</span>
+      </header>
+      <div className="relation-history-list">
+        {pageItems.map((suggestion) => {
+          const removed =
+            suggestion.status === "removed" || suggestion.relation?.removed === true;
+          const confirmed = suggestion.status === "confirmed" && !removed;
+          const state = confirmed ? "confirmed" : removed ? "removed" : "rejected";
+          const stateLabel = confirmed ? "已确认" : removed ? "已撤销" : "已忽略";
+          const stateHint = confirmed ? "关系生效中" : removed ? "关系已失效" : "未建立关系";
+          const stateIcon = confirmed ? "✓" : removed ? "↶" : "×";
+          const relationType = suggestion.relation?.type ?? suggestion.type;
+          const description =
+            suggestion.relation?.description ?? suggestion.description;
+
+          return (
+            <article className={`relation-history-row is-${state}`} key={suggestion.id}>
+              <div className={`relation-history-status is-${state}`}>
+                <span aria-hidden="true">{stateIcon}</span>
+                <div>
+                  <strong>{stateLabel}</strong>
+                  <small>{stateHint}</small>
+                </div>
+              </div>
+
+              <div className="relation-history-connection">
+                <div className="relation-history-path">
+                  <button
+                    aria-label={`预览记录：${suggestion.source.recordTitle}`}
+                    className="relation-history-endpoint"
+                    onClick={(event) =>
+                      onPreview(suggestion.source, event.currentTarget)
+                    }
+                    type="button"
+                  >
+                    <strong>{suggestion.source.title}</strong>
+                    <span>{suggestion.source.recordTitle}</span>
+                  </button>
+                  <span className="relation-history-type">
+                    {RELATION_LABELS[relationType]}
+                    <i aria-hidden="true">→</i>
+                  </span>
+                  <button
+                    aria-label={`预览记录：${suggestion.target.recordTitle}`}
+                    className="relation-history-endpoint"
+                    onClick={(event) =>
+                      onPreview(suggestion.target, event.currentTarget)
+                    }
+                    type="button"
+                  >
+                    <strong>{suggestion.target.title}</strong>
+                    <span>{suggestion.target.recordTitle}</span>
+                  </button>
+                </div>
+                <p>{description}</p>
+              </div>
+
+              <div className="relation-history-action">
+                {confirmed ? (
+                  <button
+                    className="relation-undo-button"
+                    disabled={busyId === suggestion.id}
+                    onClick={() => onUndo(suggestion)}
+                    type="button"
+                  >
+                    {busyId === suggestion.id ? "撤销中…" : "撤销关系"}
+                  </button>
+                ) : (
+                  <span>{removed ? "已撤销" : "已归档"}</span>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <footer className="relation-history-pagination">
+        <span>
+          {pageStart + 1}–{Math.min(pageStart + pageItems.length, items.length)} / {items.length}
+        </span>
+        {pageCount > 1 ? (
+          <nav aria-label="已处理关系翻页">
+            <button
+              aria-label="上一页已处理关系"
+              disabled={safePage === 0}
+              onClick={() => onPageChange(safePage - 1)}
+              type="button"
+            >
+              ←
+            </button>
+            <span>第 {safePage + 1} / {pageCount} 页</span>
+            <button
+              aria-label="下一页已处理关系"
+              disabled={safePage === pageCount - 1}
+              onClick={() => onPageChange(safePage + 1)}
+              type="button"
+            >
+              →
+            </button>
+          </nav>
+        ) : null}
+      </footer>
+    </section>
+  );
+}
+
+function RelationSourceDrawer({
+  closeButton,
+  onClose,
+  point,
+}: {
+  closeButton: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  point: RelationSuggestion["source"];
+}) {
+  const [record, setRecord] = useState<RecordDetail | null>(null);
+  const [recordError, setRecordError] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    setRecord(null);
+    setRecordError(false);
+    void getRecordDetail(point.recordId, controller.signal)
+      .then(setRecord)
+      .catch((caught: unknown) => {
+        if (!isAbortError(caught)) {
+          setRecordError(true);
+        }
+      });
+
+    return () => controller.abort();
+  }, [point.recordId]);
+
+  return (
+    <aside
+      aria-label={`记录预览：${point.recordTitle}`}
+      aria-modal="false"
+      className="relation-source-drawer"
+      role="dialog"
+    >
+      <header className="relation-drawer-heading">
+        <div>
+          <span>记录预览</span>
+          <h2>{record?.presentation.title ?? point.recordTitle}</h2>
+        </div>
+        <button
+          aria-label="关闭记录预览"
+          onClick={onClose}
+          ref={closeButton}
+          type="button"
+        >
+          ×
+        </button>
+      </header>
+
+      <section className="relation-drawer-point">
+        <span>当前关联知识点</span>
+        <h3>{point.title}</h3>
+        <p>{point.body}</p>
+        {point.evidence.length > 0 ? (
+          <div className="relation-drawer-evidence">
+            <strong>引用依据</strong>
+            {point.evidence.map((evidence) => (
+              <blockquote key={evidence.id}>“{evidence.quote}”</blockquote>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="relation-drawer-record">
+        <span>所属记录</span>
+        {!record && !recordError ? <p className="relation-drawer-loading">正在载入记录…</p> : null}
+        {recordError ? <p className="relation-drawer-error">记录预览暂时无法载入。</p> : null}
+        {record ? (
+          <>
+            <p className="relation-drawer-summary">
+              {record.presentation.summary ?? "这条记录还没有摘要。"}
+            </p>
+            {record.editable.myTags.length > 0 ? (
+              <div aria-label="记录标签" className="relation-drawer-tags">
+                {record.editable.myTags.map((tag) => (
+                  <span key={tag.id}>{tag.name}</span>
+                ))}
+              </div>
+            ) : null}
+            <details className="relation-drawer-original">
+              <summary>查看原始记录</summary>
+              <p>{record.editable.text}</p>
+            </details>
+          </>
+        ) : null}
+      </section>
+
+      <Link
+        className="relation-open-record"
+        to={`/records/${encodeURIComponent(point.recordId)}`}
+      >
+        打开完整记录 <span aria-hidden="true">→</span>
+      </Link>
+    </aside>
+  );
+}
+
 function RelationPoint({
+  onPreview,
   point,
   side,
 }: {
+  onPreview: RelationPreviewHandler;
   point: RelationSuggestion["source"];
   side: string;
 }) {
   return (
-    <section className="evidence-pane relation-point">
-      <div className="evidence-pane-meta">
+    <section className="relation-point">
+      <div className="relation-point-meta">
         <span>{side}</span>
-        {point.changedSinceSuggestion || !point.current ? <span>内容已变化</span> : null}
+        <button
+          aria-label={`预览记录：${point.recordTitle}`}
+          onClick={(event) => onPreview(point, event.currentTarget)}
+          type="button"
+        >
+          {point.recordTitle}<span aria-hidden="true">↗</span>
+        </button>
       </div>
       <h3>{point.title}</h3>
-      <Link to={`/records/${point.recordId}`}>{point.recordTitle}</Link>
       <p>{point.body}</p>
-      {point.evidence.length > 0 ? (
-        <div className="evidence-quotes">
-          <span>依据</span>
-          {point.evidence.map((evidence) => (
-            <blockquote key={evidence.id}>“{evidence.quote}”</blockquote>
-          ))}
-        </div>
+      {point.changedSinceSuggestion || !point.current ? (
+        <span className="relation-point-warning">内容已变化</span>
       ) : null}
+    </section>
+  );
+}
+
+function RelationEvidence({ point }: { point: RelationSuggestion["source"] }) {
+  return (
+    <section>
+      <strong>{point.title}</strong>
+      {point.evidence.length > 0 ? (
+        point.evidence.map((evidence) => (
+          <blockquote key={evidence.id}>“{evidence.quote}”</blockquote>
+        ))
+      ) : (
+        <p>暂无引用片段</p>
+      )}
     </section>
   );
 }
