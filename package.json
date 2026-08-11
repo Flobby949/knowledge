@@ -10,7 +10,9 @@
     "dev:web": "vite",
     "test": "vitest run",
     "test:api": "vitest run tests/api --no-file-parallelism",
-    "test:e2e": "playwright test --project=chrome",
+    "test:e2e": "playwright test --project=chrome --project=edge",
+    "test:e2e:chrome": "playwright test --project=chrome",
+    "test:e2e:edge": "playwright test --project=edge",
     "test:visual": "playwright test --config playwright.visual.config.ts --project=chrome",
     "typecheck": "tsc --noEmit"
   },

@@ -748,6 +748,14 @@ test("Concept Candidates / AI 候选 · 1600×1000 审查台与 1280×800 几何
     });
     const stage = page.locator(".candidate-stage");
 
+    await expect(
+      navigation.getByRole("link", { name: "网络", exact: true }),
+    ).toBeVisible();
+    await expect(
+      main
+        .getByRole("navigation", { name: "Concept 工作区视图" })
+        .getByRole("button", { name: /Concept 关系/u }),
+    ).toBeVisible();
     await expect(main.getByRole("heading", { name: /共同机制/u })).toBeVisible();
     await expect(main.getByText("等待人工确认", { exact: true })).toBeVisible();
     await expect(main.locator(".candidate-input-grid article")).toHaveCount(2);

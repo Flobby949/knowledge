@@ -7,6 +7,7 @@ const apiPort = Number.parseInt(process.env.E2E_API_PORT ?? "3001", 10);
 const webPort = Number.parseInt(process.env.E2E_WEB_PORT ?? "5173", 10);
 const baseURL =
   process.env.E2E_BASE_URL ?? `http://127.0.0.1:${webPort}`;
+const edgeExecutablePath = process.env.EDGE_EXECUTABLE_PATH;
 
 process.env.E2E_BASE_URL = baseURL;
 
@@ -28,6 +29,16 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         channel: "chrome",
+        viewport: { width: 1600, height: 1000 },
+      },
+    },
+    {
+      name: "edge",
+      use: {
+        ...devices["Desktop Edge"],
+        ...(edgeExecutablePath
+          ? { launchOptions: { executablePath: edgeExecutablePath } }
+          : { channel: "msedge" }),
         viewport: { width: 1600, height: 1000 },
       },
     },

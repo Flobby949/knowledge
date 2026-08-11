@@ -301,24 +301,28 @@ export function HomePage() {
               data-renderer={renderer}
               role="region"
             >
-              {rendererMessage ? (
-                <p
-                  aria-label="首页网络渲染状态"
-                  className="home-renderer-alert"
-                  role="alert"
-                >
-                  {rendererMessage}
-                </p>
-              ) : null}
-              {loadError ? (
-                <p className="home-network-error" role="alert">
-                  {loadError}
-                </p>
-              ) : null}
-              {graph.truncated ? (
-                <p className="home-network-truncated" role="status">
-                  当前局部网络已按服务端预算截断；选择节点可继续核验局部关系。
-                </p>
+              {rendererMessage || loadError || graph.truncated ? (
+                <div className="home-network-messages">
+                  {rendererMessage ? (
+                    <p
+                      aria-label="首页网络渲染状态"
+                      className="home-renderer-alert"
+                      role="alert"
+                    >
+                      {rendererMessage}
+                    </p>
+                  ) : null}
+                  {loadError ? (
+                    <p className="home-network-error" role="alert">
+                      {loadError}
+                    </p>
+                  ) : null}
+                  {graph.truncated ? (
+                    <p className="home-network-truncated" role="status">
+                      当前局部网络已按服务端预算截断；选择节点可继续核验局部关系。
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
 
               {loading && graph.nodes.length === 0 ? (

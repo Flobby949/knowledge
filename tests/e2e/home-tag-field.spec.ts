@@ -272,6 +272,41 @@ test.describe("V3.4 home real knowledge network", () => {
     await expectFallbackState(page, fixture);
   });
 
+  test("keeps renderer and later network failures separately readable", async ({
+    page,
+  }) => {
+    const fixture = homeNetworkFixture();
+
+    await disableWebGl2(page);
+    await installHomeNetworkRoutes(page, fixture, {
+      failExpandedSubgraph: true,
+    });
+    await page.goto(appUrl("/"));
+
+    const home = page.getByRole("main", { name: "首页" });
+    const stage = home.getByRole("region", { name: "真实 3D 知识网络" });
+
+    await expect(stage).toHaveAttribute("data-renderer", "2d");
+    await home
+      .getByRole("group", { name: "真实知识网络图幅" })
+      .getByRole("button", { name: `打开节点：${fixture.conceptA.label}` })
+      .click();
+
+    const rendererAlert = stage.locator(".home-renderer-alert");
+    const networkError = stage.locator(".home-network-error");
+
+    await expect(rendererAlert).toBeVisible();
+    await expect(networkError).toHaveText("局部网络读取失败");
+    const rendererBox = await rendererAlert.boundingBox();
+    const errorBox = await networkError.boundingBox();
+
+    expect(rendererBox).not.toBeNull();
+    expect(errorBox).not.toBeNull();
+    expect(errorBox!.y).toBeGreaterThanOrEqual(
+      rendererBox!.y + rendererBox!.height + 4,
+    );
+  });
+
   test("context loss and a later 3D frame exception both preserve state while falling back to 2D", async ({
     context,
     page,
@@ -502,7 +537,10 @@ function homeNetworkFixture(): HomeNetworkFixture {
 async function installHomeNetworkRoutes(
   page: Page,
   fixture: HomeNetworkFixture,
-  options: { pathTruncated?: boolean } = {},
+  options: {
+    failExpandedSubgraph?: boolean;
+    pathTruncated?: boolean;
+  } = {},
 ): Promise<void> {
   await page.route("**/api/v1/tag-field", async (route) => {
     await route.fulfill({
@@ -559,6 +597,15 @@ async function installHomeNetworkRoutes(
   await page.route("**/api/v1/network/subgraph**", async (route) => {
     const url = new URL(route.request().url());
     const root = url.searchParams.get("root");
+
+    if (root && options.failExpandedSubgraph) {
+      await route.fulfill({
+        json: { error: { message: "局部网络读取失败" } },
+        status: 503,
+      });
+      return;
+    }
+
     const expanded = root !== null;
     const graph: NetworkGraph = {
       root,

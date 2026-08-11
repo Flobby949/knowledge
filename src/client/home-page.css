@@ -413,14 +413,19 @@ html[data-theme="scifi"] .home-network-viewport::after {
   background: color-mix(in srgb, var(--workspace-canvas) 91%, transparent);
 }
 
-.home-renderer-alert,
-.home-network-error,
-.home-network-truncated {
+.home-network-messages {
   position: absolute;
   z-index: 24;
   top: 94px;
   right: 24px;
+  display: grid;
+  gap: 8px;
   max-width: min(520px, calc(100% - 48px));
+}
+
+.home-renderer-alert,
+.home-network-error,
+.home-network-truncated {
   padding: 8px 11px;
   margin: 0;
   color: var(--home-ink);
@@ -433,7 +438,7 @@ html[data-theme="scifi"] .home-network-viewport::after {
 }
 
 .home-network-error { color: var(--danger); border-color: var(--danger); }
-.home-network-truncated { top: 132px; border-color: var(--home-line-strong); }
+.home-network-truncated { border-color: var(--home-line-strong); }
 
 .home-network-state {
   position: absolute;
