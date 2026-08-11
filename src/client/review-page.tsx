@@ -1,6 +1,6 @@
 /*
  * THESIS: Review is a calm verification bench: source evidence stays fixed while decisions happen point by point.
- * OWN-WORLD: Cold paper planes, graphite reading type, hairline rules, and electric blue reserved for confirmation.
+ * OWN-WORLD: Paper planes use either berry-petal or graphite-blue signals while confirmation semantics remain identical.
  * STORY: The queue names the record, the left pane preserves its exact source, and the right pane records explicit human decisions.
  * FIRST VIEWPORT: 60px navigation, a 72px queue strip, then a 58/42 two-pane workspace with a persistent completion action.
  */

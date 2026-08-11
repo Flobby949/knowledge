@@ -9,9 +9,9 @@
   gap: 7px;
   min-height: 36px;
   padding: 0 10px;
-  color: #314764;
-  background: #f8fbff;
-  border: 1px solid #c9d6e7;
+  color: #573e4b;
+  background: #fdfafb;
+  border: 1px solid #e0d0d6;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
@@ -20,8 +20,8 @@
 
 .ai-task-pulse-button:hover,
 .ai-task-pulse-button[aria-expanded="true"] {
-  color: #174c95;
-  border-color: #8faad0;
+  color: #703c56;
+  border-color: #c09fac;
 }
 
 .ai-task-pulse-button strong {
@@ -41,7 +41,7 @@
   position: relative;
   width: 12px;
   height: 12px;
-  border: 1px solid #3275cf;
+  border: 1px solid #b05181;
   border-radius: 50%;
 }
 
@@ -56,7 +56,7 @@
 .ai-task-pulse-signal::after {
   position: absolute;
   inset: -4px;
-  border: 1px solid rgba(0, 95, 249, 0.28);
+  border: 1px solid rgba(198, 61, 104, 0.28);
   border-radius: 50%;
   content: "";
   animation: ai-task-signal 1.8s ease-out infinite;
@@ -73,7 +73,7 @@
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  box-shadow: 0 16px 36px rgba(23, 43, 78, 0.16);
+  box-shadow: 0 16px 36px rgb(111 61 82 / 16%);
 }
 
 .ai-task-popover > header {
@@ -92,12 +92,12 @@
 
 .ai-task-popover header p {
   margin: 3px 0 0;
-  color: #657590;
+  color: #8d687a;
   font-size: 12px;
 }
 
 .ai-task-popover-index {
-  color: #55718f;
+  color: #836172;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -114,7 +114,7 @@
 .ai-task-popover li {
   position: relative;
   padding: 13px 18px;
-  border-bottom: 1px solid #e7edf5;
+  border-bottom: 1px solid #f2eaed;
 }
 
 .ai-task-popover-row {
@@ -182,7 +182,7 @@
 }
 
 .ai-task-status.is-running {
-  color: #175db6;
+  color: #923b67;
 }
 
 .ai-task-status.is-failed {
@@ -197,7 +197,7 @@
 .ai-task-progress-copy {
   margin: 6px 0 0 20px;
   overflow-wrap: anywhere;
-  color: #697994;
+  color: #916c7f;
   font-size: 12px;
   line-height: 1.55;
 }
@@ -210,9 +210,9 @@
   min-height: 30px;
   padding: 3px 10px;
   margin: 9px 0 0 20px;
-  color: #174f9e;
-  background: #f8fbff;
-  border: 1px solid #bcd0e8;
+  color: #81345b;
+  background: #fdfafb;
+  border: 1px solid #dec6cf;
   border-radius: 5px;
   cursor: pointer;
   font-size: 12px;
@@ -220,7 +220,7 @@
 }
 
 .ai-task-retry:disabled {
-  color: #8a97aa;
+  color: #a98b9a;
   cursor: wait;
 }
 
@@ -239,7 +239,7 @@
 }
 
 .ai-task-popover footer a {
-  color: #195aaa;
+  color: #8a3962;
   font-size: 12px;
   font-weight: 650;
 }
@@ -250,14 +250,14 @@
 }
 
 .app-navigation.dark .ai-task-pulse-button {
-  color: #dceaff;
-  background: #081326;
-  border-color: rgba(123, 164, 216, 0.42);
+  color: #f7e4eb;
+  background: #1e1017;
+  border-color: rgba(198, 181, 243, 0.42);
 }
 
 .app-navigation.dark .ai-task-pulse-button:hover,
 .app-navigation.dark .ai-task-pulse-button[aria-expanded="true"] {
-  border-color: #57a2ff;
+  border-color: #c88ea4;
 }
 
 @keyframes ai-task-signal {

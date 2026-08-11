@@ -1,7 +1,7 @@
 .tags-shell {
   height: 100vh;
   overflow: hidden;
-  color: #203453;
+  color: #462d3a;
   background: var(--paper);
 }
 
@@ -37,7 +37,7 @@
 .tag-atlas-heading p,
 .tag-detail-drawer > header p {
   margin: 0 0 2px;
-  color: #697c99;
+  color: #946e81;
   font-size: 11px;
   font-weight: 680;
   letter-spacing: 0.1em;
@@ -59,7 +59,7 @@
 }
 
 .tag-atlas-heading-actions > span {
-  color: #60718d;
+  color: #886577;
   font-size: 13px;
 }
 
@@ -86,15 +86,15 @@
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(112px, 1fr));
   padding: 3px;
-  background: #edf2f8;
-  border: 1px solid #d8e1ec;
+  background: #f6eff2;
+  border: 1px solid #e8dce1;
   border-radius: 8px;
 }
 
 .tag-section-tabs button {
   min-height: 36px;
   padding: 0 15px;
-  color: #60718d;
+  color: #886577;
   font-weight: 640;
   background: transparent;
   border: 1px solid transparent;
@@ -102,10 +102,10 @@
 }
 
 .tag-section-tabs button[aria-selected="true"] {
-  color: #173e70;
+  color: #582f44;
   background: #fff;
-  border-color: #c8d7e8;
-  box-shadow: 0 2px 7px rgb(47 78 116 / 9%);
+  border-color: #e1cfd6;
+  box-shadow: 0 2px 7px rgb(111 61 82 / 9%);
 }
 
 .tag-search-control {
@@ -124,9 +124,9 @@
   width: 100%;
   min-height: 42px;
   padding: 0 14px 0 38px;
-  color: #203453;
+  color: #462d3a;
   background: #fff;
-  border: 1px solid #cfd9e6;
+  border: 1px solid #e2d3d9;
   border-radius: 7px;
 }
 
@@ -134,16 +134,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #71809a;
+  color: #987385;
   font-size: 12px;
 }
 
 .tag-sort-control select {
   min-height: 42px;
   padding: 0 34px 0 12px;
-  color: #304765;
+  color: #583d4a;
   background: #fff;
-  border: 1px solid #cfd9e6;
+  border: 1px solid #e2d3d9;
   border-radius: 7px;
 }
 
@@ -154,8 +154,8 @@
   gap: 12px;
   padding: 15px 16px;
   margin-top: 16px;
-  background: #f7faff;
-  border: 1px solid #cbd9e9;
+  background: #fdf9fa;
+  border: 1px solid #e2d2d8;
   border-radius: 8px;
 }
 
@@ -166,7 +166,7 @@
 .new-tag-form label {
   display: block;
   margin-bottom: 3px;
-  color: #263d5d;
+  color: #4f3442;
   font-size: 13px;
   font-weight: 680;
 }
@@ -174,7 +174,7 @@
 .new-tag-form p {
   grid-column: 1 / -1;
   margin: 0;
-  color: #6c7b93;
+  color: #936c80;
   font-size: 11px;
   line-height: 1.45;
 }
@@ -187,7 +187,7 @@
   min-width: 0;
   min-height: 40px;
   padding-inline: 12px;
-  border: 1px solid #bfcddd;
+  border: 1px solid #d6c7cc;
   border-radius: 6px;
 }
 
@@ -215,8 +215,8 @@
   gap: 9px;
   padding: 12px 14px;
   margin-top: 14px;
-  background: #f7f9fc;
-  border: 1px solid #d6e0eb;
+  background: #fbf8f9;
+  border: 1px solid #e7dadf;
   border-radius: 7px;
 }
 
@@ -242,14 +242,14 @@
 
 .tag-batch-summary strong,
 .tag-batch-confirmation strong {
-  color: #2c4261;
+  color: #543947;
   font-size: 13px;
   font-weight: 680;
 }
 
 .tag-batch-summary span,
 .tag-batch-confirmation span {
-  color: #6c7b93;
+  color: #936c80;
   font-size: 11px;
   line-height: 1.45;
 }
@@ -323,14 +323,14 @@
   width: 32px;
   height: 32px;
   background: rgb(255 255 255 / 92%);
-  border: 1px solid #d1dbe7;
+  border: 1px solid #e3d5da;
   border-radius: 5px;
   cursor: pointer;
 }
 
 .tag-card-selection:has(input:checked) {
-  background: #edf5ff;
-  border-color: #8daed5;
+  background: #fbf1f5;
+  border-color: #c39fad;
 }
 
 .tag-card-selection:has(input:disabled) {
@@ -353,7 +353,7 @@
   width: 100%;
   height: 100%;
   padding: 15px 16px;
-  color: #203453;
+  color: #462d3a;
   text-align: left;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -367,8 +367,8 @@
 
 .tag-atlas-grid button:not(:disabled):hover,
 .tag-atlas-grid button[aria-pressed="true"] {
-  background: #fbfdff;
-  border-color: #8eadd3;
+  background: #fefcfd;
+  border-color: #c29fac;
 }
 
 .tag-atlas-grid button:not(:disabled):hover {
@@ -376,13 +376,13 @@
 }
 
 .tag-atlas-grid button[aria-pressed="true"] {
-  box-shadow: inset 0 0 0 1px #b9cde5;
+  box-shadow: inset 0 0 0 1px #dac4cc;
 }
 
 .tag-atlas-grid li.is-batch-selected > button {
-  background: #f7fbff;
-  border-color: #6794c7;
-  box-shadow: inset 0 0 0 1px #b8cde5;
+  background: #fdf9fa;
+  border-color: #b47a97;
+  box-shadow: inset 0 0 0 1px #dac3cc;
 }
 
 .tag-atlas-grid button:disabled {
@@ -392,7 +392,7 @@
 
 .tag-atlas-index {
   min-width: 0;
-  color: #7b89a1;
+  color: #9f7d8e;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
@@ -405,11 +405,11 @@
 .tag-atlas-state {
   align-self: start;
   padding: 2px 7px;
-  color: #556987;
+  color: #7f5e6e;
   font-size: 10px;
   font-weight: 680;
-  background: #f0f3f8;
-  border: 1px dashed #9dadc1;
+  background: #f7f1f3;
+  border: 1px dashed #bba3ac;
   border-radius: 999px;
 }
 
@@ -430,13 +430,13 @@
 .tag-atlas-count {
   grid-column: 1 / -1;
   align-self: end;
-  color: #60718d;
+  color: #886577;
   font-size: 12px;
 }
 
 .tag-atlas-feedback,
 .tag-atlas-empty {
-  color: #71809a;
+  color: #987385;
 }
 
 .tag-atlas-feedback {
@@ -454,7 +454,7 @@
 }
 
 .tag-atlas-empty strong {
-  color: #405575;
+  color: #6a4b5a;
   font-size: 17px;
 }
 
@@ -522,7 +522,7 @@
   width: 32px;
   height: 32px;
   margin-top: -7px;
-  color: #667792;
+  color: #8f697c;
   font-size: 22px;
   line-height: 1;
   background: transparent;
@@ -531,8 +531,8 @@
 }
 
 .tag-detail-drawer > header button[aria-label="关闭标签详情"]:hover {
-  background: #f1f5fa;
-  border-color: #d4deea;
+  background: #f8f3f5;
+  border-color: #e5d9de;
 }
 
 .tag-detail-drawer > header h2 {
@@ -545,7 +545,7 @@
 }
 
 .tag-detail-drawer > header > span {
-  color: #62738d;
+  color: #896678;
   font-size: 12px;
 }
 
@@ -570,7 +570,7 @@
 }
 
 .tag-related-heading span {
-  color: #75839a;
+  color: #997688;
   font-size: 11px;
 }
 
@@ -604,7 +604,7 @@
 .tag-record-summary a {
   display: inline-block;
   max-width: 100%;
-  color: #263e60;
+  color: #523543;
 }
 
 .tag-record-summary strong {
@@ -617,7 +617,7 @@
 
 .tag-record-summary p {
   margin: 4px 0 0;
-  color: #71809a;
+  color: #987385;
   font-size: 11px;
   line-height: 1.45;
 }
@@ -625,10 +625,10 @@
 .tag-record-summary > button {
   min-height: 32px;
   padding: 0 9px;
-  color: #506783;
+  color: #795a6a;
   font-size: 11px;
-  background: #f7f9fc;
-  border: 1px solid #d5dfeb;
+  background: #fbf8f9;
+  border: 1px solid #e6dadf;
   border-radius: 5px;
 }
 
@@ -636,7 +636,7 @@
   display: grid;
   gap: 0;
   padding: 0 14px 8px;
-  border-top: 1px solid #e3e9f1;
+  border-top: 1px solid #eee6e9;
 }
 
 .tag-point-list > [role="group"] {
@@ -645,7 +645,7 @@
   align-items: center;
   gap: 12px;
   padding: 11px 0;
-  border-bottom: 1px solid #e8edf3;
+  border-bottom: 1px solid #f2e9ec;
 }
 
 .tag-point-list > [role="group"]:last-child {
@@ -659,7 +659,7 @@
 .tag-point-list strong {
   display: block;
   overflow: hidden;
-  color: #354b69;
+  color: #5c424f;
   font-size: 12px;
   line-height: 1.45;
   text-overflow: ellipsis;
@@ -669,24 +669,24 @@
 .tag-point-list span {
   display: block;
   margin-top: 2px;
-  color: #74839a;
+  color: #997587;
   font-size: 10px;
 }
 
 .tag-point-list button {
   min-height: 30px;
   padding: 0 8px;
-  color: #486484;
+  color: #785466;
   font-size: 10px;
   background: transparent;
-  border: 1px solid #ccd8e6;
+  border: 1px solid #e1d1d7;
   border-radius: 4px;
 }
 
 .tag-drawer-feedback {
   padding: 16px 2px;
   margin: 0;
-  color: #71809a;
+  color: #987385;
   font-size: 12px;
 }
 
@@ -699,7 +699,7 @@
   display: grid;
   gap: 10px;
   padding: 16px 30px 18px;
-  background: #fbfcfe;
+  background: #fdfcfc;
   border-top: 1px solid var(--border);
 }
 
@@ -729,7 +729,7 @@
 .tag-drawer-actions > p {
   max-width: 250px;
   margin: 0;
-  color: #6b7991;
+  color: #916b7e;
   font-size: 11px;
   line-height: 1.5;
 }
@@ -784,7 +784,7 @@
 }
 
 .tag-rename-form label {
-  color: #526681;
+  color: #795a6a;
   font-size: 12px;
   font-weight: 650;
 }
@@ -793,7 +793,7 @@
   min-width: 0;
   min-height: 38px;
   padding-inline: 10px;
-  border: 1px solid #bdcada;
+  border: 1px solid #d3c4ca;
   border-radius: 5px;
 }
 

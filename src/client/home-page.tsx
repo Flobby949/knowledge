@@ -1,9 +1,9 @@
 /*
- * THESIS: Home is a navigable signal field, not a decorative dashboard.
- * OWN-WORLD: Deep-space black, dendritic signal paths, restrained spectral node accents, and a precise HUD.
- * STORY: Every durable tag appears as a stable point; search pulls one signal forward and activation opens its record set.
- * FIRST VIEWPORT: A dark 60px navigation over one unbroken 940px field, with the search HUD low and reset control at right.
- * FORM: Brief-pinned Experience surface; depth-first neural field, with no concept seed required.
+ * THESIS: Home is one navigable tag atlas with two complete visual worlds, not a card dashboard or a skin-deep recolor.
+ * OWN-WORLD: Macaron bubbles and cloud-white paper can switch to the original deep-space neural signal field.
+ * STORY: Every durable tag keeps its place and behavior while the user changes the visual language around it.
+ * FIRST VIEWPORT: One unbroken 940px field below the shared navigation, with search low-left and reset low-right.
+ * FORM: User-approved dual-theme Experience surface; both WebGL renderers preserve the same graph-ready interaction model.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -16,7 +16,9 @@ import {
 import { getTagField, type TagFieldItem } from "./api.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
+import { createTagBubbleField } from "./tag-bubble-field.js";
 import { createTagMembraneField } from "./tag-membrane-field.js";
+import { useTheme, type AppTheme } from "./theme.js";
 import "./home-page.css";
 
 const DEFAULT_CAMERA: CameraState = { distance: 8.8, pitch: -0.28, yaw: 0.42 };
@@ -24,6 +26,7 @@ const CAMERA_STORAGE_KEY = "knowledge.home.camera.v1";
 
 export function HomePage() {
   const navigate = useNavigate();
+  const { theme } = useTheme();
   const [searchParams] = useSearchParams();
   const [tags, setTags] = useState<TagFieldItem[]>([]);
   const [tagFieldStatus, setTagFieldStatus] = useState<
@@ -119,6 +122,7 @@ export function HomePage() {
             onProjection: applyNodeProjections,
             reducedMotion,
             renderBudget,
+            theme,
             shouldAutoRotate: () =>
               pointerRef.current === null &&
               focusedIdRef.current === null &&
@@ -161,7 +165,7 @@ export function HomePage() {
         webGlFieldRef.current = null;
       }
     };
-  }, [motionMode, renderBudget, tags]);
+  }, [motionMode, renderBudget, tags, theme]);
 
   useEffect(() => {
     if (renderMode !== "dom-2d") {
@@ -429,11 +433,10 @@ export function HomePage() {
       <AppNavigation
         newRecordButton={newRecordButton}
         onCreate={() => setNewRecordOpen(true)}
-        theme="dark"
       />
       <main aria-label="首页" className="home-main">
         <section
-          aria-label="神经标签场"
+          aria-label={theme === "scifi" ? "神经标签场" : "气泡标签场"}
           className="tag-field"
           data-camera={cameraSignature(cameraRef.current)}
           data-camera-distance={cameraRef.current.distance.toFixed(3)}
@@ -441,7 +444,7 @@ export function HomePage() {
           data-camera-yaw={cameraRef.current.yaw.toFixed(3)}
           data-interaction="idle"
           data-lod={renderBudget.level}
-          data-state={`deep-space ${renderMode} ${motionMode}`}
+          data-state={`${theme === "scifi" ? "deep-space" : "pastel-space"} ${renderMode} ${motionMode}`}
           onPointerCancel={finishPointerInteraction}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -495,20 +498,28 @@ export function HomePage() {
                         tagNodeRefs.current.delete(tag.id);
                       }
                     }}
-                    style={nodeStyle(tag)}
+                    style={nodeStyle(tag, theme)}
                     type="button"
                   >
                     <span
                       aria-hidden="true"
                       className="tag-node-energy"
-                      data-energy-core=""
+                      {...(theme === "scifi"
+                        ? { "data-energy-core": "" }
+                        : { "data-bubble-core": "" })}
                     >
-                      <span className="tag-node-branch tag-node-branch-primary" />
-                      <span className="tag-node-branch tag-node-branch-secondary" />
-                      <span className="tag-node-branch tag-node-branch-tertiary" />
+                      {theme === "scifi" ? (
+                        <>
+                          <span className="tag-node-branch tag-node-branch-primary" />
+                          <span className="tag-node-branch tag-node-branch-secondary" />
+                          <span className="tag-node-branch tag-node-branch-tertiary" />
+                        </>
+                      ) : null}
                       <span
                         className="tag-node-shell"
-                        data-node-ring=""
+                        {...(theme === "scifi"
+                          ? { "data-node-ring": "" }
+                          : { "data-bubble-ring": "" })}
                         data-ring={
                           tag.approval === "approved" ? "complete" : "dashed"
                         }
@@ -561,10 +572,14 @@ export function HomePage() {
           >
             {focused
               ? `${focused.name} · ${focused.approval === "candidate" ? "AI 候选" : "已认可"} · ${focused.recordCount} 条记录`
-              : "选择一个标签以查看信号信息"}
+              : theme === "scifi"
+                ? "选择一个标签以查看信号信息"
+                : "选择一个标签查看记录信息"}
           </p>
           <p className="tag-field-legend">
-            WebGL 空间场 · 拖拽旋转 · 动态连线不表示标签关系
+            {theme === "scifi"
+              ? "WebGL 空间场 · 拖拽旋转 · 动态连线不表示标签关系"
+              : "WebGL 气泡场 · 拖拽旋转 · 节点位置不表示标签关系"}
           </p>
           <output
             aria-label="镜头状态"
@@ -700,6 +715,7 @@ type WebGlTagFieldOptions = {
   reducedMotion: boolean;
   renderBudget: TagFieldRenderBudget;
   shouldAutoRotate: () => boolean;
+  theme: AppTheme;
 };
 
 type SignalTrace = {
@@ -768,9 +784,9 @@ type NodeCustomProperties = React.CSSProperties & {
   "--node-opacity": string;
 };
 
-function nodeStyle(tag: TagFieldItem): NodeCustomProperties {
+function nodeStyle(tag: TagFieldItem, theme: AppTheme): NodeCustomProperties {
   return {
-    "--node-color": stableNodeColor(tag.id),
+    "--node-color": stableNodeColor(tag.id, theme),
     "--node-diameter": `${nodeDiameter(tag.recordCount)}px`,
     "--node-opacity":
       tag.recordCount === 0 ? "0.56" : tag.approval === "candidate" ? "0.82" : "1",
@@ -781,7 +797,7 @@ function nodeDiameter(recordCount: number): number {
   return Math.min(90, Math.round(44 + Math.log2(recordCount + 1) * 12));
 }
 
-function membraneDiameter(
+function bubbleDiameter(
   recordCount: number,
   renderBudget: TagFieldRenderBudget,
 ): number {
@@ -813,10 +829,13 @@ function shouldHideNodeLabel(
   return stableHash(id) % stride !== 0;
 }
 
-function stableNodeColor(id: string): string {
-  const palette = ["#39c6ff", "#28e2e8", "#7e74ff", "#aa6cff", "#21c7ad", "#ff986d"];
+function stableNodeColor(id: string, theme: AppTheme): string {
+  const palette = theme === "scifi"
+    ? ["#39c6ff", "#28e2e8", "#7e74ff", "#aa6cff", "#21c7ad", "#ff986d"]
+    : ["#f39bb4", "#c6b5f3", "#b8ddbd", "#ffe29b", "#b8d8f3"];
+  const hashKey = theme === "scifi" ? id : `${id}:color`;
 
-  return palette[stableHash(id) % palette.length] ?? palette[0]!;
+  return palette[stableHash(hashKey) % palette.length] ?? palette[0]!;
 }
 
 function stableHash(value: string): number {
@@ -885,38 +904,67 @@ function createWebGlTagField(
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(width, height, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(0x00030b, 1);
+  const sciFi = options.theme === "scifi";
+  const fieldBackground = sciFi ? 0x00030b : 0xfff8fb;
+
+  renderer.setClearColor(fieldBackground, 1);
   camera.position.set(0, 0, runtimeCamera.distance);
   camera.lookAt(0, 0, 0);
   nodeGroup.rotation.set(runtimeCamera.pitch, runtimeCamera.yaw, 0.02);
-  scene.fog = new THREE.FogExp2(0x00030b, 0.085);
+  scene.fog = new THREE.FogExp2(fieldBackground, 0.085);
   scene.add(staticLayer, nodeGroup);
 
-  const starField = createStarField(options.renderBudget.glowTextureSize);
-  const dustField = createDustField(options.renderBudget.glowTextureSize);
-  const membraneField = createTagMembraneField(
-    tags.map((tag) => ({
-      candidate: tag.approval === "candidate",
-      color: stableNodeColor(tag.id),
-      diameter: membraneDiameter(tag.recordCount, options.renderBudget),
-      id: tag.id,
-      opacity:
-        tag.recordCount === 0
-          ? 0.5
-          : tag.approval === "candidate"
-            ? 0.82
-            : 1,
-      phase: stableUnit(`${tag.id}:membrane-phase`) * Math.PI * 2,
-      position: stableWorldPosition(tag.id),
-    })),
-    runtimeCamera.distance,
-    Math.min(window.devicePixelRatio || 1, 2),
+  const ambientDots = createAmbientDotField(
+    options.renderBudget.glowTextureSize,
+    options.theme,
   );
+  const ambientDepth = createAmbientDepthField(
+    options.renderBudget.glowTextureSize,
+    options.theme,
+  );
+  const nodeField = sciFi
+    ? createTagMembraneField(
+        tags.map((tag) => ({
+          candidate: tag.approval === "candidate",
+          color: stableNodeColor(tag.id, options.theme),
+          diameter: bubbleDiameter(tag.recordCount, options.renderBudget),
+          id: tag.id,
+          opacity:
+            tag.recordCount === 0
+              ? 0.5
+              : tag.approval === "candidate"
+                ? 0.82
+                : 1,
+          phase: stableUnit(`${tag.id}:membrane-phase`) * Math.PI * 2,
+          position: stableWorldPosition(tag.id),
+        })),
+        runtimeCamera.distance,
+        Math.min(window.devicePixelRatio || 1, 2),
+      )
+    : createTagBubbleField(
+        tags.map((tag) => ({
+          candidate: tag.approval === "candidate",
+          color: stableNodeColor(tag.id, options.theme),
+          diameter: bubbleDiameter(tag.recordCount, options.renderBudget),
+          id: tag.id,
+          opacity:
+            tag.recordCount === 0
+              ? 0.5
+              : tag.approval === "candidate"
+                ? 0.82
+                : 1,
+          position: stableWorldPosition(tag.id),
+        })),
+        runtimeCamera.distance,
+        Math.min(window.devicePixelRatio || 1, 2),
+      );
 
-  staticLayer.add(starField, dustField);
-  nodeGroup.add(membraneField.points);
+  staticLayer.add(ambientDots, ambientDepth);
+  nodeGroup.add(nodeField.points);
 
-  const signalTraces = createSignalTraces(tags, options.renderBudget);
+  const signalTraces = sciFi
+    ? createSignalTraces(tags, options.renderBudget)
+    : [];
 
   for (const trace of signalTraces) {
     nodeGroup.add(trace.line, trace.pulse);
@@ -934,7 +982,7 @@ function createWebGlTagField(
     height = nextHeight;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height, false);
-    membraneField.setViewport(
+    nodeField.setViewport(
       runtimeCamera.distance,
       Math.min(window.devicePixelRatio || 1, 2),
     );
@@ -995,7 +1043,7 @@ function createWebGlTagField(
     nodeGroup.rotation.set(runtimeCamera.pitch, runtimeCamera.yaw, 0.02);
     camera.position.z = runtimeCamera.distance;
     camera.updateProjectionMatrix();
-    membraneField.setViewport(
+    nodeField.setViewport(
       runtimeCamera.distance,
       Math.min(window.devicePixelRatio || 1, 2),
     );
@@ -1048,10 +1096,10 @@ function createWebGlTagField(
     }
 
     if (!options.reducedMotion) {
-      starField.rotation.y -= deltaSeconds * 0.0025;
-      dustField.rotation.y += deltaSeconds * 0.004;
+      ambientDots.rotation.y -= deltaSeconds * (sciFi ? 0.0025 : 0.0018);
+      ambientDepth.rotation.y += deltaSeconds * (sciFi ? 0.004 : 0.0028);
 
-      if (shouldAnimateField) {
+      if (sciFi && shouldAnimateField) {
         signalTraces.forEach((trace, index) => {
           const material = trace.line.material as THREE.LineBasicMaterial;
           const phase = (now / 8_000 + index * 0.27) % 1;
@@ -1070,13 +1118,13 @@ function createWebGlTagField(
             position.needsUpdate = true;
           }
         });
-      } else {
+      } else if (sciFi) {
         for (const trace of signalTraces) {
           trace.pulse.visible = false;
           (trace.line.material as THREE.LineBasicMaterial).opacity = 0.22;
         }
       }
-    } else {
+    } else if (sciFi) {
       for (const trace of signalTraces) {
         trace.pulse.visible = false;
         (trace.line.material as THREE.LineBasicMaterial).opacity = 0.22;
@@ -1122,7 +1170,7 @@ function createWebGlTagField(
       renderer.dispose();
     },
     focusTag(id) {
-      membraneField.setFocusedTag(id);
+      nodeField.setFocusedTag(id);
       const point = stableWorldPosition(id);
       const horizontal = Math.hypot(point.x, point.z);
       const target = clampCamera({
@@ -1154,12 +1202,15 @@ function createWebGlTagField(
       }
     },
     setFocusedTag(id) {
-      membraneField.setFocusedTag(id);
+      nodeField.setFocusedTag(id);
     },
   };
 }
 
-function createStarField(glowTextureSize: number): THREE.Points {
+function createAmbientDotField(
+  glowTextureSize: number,
+  theme: AppTheme,
+): THREE.Points {
   const count = 420;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
@@ -1172,7 +1223,19 @@ function createStarField(glowTextureSize: number): THREE.Points {
     positions[index * 3 + 1] =
       ((((stableHash(`star-y:${index}`) % 10_000) / 10_000) - 0.5) * 9.5);
     positions[index * 3 + 2] = -2 - depth * 14;
-    color.set(index % 11 === 0 ? 0x6b63ff : index % 7 === 0 ? 0x18c7d8 : 0x3f9ee8);
+    color.set(
+      theme === "scifi"
+        ? index % 11 === 0
+          ? 0x6b63ff
+          : index % 7 === 0
+            ? 0x18c7d8
+            : 0x3f9ee8
+        : index % 11 === 0
+          ? 0xc6b5f3
+          : index % 7 === 0
+            ? 0xb8ddbd
+            : 0xf39bb4,
+    );
     colors[index * 3] = color.r;
     colors[index * 3 + 1] = color.g;
     colors[index * 3 + 2] = color.b;
@@ -1187,19 +1250,24 @@ function createStarField(glowTextureSize: number): THREE.Points {
     geometry,
     new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.052,
+      size: theme === "scifi" ? 0.052 : 0.045,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.74,
+      opacity: theme === "scifi" ? 0.74 : 0.42,
       map: createGlowTexture(glowTextureSize),
       vertexColors: true,
-      blending: THREE.AdditiveBlending,
+      blending: theme === "scifi"
+        ? THREE.AdditiveBlending
+        : THREE.NormalBlending,
       depthWrite: false,
     }),
   );
 }
 
-function createDustField(glowTextureSize: number): THREE.Points {
+function createAmbientDepthField(
+  glowTextureSize: number,
+  theme: AppTheme,
+): THREE.Points {
   const count = 96;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
@@ -1213,7 +1281,19 @@ function createDustField(glowTextureSize: number): THREE.Points {
     positions[index * 3] = ((xSeed % 10_000) / 10_000 - 0.5) * 13;
     positions[index * 3 + 1] = ((ySeed % 10_000) / 10_000 - 0.5) * 8;
     positions[index * 3 + 2] = -1 - ((zSeed % 10_000) / 10_000) * 10;
-    color.set(index % 9 === 0 ? 0x8168ff : index % 6 === 0 ? 0x19d2d5 : 0x238ed6);
+    color.set(
+      theme === "scifi"
+        ? index % 9 === 0
+          ? 0x8168ff
+          : index % 6 === 0
+            ? 0x19d2d5
+            : 0x238ed6
+        : index % 9 === 0
+          ? 0xffe29b
+          : index % 6 === 0
+            ? 0xb8d8f3
+            : 0xc6b5f3,
+    );
     colors[index * 3] = color.r;
     colors[index * 3 + 1] = color.g;
     colors[index * 3 + 2] = color.b;
@@ -1231,10 +1311,12 @@ function createDustField(glowTextureSize: number): THREE.Points {
       size: 0.18,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.34,
+      opacity: theme === "scifi" ? 0.34 : 0.18,
       map: createGlowTexture(glowTextureSize),
       vertexColors: true,
-      blending: THREE.AdditiveBlending,
+      blending: theme === "scifi"
+        ? THREE.AdditiveBlending
+        : THREE.NormalBlending,
       depthWrite: false,
     }),
   );
@@ -1333,7 +1415,6 @@ function createSignalTraces(
 
     line.renderOrder = 2;
     pulse.renderOrder = 3;
-
     traces.push({ curve, line, pulse });
   }
 

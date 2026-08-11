@@ -1,6 +1,6 @@
 /*
  * THESIS: The atlas is a compact linguistic index, not a field of repeated decorative orbs.
- * OWN-WORLD: Equal paper cards, sharp typographic counts, and one 480px inspection drawer.
+ * OWN-WORLD: Equal theme-responsive paper cards, sharp typographic counts, and one 480px inspection drawer.
  * STORY: The user scans the vocabulary, selects one term, and manages its record-level footprint in place.
  * FIRST VIEWPORT: 60px navigation, five equal card columns, then a non-modal push drawer on selection.
  */
@@ -516,7 +516,7 @@ export function TagsPage() {
         <main aria-label="标签图鉴" className="tag-atlas-main">
           <header className="tag-atlas-heading">
             <div>
-              <p>VOCABULARY INDEX</p>
+              <p>个人词汇</p>
               <h1>标签图鉴</h1>
             </div>
             <div className="tag-atlas-heading-actions">
