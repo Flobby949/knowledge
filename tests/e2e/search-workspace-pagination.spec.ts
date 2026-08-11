@@ -35,7 +35,7 @@ test.describe("search snapshot workspace", () => {
       throw new Error("search fixtures must return their shared tag");
     }
 
-    await page.goto(appUrl("/records"));
+    await page.goto(appUrl("/"));
 
     const searchRequests: string[] = [];
 
@@ -47,15 +47,15 @@ test.describe("search snapshot workspace", () => {
       }
     });
 
-    const globalSearch = page.getByRole("search", { name: "全局搜索" });
-    const searchInput = globalSearch.getByRole("searchbox", {
-      name: "定位标签或搜索记录",
-    });
+    const searchInput = page
+      .getByRole("main", { name: "首页" })
+      .getByRole("search", { name: "首页搜索" })
+      .getByRole("searchbox", { name: "定位标签或搜索记录" });
 
     await searchInput.fill(marker);
     await page.waitForTimeout(180);
     expect(searchRequests).toHaveLength(0);
-    await expect(page).toHaveURL(appUrl("/records"));
+    await expect(page).toHaveURL(appUrl("/"));
 
     await searchInput.press("Enter");
     await expect(page).toHaveURL(searchUrl({ query: marker }));

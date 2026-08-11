@@ -29,12 +29,12 @@ test.describe("keyword search and record detail drawer", () => {
       `${missTitle}\n这条记录使用完全不同的检索词。`,
       `未命中标签 ${marker}`,
     );
-    await page.goto(appUrl("/records"));
+    await page.goto(appUrl("/"));
 
-    const globalSearch = page.getByRole("search", { name: "全局搜索" });
-    const searchInput = globalSearch.getByRole("searchbox", {
-      name: "定位标签或搜索记录",
-    });
+    const searchInput = page
+      .getByRole("main", { name: "首页" })
+      .getByRole("search", { name: "首页搜索" })
+      .getByRole("searchbox", { name: "定位标签或搜索记录" });
 
     await searchInput.fill(keyword);
     await searchInput.press("Enter");

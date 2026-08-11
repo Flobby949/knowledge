@@ -594,6 +594,20 @@ export async function listConceptCandidateScans(
   return body.items;
 }
 
+export async function runFullConceptDiscovery(): Promise<{
+  coveredCount: number;
+  enqueuedCount: number;
+}> {
+  const response = await fetch("/api/v1/concept-candidate-discovery/full", {
+    method: "POST",
+  });
+
+  return parseConceptResponse<{
+    coveredCount: number;
+    enqueuedCount: number;
+  }>(response);
+}
+
 export async function retryConceptCandidateScan(
   id: string,
 ): Promise<ConceptCandidateScan> {

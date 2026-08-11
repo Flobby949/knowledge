@@ -122,21 +122,6 @@ body {
   stroke: currentColor;
 }
 
-.workspace-navigation .global-search {
-  top: 13px;
-  left: 48%;
-  width: min(580px, 42vw);
-  height: 46px;
-  background: #f3f7fd;
-  border-color: #cdd9e9;
-}
-
-.workspace-navigation .global-search:focus-within {
-  background: #fff;
-  border-color: var(--workspace-accent);
-  box-shadow: 0 0 0 3px rgb(0 95 249 / 10%);
-}
-
 .workspace-navigation .primary-button {
   min-height: 44px;
   color: #fff;

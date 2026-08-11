@@ -223,14 +223,14 @@ test.describe("Mode B review workspace", () => {
     await expect(emptyState).toContainText("暂无待审查记录");
     await expect(workspace.getByRole("article")).toHaveCount(0);
 
-    await submitGlobalSearch(page, correctedTitle);
+    await submitHomeSearch(page, correctedTitle);
 
     const resultStage = page.getByRole("region", { name: "搜索结果" });
     const confirmedResult = resultStage.getByText(myTag, { exact: true });
 
     await expect(confirmedResult).toBeVisible();
 
-    await submitGlobalSearch(page, rejectedTitle);
+    await submitHomeSearch(page, rejectedTitle);
 
     await expect(
       page
@@ -520,7 +520,7 @@ async function expectSearchMembership(
   expect(includesRecord).toBe(expected);
 }
 
-async function submitGlobalSearch(page: Page, query: string): Promise<void> {
+async function submitHomeSearch(page: Page, query: string): Promise<void> {
   const response = page.waitForResponse((candidate) => {
     const url = new URL(candidate.url());
 
@@ -530,12 +530,14 @@ async function submitGlobalSearch(page: Page, query: string): Promise<void> {
       url.searchParams.get("q") === query
     );
   });
-  const search = page
+  await page
     .getByRole("navigation", { name: "主导航" })
-    .getByRole("search", { name: "全局搜索" });
-  const input = search.getByRole("searchbox", {
-    name: "定位标签或搜索记录",
-  });
+    .getByRole("link", { name: "首页", exact: true })
+    .click();
+  const input = page
+    .getByRole("main", { name: "首页" })
+    .getByRole("search", { name: "首页搜索" })
+    .getByRole("searchbox", { name: "定位标签或搜索记录" });
 
   await input.fill(query);
   await input.press("Enter");

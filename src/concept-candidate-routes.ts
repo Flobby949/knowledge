@@ -123,6 +123,8 @@ export function registerConceptCandidateRoutes(
   } = options;
   const backgroundWork = new Set<Promise<void>>();
   const scheduledAnalyses = new Set<string>();
+  let candidateScanTail = Promise.resolve();
+  let discoveryTail = Promise.resolve();
   const track = <T>(operation: Promise<T>): Promise<T> => {
     const settled = operation.then(
       () => undefined,
@@ -133,26 +135,23 @@ export function registerConceptCandidateRoutes(
     void settled.finally(() => backgroundWork.delete(settled));
     return operation;
   };
-  const runBackground = (
+  const queueSerialBackground = (
+    previous: Promise<void>,
     operation: () => Promise<void>,
     context: Record<string, unknown>,
     message: string,
-  ) => {
-    let run: () => void = () => undefined;
-    const pending = new Promise<void>((resolve) => {
-      run = () => {
-        void operation()
-          .catch((error) => app.log.error({ ...context, err: error }, message))
-          .finally(resolve);
-      };
-    });
+  ): Promise<void> => {
+    const pending = previous
+      .then(operation)
+      .catch((error) => app.log.error({ ...context, err: error }, message));
 
     backgroundWork.add(pending);
     void pending.finally(() => backgroundWork.delete(pending));
-    setImmediate(run);
+    return pending;
   };
   const schedule = (scanId: string) => {
-    runBackground(
+    candidateScanTail = queueSerialBackground(
+      candidateScanTail,
       () =>
         processConceptCandidateScan({
           credentialSecret,
@@ -171,7 +170,8 @@ export function registerConceptCandidateRoutes(
     }
 
     scheduledAnalyses.add(analysisRevisionId);
-    runBackground(
+    discoveryTail = queueSerialBackground(
+      discoveryTail,
       async () => {
         try {
           await processAutomaticConceptDiscovery({
@@ -222,6 +222,57 @@ export function registerConceptCandidateRoutes(
         WHERE status IN ('QUEUED', 'RUNNING')`,
     );
     await schedulePending();
+  });
+
+  app.post("/api/v1/concept-candidate-discovery/full", async (_request, reply) => {
+    const configuration = await readActiveTextConfiguration(pool);
+
+    if (!configuration) {
+      return reply.code(409).send({
+        error: {
+          code: "MODEL_CONFIG_REQUIRED",
+          message: "请先启用完整模型配置，再执行全量 Concept 发现。",
+        },
+      });
+    }
+
+    const result = await pool.query<{
+      covered_count: number;
+      enqueued_count: number;
+    }>(
+      `WITH eligible AS MATERIALIZED (
+         SELECT DISTINCT analysis.id
+           FROM ai_analysis_revisions AS analysis
+           INNER JOIN records AS record
+             ON record.current_analysis_revision_id = analysis.id
+            AND record.archived_at IS NULL
+          WHERE analysis.status = 'ACTIVE'
+       ), inserted AS (
+         INSERT INTO concept_candidate_discovery_queue (analysis_revision_id)
+         SELECT eligible.id
+           FROM eligible
+          WHERE NOT EXISTS (
+            SELECT 1
+              FROM concept_candidate_scans AS scan
+             WHERE scan.trigger_analysis_revision_id = eligible.id
+          )
+         ON CONFLICT (analysis_revision_id) DO NOTHING
+         RETURNING analysis_revision_id
+       )
+       SELECT (SELECT count(*)::integer FROM inserted) AS enqueued_count,
+              ((SELECT count(*) FROM eligible) -
+               (SELECT count(*) FROM inserted))::integer AS covered_count`,
+    );
+    const counts = result.rows[0] ?? {
+      covered_count: 0,
+      enqueued_count: 0,
+    };
+
+    await schedulePending();
+    return reply.code(202).send({
+      coveredCount: counts.covered_count,
+      enqueuedCount: counts.enqueued_count,
+    });
   });
 
   app.post<{ Body: unknown }>(
@@ -590,7 +641,12 @@ async function processAutomaticConceptDiscovery(options: {
   ]);
   const seedIds = seedResult.rows.map(({ id }) => id);
 
-  if (!configuration || seedIds.length === 0) {
+  if (!configuration) {
+    return;
+  }
+
+  if (seedIds.length === 0) {
+    await markConceptDiscoveryProcessed(pool, analysisRevisionId);
     return;
   }
 

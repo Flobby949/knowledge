@@ -6,6 +6,7 @@ import {
   listConceptCandidateScans,
   rejectConceptCandidate,
   retryConceptCandidateScan,
+  runFullConceptDiscovery,
   type ConceptCandidateScan,
 } from "./api.js";
 import "./concept-candidates-panel.css";
@@ -24,6 +25,7 @@ export function ConceptCandidatesPanel({
   const [scans, setScans] = useState<ConceptCandidateScan[]>([]);
   const [selectedId, setSelectedId] = useState(initialScanId);
   const [loading, setLoading] = useState(true);
+  const [followingFullDiscovery, setFollowingFullDiscovery] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -68,7 +70,7 @@ export function ConceptCandidatesPanel({
   );
 
   useEffect(() => {
-    if (!processing) {
+    if (!processing && !followingFullDiscovery) {
       return;
     }
 
@@ -81,7 +83,20 @@ export function ConceptCandidatesPanel({
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [processing, refresh]);
+  }, [followingFullDiscovery, processing, refresh]);
+
+  useEffect(() => {
+    if (!followingFullDiscovery) {
+      return;
+    }
+
+    const timeout = window.setTimeout(
+      () => setFollowingFullDiscovery(false),
+      30_000,
+    );
+
+    return () => window.clearTimeout(timeout);
+  }, [followingFullDiscovery]);
 
   const selected = scans.find((scan) => scan.id === selectedId) ?? null;
 
@@ -108,8 +123,55 @@ export function ConceptCandidatesPanel({
     }
   }
 
+  async function discoverAll() {
+    setBusy("full-discovery");
+    setError("");
+    setNotice("");
+
+    try {
+      const result = await runFullConceptDiscovery();
+
+      if (result.enqueuedCount === 0) {
+        setFollowingFullDiscovery(false);
+        setNotice(
+          `全部 ${result.coveredCount} 份生效分析都已覆盖，没有重复登记。`,
+        );
+      } else {
+        setFollowingFullDiscovery(true);
+        setNotice(
+          `已登记 ${result.enqueuedCount} 份生效分析，另有 ` +
+            `${result.coveredCount} 份已覆盖；系统会按顺序生成待确认候选。`,
+        );
+      }
+
+      await refresh();
+    } catch (caught) {
+      setError(messageFrom(caught, "全量 Concept 发现暂时无法启动。"));
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <div className="candidate-workbench">
+      <section
+        aria-label="全量 Concept 发现"
+        className="candidate-discovery-command"
+      >
+        <div>
+          <strong>全量发现历史知识</strong>
+          <p>只生成待确认候选，不直接创建 Concept，无需选择范围。</p>
+        </div>
+        <button
+          className="secondary-button"
+          disabled={busy === "full-discovery"}
+          onClick={() => void discoverAll()}
+          type="button"
+        >
+          {busy === "full-discovery" ? "正在登记…" : "全量发现历史知识"}
+        </button>
+      </section>
+
       <aside aria-label="Concept Candidate 扫描记录" className="candidate-catalog">
         <header>
           <div>

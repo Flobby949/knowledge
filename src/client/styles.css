@@ -172,44 +172,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   box-shadow: 0 0 7px #39c6ff;
 }
 
-.global-search {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  display: flex;
-  align-items: center;
-  width: 460px;
-  height: 44px;
-  padding: 0 14px;
-  transform: translateX(-50%);
-  background: #fffafd;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.home-navigation .global-search {
-  width: 420px;
-}
-
-.global-search input, .toolbar-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
-.global-search input::placeholder, .toolbar-search input::placeholder { color: #806a78; }
-.global-search-suggestions {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  width: 100%;
-  padding: 8px;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  box-shadow: 0 12px 28px rgb(111 61 82 / 12%);
-}
-.global-search-suggestions > div + div { padding-top: 7px; margin-top: 7px; border-top: 1px solid var(--border); }
-.global-search-suggestions p { margin: 0 8px 4px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
-.global-search-suggestions button { display: block; width: 100%; min-height: 34px; padding: 6px 8px; overflow: hidden; border: 0; border-radius: 5px; background: transparent; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.global-search-suggestions button:hover, .global-search-suggestions button:focus-visible { background: var(--signal-soft); }
-.global-search-suggestions span { display: block; padding: 6px 8px; color: var(--muted); font-size: 13px; }
+.toolbar-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
+.toolbar-search input::placeholder { color: #806a78; }
 .search-icon { flex: 0 0 auto; width: 15px; height: 15px; margin-right: 12px; border: 1.5px solid #755d6c; border-radius: 50%; }
 .search-icon::after { display: block; width: 6px; height: 1.5px; margin: 11px 0 0 11px; transform: rotate(45deg); background: #755d6c; content: ""; }
 
@@ -496,8 +460,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 @media (max-width: 1350px) {
   .app-navigation { padding-inline: 24px; }
-  .global-search { width: 340px; }
-  .home-navigation .global-search { left: 53%; width: 300px; }
   .nav-primary > a:not(.brand-mark), .settings-link { min-width: 62px; padding-inline: 10px; }
   .records-toolbar { width: calc(100% - 48px); margin-inline: 24px; grid-template-columns: minmax(0, 1fr) 108px 120px 120px 142px; gap: 12px; }
   .records-masonry { width: calc(100% - 48px); margin-inline: 24px; }

@@ -2,7 +2,7 @@
  * THESIS: Inner pages are a knowledge workbench, not a gallery of bordered cards.
  * OWN-WORLD: A 76px signal rail, 72px command bar, cloud-paper fields, berry ink, and numbered concentric knowledge markers.
  * STORY: The user orients once, reads the primary material, reveals proof only when needed, and acts without losing context.
- * FIRST VIEWPORT: Stable rail at left, search and global actions above, then a page-specific canvas whose first content begins immediately below.
+ * FIRST VIEWPORT: Stable rail at left, global actions above, then a page-specific canvas whose first content begins immediately below.
  * FORM: Knowledge-first verification canvas, ranked fifth and chosen as reading-first staging; direction seed ac559a1b.
  */
 
@@ -170,36 +170,6 @@ html[data-theme="scifi"] {
   white-space: nowrap;
 }
 
-.workspace-navigation .global-search {
-  top: 13px;
-  left: 48%;
-  width: min(580px, 42vw);
-  height: 46px;
-  padding-inline: 16px;
-  color: var(--workspace-ink);
-  background: color-mix(in srgb, var(--workspace-panel) 58%, var(--workspace-canvas));
-  border-color: var(--workspace-line);
-  border-radius: 10px;
-}
-
-.workspace-navigation .global-search:focus-within {
-  background: var(--workspace-canvas);
-  border-color: var(--workspace-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--workspace-accent) 11%, transparent);
-}
-
-.workspace-navigation .global-search input::placeholder {
-  color: color-mix(in srgb, var(--workspace-muted) 84%, var(--workspace-canvas));
-}
-
-.workspace-navigation .search-icon {
-  border-color: var(--workspace-muted);
-}
-
-.workspace-navigation .search-icon::after {
-  background: var(--workspace-muted);
-}
-
 .workspace-navigation .nav-actions {
   gap: 10px;
   margin-left: auto;
@@ -235,11 +205,6 @@ html[data-theme="scifi"] {
   background: var(--workspace-canvas);
   border-color: var(--workspace-line);
   border-radius: 9px;
-}
-
-.global-search-suggestions {
-  border-color: var(--workspace-line-strong);
-  box-shadow: var(--workspace-shadow);
 }
 
 .records-main,
@@ -1237,11 +1202,6 @@ html[data-theme="scifi"] {
 }
 
 @media (max-width: 1400px) {
-  .workspace-navigation .global-search {
-    left: 44%;
-    width: min(500px, 40vw);
-  }
-
   .record-source-pane,
   .review-source-pane {
     padding-inline: 46px;

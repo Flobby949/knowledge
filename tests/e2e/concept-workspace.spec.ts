@@ -109,6 +109,24 @@ test.describe("Concept workspace", () => {
     await expect(
       main.getByRole("form", { name: "发起 Concept Candidate 扫描" }),
     ).toHaveCount(0);
+    await expect(
+      main.getByText("只生成待确认候选，不直接创建 Concept，无需选择范围。"),
+    ).toBeVisible();
+
+    const fullDiscovery = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          "/api/v1/concept-candidate-discovery/full",
+    );
+
+    await main
+      .getByRole("button", { name: "全量发现历史知识" })
+      .click();
+    expect((await fullDiscovery).status()).toBe(202);
+    await expect(
+      main.getByText("全部 1 份生效分析都已覆盖，没有重复登记。"),
+    ).toBeVisible();
 
     const pulse = page.getByRole("button", { name: /AI 任务：1 项需关注/u });
 

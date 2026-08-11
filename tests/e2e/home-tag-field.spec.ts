@@ -46,9 +46,15 @@ test.describe("home bubble tag field", () => {
     await expect(firstRecordActions).toHaveCount(2);
     await expect(
       page
-        .getByRole("navigation", { name: "主导航" })
+        .getByRole("main", { name: "首页" })
+        .getByRole("search", { name: "首页搜索" })
         .getByRole("searchbox", { name: "定位标签或搜索记录" }),
     ).toBeEnabled();
+    await expect(
+      page
+        .getByRole("navigation", { name: "主导航" })
+        .getByRole("search"),
+    ).toHaveCount(0);
 
     for (let index = 0; index < 2; index += 1) {
       await firstRecordActions.nth(index).click();

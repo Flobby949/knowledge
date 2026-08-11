@@ -151,10 +151,15 @@ test.describe("settings data management", () => {
     ).toContainText("健康");
     await expect(page).toHaveURL(appUrl("/settings"));
 
-    const globalSearch = page.getByRole("search", { name: "全局搜索" });
-    const searchInput = globalSearch.getByRole("searchbox", {
-      name: "定位标签或搜索记录",
-    });
+    await page
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("link", { name: "首页", exact: true })
+      .click();
+
+    const searchInput = page
+      .getByRole("main", { name: "首页" })
+      .getByRole("search", { name: "首页搜索" })
+      .getByRole("searchbox", { name: "定位标签或搜索记录" });
 
     await searchInput.fill(keyword);
     await searchInput.press("Enter");

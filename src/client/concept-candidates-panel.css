@@ -1,11 +1,46 @@
 .candidate-workbench {
   display: grid;
   grid-template-columns: 324px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 680px;
   overflow: hidden;
   background: var(--workspace-canvas);
   border: 1px solid var(--workspace-line-strong);
   border-radius: 12px;
+}
+
+.candidate-discovery-command {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 72px;
+  padding: 13px 16px;
+  background: var(--workspace-panel);
+  border-bottom: 1px solid var(--workspace-line-strong);
+}
+
+.candidate-discovery-command > div {
+  display: grid;
+  gap: 3px;
+}
+
+.candidate-discovery-command strong {
+  font-size: 13px;
+}
+
+.candidate-discovery-command p {
+  margin: 0;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.candidate-discovery-command .secondary-button {
+  min-width: 154px;
+  min-height: 38px;
+  flex: 0 0 auto;
 }
 
 .candidate-catalog {

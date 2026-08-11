@@ -8,11 +8,9 @@ import {
 import {
   Link,
   useLocation,
-  useNavigate,
   useSearchParams,
 } from "react-router-dom";
 
-import { normalizeTagName } from "../domain/tag-name.js";
 import {
   getTagField,
   listRecords,
@@ -756,59 +754,14 @@ export function AppNavigation({
 }) {
   const { theme } = useTheme();
   const location = useLocation();
-  const navigate = useNavigate();
   const darkNavigation = theme === "scifi" && location.pathname === "/";
   const workspaceNavigation = location.pathname !== "/";
-  const currentQuery = new URLSearchParams(location.search).get("q") ?? "";
-  const [query, setQuery] = useState(currentQuery);
-  const [tags, setTags] = useState<TagFieldItem[]>([]);
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-  const searchForm = useRef<HTMLFormElement>(null);
-  const normalizedQuery = normalizeTagName(query);
-  const matchingTags = normalizedQuery
-    ? tags
-      .filter((tag) => normalizeTagName(tag.name).includes(normalizedQuery))
-      .slice(0, 8)
-    : [];
-
-  useEffect(() => {
-    setQuery(currentQuery);
-    setSuggestionsOpen(false);
-  }, [currentQuery, location.pathname]);
-
-  useEffect(() => {
-    let active = true;
-
-    void getTagField()
-      .then((items) => {
-        if (active) {
-          setTags(items);
-        }
-      })
-      .catch(() => undefined);
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  function submitRecordSearch(value: string) {
-    const submitted = value.trim();
-
-    if (!submitted) {
-      return;
-    }
-
-    setSuggestionsOpen(false);
-    const search = new URLSearchParams({ q: submitted });
-    void navigate(`/search?${search.toString()}`);
-  }
 
   return (
-    <header className={`app-header ${workspaceNavigation ? "is-workspace" : "is-home"}`}>
+    <header className={workspaceNavigation ? "app-header is-workspace" : "app-header"}>
       <nav
         aria-label="主导航"
-        className={`app-navigation ${darkNavigation ? "dark" : "light"} ${workspaceNavigation ? "workspace-navigation" : "home-navigation"}`}
+        className={`app-navigation ${darkNavigation ? "dark" : "light"}${workspaceNavigation ? " workspace-navigation" : ""}`}
         data-testid="app-nav"
       >
         <div className="nav-primary">
@@ -841,78 +794,6 @@ export function AppNavigation({
             <span className="nav-link-label">发现</span>
           </Link>
         </div>
-
-        <form
-          aria-label="全局搜索"
-          className="global-search"
-          onBlur={(event) => {
-            if (
-              event.relatedTarget instanceof Node &&
-              searchForm.current?.contains(event.relatedTarget)
-            ) {
-              return;
-            }
-
-            setSuggestionsOpen(false);
-          }}
-          onFocus={() => setSuggestionsOpen(Boolean(query.trim()))}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setSuggestionsOpen(false);
-            }
-          }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitRecordSearch(query);
-          }}
-          ref={searchForm}
-          role="search"
-        >
-          <span aria-hidden="true" className="search-icon" />
-          <label className="visually-hidden" htmlFor="global-search-input">定位标签或搜索记录</label>
-          <input
-            id="global-search-input"
-            name="q"
-            onChange={(event) => {
-              setQuery(event.currentTarget.value);
-              setSuggestionsOpen(Boolean(event.currentTarget.value.trim()));
-            }}
-            placeholder="定位标签或搜索记录"
-            type="search"
-            value={query}
-          />
-          {suggestionsOpen && query.trim() ? (
-            <div className="global-search-suggestions">
-              <div aria-label="定位标签" role="group">
-                <p aria-hidden="true">定位标签</p>
-                {matchingTags.length > 0 ? matchingTags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    onClick={() => {
-                      setSuggestionsOpen(false);
-                      const search = new URLSearchParams({ tag: tag.id });
-                      void navigate(`/?${search.toString()}`);
-                    }}
-                    role="option"
-                    type="button"
-                  >
-                    {tag.name}
-                  </button>
-                )) : <span>没有匹配标签</span>}
-              </div>
-              <div aria-label="搜索记录" role="group">
-                <p aria-hidden="true">搜索记录</p>
-                <button
-                  onClick={() => submitRecordSearch(query)}
-                  role="option"
-                  type="button"
-                >
-                  搜索记录“{query.trim()}”
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </form>
 
         <div className="nav-actions">
           <AiTaskPulse />
