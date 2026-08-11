@@ -142,7 +142,10 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
             { id: "tag-cache", name: "缓存" },
             { id: "tag-consistency", name: "一致性" },
           ],
-          text: "使用版本号避免旧缓存覆盖新值，并在写入后主动失效相关缓存。",
+          text: Array.from(
+            { length: 18 },
+            () => "使用版本号避免旧缓存覆盖新值，并在写入后主动失效相关缓存。",
+          ).join("\n\n"),
           textVersion: 1,
         },
         excludedItems: [],
@@ -272,7 +275,34 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
   await expect(
     recordDrawer.getByRole("link", { name: "打开完整记录" }),
   ).toHaveAttribute("href", `/records/${recordA}`);
-  await recordDrawer.getByRole("button", { name: "关闭记录预览" }).click();
+  const drawerCloseButton = recordDrawer.getByRole("button", {
+    name: "关闭记录预览",
+  });
+  const drawerScroll = recordDrawer.locator(".relation-drawer-scroll");
+  const closeTopBeforeScroll = await drawerCloseButton.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+
+  await recordDrawer.getByText("查看原始记录").click();
+  await drawerScroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  const closeTopAfterScroll = await drawerCloseButton.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+
+  expect(Math.abs(closeTopAfterScroll - closeTopBeforeScroll)).toBeLessThan(1);
+  await expect
+    .poll(() => drawerScroll.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+
+  const pageScrollBefore = await page.evaluate(() => window.scrollY);
+
+  await recordDrawer.getByRole("link", { name: "打开完整记录" }).hover();
+  await page.mouse.wheel(0, 1_200);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(pageScrollBefore);
+
+  await drawerCloseButton.click();
   await expect(recordDrawer).toBeHidden();
 
   await relationHistory

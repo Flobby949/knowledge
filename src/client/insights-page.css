@@ -1154,12 +1154,13 @@
 .relation-source-drawer {
   position: fixed;
   z-index: 60;
+  display: flex;
+  flex-direction: column;
   top: var(--workspace-command-height, 72px);
   right: 0;
   bottom: 0;
   width: min(460px, calc(100vw - var(--workspace-rail-width, 76px)));
-  padding: 24px 26px 32px;
-  overflow-y: auto;
+  overflow: hidden;
   color: var(--text);
   background: var(--workspace-canvas, var(--surface));
   border-left: 1px solid var(--workspace-line-strong, var(--border-strong));
@@ -1168,11 +1169,22 @@
 
 .relation-drawer-heading {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  padding-bottom: 20px;
+  padding: 24px 26px 20px;
+  background: var(--workspace-canvas, var(--surface));
   border-bottom: 1px solid var(--border);
+}
+
+.relation-drawer-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 26px 32px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
 }
 
 .relation-drawer-heading > div {
@@ -2380,7 +2392,8 @@
     grid-template-columns: minmax(0, 1fr) 66px minmax(0, 1fr);
   }
 
-  .relation-source-drawer {
+  .relation-drawer-heading,
+  .relation-drawer-scroll {
     padding-inline: 20px;
   }
 

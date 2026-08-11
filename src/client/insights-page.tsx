@@ -971,50 +971,52 @@ function RelationSourceDrawer({
         </button>
       </header>
 
-      <section className="relation-drawer-point">
-        <span>当前关联知识点</span>
-        <h3>{point.title}</h3>
-        <p>{point.body}</p>
-        {point.evidence.length > 0 ? (
-          <div className="relation-drawer-evidence">
-            <strong>引用依据</strong>
-            {point.evidence.map((evidence) => (
-              <blockquote key={evidence.id}>“{evidence.quote}”</blockquote>
-            ))}
-          </div>
-        ) : null}
-      </section>
+      <div className="relation-drawer-scroll">
+        <section className="relation-drawer-point">
+          <span>当前关联知识点</span>
+          <h3>{point.title}</h3>
+          <p>{point.body}</p>
+          {point.evidence.length > 0 ? (
+            <div className="relation-drawer-evidence">
+              <strong>引用依据</strong>
+              {point.evidence.map((evidence) => (
+                <blockquote key={evidence.id}>“{evidence.quote}”</blockquote>
+              ))}
+            </div>
+          ) : null}
+        </section>
 
-      <section className="relation-drawer-record">
-        <span>所属记录</span>
-        {!record && !recordError ? <p className="relation-drawer-loading">正在载入记录…</p> : null}
-        {recordError ? <p className="relation-drawer-error">记录预览暂时无法载入。</p> : null}
-        {record ? (
-          <>
-            <p className="relation-drawer-summary">
-              {record.presentation.summary ?? "这条记录还没有摘要。"}
-            </p>
-            {record.editable.myTags.length > 0 ? (
-              <div aria-label="记录标签" className="relation-drawer-tags">
-                {record.editable.myTags.map((tag) => (
-                  <span key={tag.id}>{tag.name}</span>
-                ))}
-              </div>
-            ) : null}
-            <details className="relation-drawer-original">
-              <summary>查看原始记录</summary>
-              <p>{record.editable.text}</p>
-            </details>
-          </>
-        ) : null}
-      </section>
+        <section className="relation-drawer-record">
+          <span>所属记录</span>
+          {!record && !recordError ? <p className="relation-drawer-loading">正在载入记录…</p> : null}
+          {recordError ? <p className="relation-drawer-error">记录预览暂时无法载入。</p> : null}
+          {record ? (
+            <>
+              <p className="relation-drawer-summary">
+                {record.presentation.summary ?? "这条记录还没有摘要。"}
+              </p>
+              {record.editable.myTags.length > 0 ? (
+                <div aria-label="记录标签" className="relation-drawer-tags">
+                  {record.editable.myTags.map((tag) => (
+                    <span key={tag.id}>{tag.name}</span>
+                  ))}
+                </div>
+              ) : null}
+              <details className="relation-drawer-original">
+                <summary>查看原始记录</summary>
+                <p>{record.editable.text}</p>
+              </details>
+            </>
+          ) : null}
+        </section>
 
-      <Link
-        className="relation-open-record"
-        to={`/records/${encodeURIComponent(point.recordId)}`}
-      >
-        打开完整记录 <span aria-hidden="true">→</span>
-      </Link>
+        <Link
+          className="relation-open-record"
+          to={`/records/${encodeURIComponent(point.recordId)}`}
+        >
+          打开完整记录 <span aria-hidden="true">→</span>
+        </Link>
+      </div>
     </aside>
   );
 }
