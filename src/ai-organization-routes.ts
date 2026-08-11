@@ -1819,7 +1819,7 @@ async function assignCandidateTags(
     }
 
     const existing = await client.query<{ id: string }>(
-      "SELECT id FROM tags WHERE normalized_name = $1",
+      "SELECT id FROM tags WHERE id = resolve_tag_name($1)",
       [normalizedName],
     );
     let tagId = existing.rows[0]?.id;

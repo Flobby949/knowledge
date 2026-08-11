@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 1,
+  formatVersion: 3,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -63,6 +63,23 @@ interface TagAssignmentSnapshotRow extends DomainRow {
   raw_label: string | null;
 }
 
+interface TagAliasSnapshotRow extends DomainRow {
+  id: string;
+  tag_id: string;
+  display_name: string;
+  normalized_name: string;
+  created_at: Timestamp;
+}
+
+interface TagMergeSnapshotRow extends DomainRow {
+  id: string;
+  operation_id: string;
+  source_tag_id: string;
+  target_tag_id: string;
+  created_at: Timestamp;
+  undone_at: Timestamp | null;
+}
+
 interface AnalysisSnapshotRow extends DomainRow {
   id: string;
   record_id: string;
@@ -117,17 +134,140 @@ interface OverviewCorrectionSnapshotRow extends DomainRow {
   updated_at: Timestamp;
 }
 
+interface DuplicateSuggestionSnapshotRow extends DomainRow {
+  id: string;
+  source_a_type: "KNOWLEDGE_POINT" | "ORIGINAL";
+  source_a_id: string;
+  source_a_record_id: string;
+  source_a_fingerprint: string;
+  source_b_type: "KNOWLEDGE_POINT" | "ORIGINAL";
+  source_b_id: string;
+  source_b_record_id: string;
+  source_b_fingerprint: string;
+  detection_kind: "EXACT" | "SEMANTIC";
+  similarity_score: number;
+  reason: string;
+  status: "ACCEPTED" | "PENDING_REVIEW" | "REJECTED" | "REMOVED";
+  primary_source_id: string | null;
+  configuration_version: number | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  decided_at: Timestamp | null;
+}
+
+interface DuplicateConsolidationSnapshotRow extends DomainRow {
+  id: string;
+  suggestion_id: string;
+  primary_source_id: string;
+  created_at: Timestamp;
+  removed_at: Timestamp | null;
+}
+
+interface RelationSuggestionSnapshotRow extends DomainRow {
+  id: string;
+  pair_key: string;
+  input_fingerprint: string;
+  source_knowledge_point_id: string;
+  target_knowledge_point_id: string;
+  source_content_fingerprint: string;
+  target_content_fingerprint: string;
+  relation_type: KnowledgeRelationSnapshotType;
+  description: string;
+  reason: string;
+  confidence: number;
+  model_configuration_version: number;
+  text_model: string;
+  status: "CONFIRMED" | "PENDING_REVIEW" | "REJECTED" | "REMOVED";
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  decided_at: Timestamp | null;
+}
+
+type KnowledgeRelationSnapshotType =
+  | "ANALOGY"
+  | "APPLIES"
+  | "CONTRASTS"
+  | "EXTENDS"
+  | "PREREQUISITE"
+  | "SIMILAR";
+
+interface RelationEvidenceSnapshotRow extends DomainRow {
+  suggestion_id: string;
+  evidence_span_id: string;
+  side: "SOURCE" | "TARGET";
+}
+
+interface KnowledgeRelationSnapshotRow extends DomainRow {
+  id: string;
+  suggestion_id: string;
+  source_knowledge_point_id: string;
+  target_knowledge_point_id: string;
+  relation_type: KnowledgeRelationSnapshotType;
+  description: string;
+  confirmed_at: Timestamp;
+  removed_at: Timestamp | null;
+}
+
+interface CoverageAnalysisSnapshotRow extends DomainRow {
+  id: string;
+  topic: string;
+  framework_summary: string;
+  caveat: string;
+  input_count: number;
+  model_configuration_version: number;
+  text_model: string;
+  created_at: Timestamp;
+}
+
+interface CoverageAnalysisPointSnapshotRow extends DomainRow {
+  analysis_id: string;
+  knowledge_point_id: string;
+  content_fingerprint: string;
+  position: number;
+}
+
+interface CoverageAnalysisItemSnapshotRow extends DomainRow {
+  id: string;
+  analysis_id: string;
+  kind: "COVERED" | "POSSIBLE_GAP";
+  position: number;
+  title: string;
+  assessment: string;
+  recommendation: string | null;
+}
+
+interface CoverageItemPointSnapshotRow extends DomainRow {
+  item_id: string;
+  knowledge_point_id: string;
+}
+
 interface DomainSnapshot {
-  formatVersion: 1;
+  formatVersion: 3;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
   tagAssignments: TagAssignmentSnapshotRow[];
+  tagAliases: TagAliasSnapshotRow[];
+  tagMerges: TagMergeSnapshotRow[];
   analyses: AnalysisSnapshotRow[];
   knowledgePoints: KnowledgePointSnapshotRow[];
   evidenceSpans: EvidenceSpanSnapshotRow[];
   corrections: CorrectionSnapshotRow[];
   overviewCorrections: OverviewCorrectionSnapshotRow[];
+  duplicateSuggestions: DuplicateSuggestionSnapshotRow[];
+  duplicateConsolidations: DuplicateConsolidationSnapshotRow[];
+  relationSuggestions: RelationSuggestionSnapshotRow[];
+  relationSuggestionEvidence: RelationEvidenceSnapshotRow[];
+  knowledgeRelations: KnowledgeRelationSnapshotRow[];
+  coverageAnalyses: CoverageAnalysisSnapshotRow[];
+  coverageAnalysisPoints: CoverageAnalysisPointSnapshotRow[];
+  coverageAnalysisItems: CoverageAnalysisItemSnapshotRow[];
+  coverageItemPoints: CoverageItemPointSnapshotRow[];
+}
+
+interface ParsedSnapshot {
+  snapshot: DomainSnapshot;
+  sourceFormatVersion: 1 | 2 | 3;
 }
 
 interface ExportRow {
@@ -219,10 +359,10 @@ export function registerDataTransferRoutes(
         return reply.code(422).send({ error: "Restore package is required" });
       }
 
-      let snapshot: DomainSnapshot;
+      let parsed: ParsedSnapshot;
 
       try {
-        snapshot = parseSnapshot(archive);
+        parsed = parseSnapshot(archive);
       } catch {
         return reply.code(422).send({
           error: {
@@ -239,10 +379,11 @@ export function registerDataTransferRoutes(
         `INSERT INTO restore_inspections
            (id, status, format_version, record_count, can_restore,
             blocking_reason, archive)
-         VALUES ($1, 'VALID', 1, $2, $3, $4, $5)`,
+         VALUES ($1, 'VALID', $2, $3, $4, $5, $6)`,
         [
           inspectionId,
-          snapshot.records.length,
+          parsed.sourceFormatVersion,
+          parsed.snapshot.records.length,
           canRestore,
           canRestore ? null : "INSTANCE_NOT_EMPTY",
           archive,
@@ -253,8 +394,8 @@ export function registerDataTransferRoutes(
         inspection: {
           id: inspectionId,
           status: "valid",
-          formatVersion: 1,
-          recordCount: snapshot.records.length,
+          formatVersion: parsed.sourceFormatVersion,
+          recordCount: parsed.snapshot.records.length,
           canRestore,
           ...(canRestore ? {} : { blockingReason: "INSTANCE_NOT_EMPTY" }),
         },
@@ -301,7 +442,7 @@ export function registerDataTransferRoutes(
           });
         }
 
-        const snapshot = parseSnapshot(inspection.archive);
+        const { snapshot } = parseSnapshot(inspection.archive);
 
         await restoreSnapshot(client, snapshot);
 
@@ -401,6 +542,12 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
     const tagAssignments = await client.query(
       "SELECT * FROM tag_assignments ORDER BY created_at, id",
     );
+    const tagAliases = await client.query(
+      "SELECT * FROM tag_aliases ORDER BY created_at, id",
+    );
+    const tagMerges = await client.query(
+      "SELECT * FROM tag_merges ORDER BY created_at, id",
+    );
     const analyses = await client.query(
       `SELECT id,
               record_id,
@@ -425,17 +572,61 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
     const overviewCorrections = await client.query(
       "SELECT * FROM record_overview_corrections ORDER BY record_id",
     );
+    const duplicateSuggestions = await client.query(
+      "SELECT * FROM duplicate_suggestions ORDER BY created_at, id",
+    );
+    const duplicateConsolidations = await client.query(
+      "SELECT * FROM duplicate_consolidations ORDER BY created_at, id",
+    );
+    const relationSuggestions = await client.query(
+      "SELECT * FROM relation_suggestions ORDER BY created_at, id",
+    );
+    const relationSuggestionEvidence = await client.query(
+      `SELECT *
+         FROM relation_suggestion_evidence
+        ORDER BY suggestion_id, side, evidence_span_id`,
+    );
+    const knowledgeRelations = await client.query(
+      "SELECT * FROM knowledge_relations ORDER BY confirmed_at, id",
+    );
+    const coverageAnalyses = await client.query(
+      "SELECT * FROM coverage_analyses ORDER BY created_at, id",
+    );
+    const coverageAnalysisPoints = await client.query(
+      `SELECT *
+         FROM coverage_analysis_points
+        ORDER BY analysis_id, position`,
+    );
+    const coverageAnalysisItems = await client.query(
+      `SELECT *
+         FROM coverage_analysis_items
+        ORDER BY analysis_id, position`,
+    );
+    const coverageItemPoints = await client.query(
+      "SELECT * FROM coverage_item_points ORDER BY item_id, knowledge_point_id",
+    );
     const snapshot: DomainSnapshot = {
-      formatVersion: 1,
+      formatVersion: 3,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
       tagAssignments: tagAssignments.rows,
+      tagAliases: tagAliases.rows,
+      tagMerges: tagMerges.rows,
       analyses: analyses.rows,
       knowledgePoints: knowledgePoints.rows,
       evidenceSpans: evidenceSpans.rows,
       corrections: corrections.rows,
       overviewCorrections: overviewCorrections.rows,
+      duplicateSuggestions: duplicateSuggestions.rows,
+      duplicateConsolidations: duplicateConsolidations.rows,
+      relationSuggestions: relationSuggestions.rows,
+      relationSuggestionEvidence: relationSuggestionEvidence.rows,
+      knowledgeRelations: knowledgeRelations.rows,
+      coverageAnalyses: coverageAnalyses.rows,
+      coverageAnalysisPoints: coverageAnalysisPoints.rows,
+      coverageAnalysisItems: coverageAnalysisItems.rows,
+      coverageItemPoints: coverageItemPoints.rows,
     };
 
     await client.query("COMMIT");
@@ -453,7 +644,7 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
   }
 }
 
-function parseSnapshot(archive: Buffer): DomainSnapshot {
+function parseSnapshot(archive: Buffer): ParsedSnapshot {
   const entries = readStoredZip(archive);
   const manifestJson = entries.get("manifest.json");
   const json = entries.get("domain.json");
@@ -463,11 +654,13 @@ function parseSnapshot(archive: Buffer): DomainSnapshot {
   }
 
   const publicManifest = JSON.parse(manifestJson.toString("utf8")) as unknown;
-  const snapshot = JSON.parse(json.toString("utf8")) as unknown;
+  const snapshotValue = JSON.parse(json.toString("utf8")) as unknown;
 
   if (
     !isDomainRow(publicManifest) ||
-    publicManifest.formatVersion !== 1 ||
+    (publicManifest.formatVersion !== 1 &&
+      publicManifest.formatVersion !== 2 &&
+      publicManifest.formatVersion !== 3) ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -488,7 +681,15 @@ function parseSnapshot(archive: Buffer): DomainSnapshot {
     throw new Error("restore manifest is invalid");
   }
 
-  validateDomainSnapshot(snapshot);
+  if (
+    !isDomainRow(snapshotValue) ||
+    snapshotValue.formatVersion !== publicManifest.formatVersion
+  ) {
+    throw new Error("restore snapshot version does not match its manifest");
+  }
+
+  const sourceFormatVersion = publicManifest.formatVersion;
+  const snapshot = validateDomainSnapshot(snapshotValue);
 
   if (publicManifest.recordCount !== snapshot.records.length) {
     throw new Error("restore manifest record count is invalid");
@@ -500,15 +701,15 @@ function parseSnapshot(archive: Buffer): DomainSnapshot {
     }
   }
 
-  return snapshot;
+  return { snapshot, sourceFormatVersion };
 }
 
-function validateDomainSnapshot(value: unknown): asserts value is DomainSnapshot {
+function validateDomainSnapshot(value: unknown): DomainSnapshot {
   if (!isDomainRow(value)) {
     throw new Error("domain snapshot must be an object");
   }
 
-  requireExactKeys(value, [
+  const commonKeys = [
     "formatVersion",
     "records",
     "fragmentRevisions",
@@ -519,11 +720,37 @@ function validateDomainSnapshot(value: unknown): asserts value is DomainSnapshot
     "evidenceSpans",
     "corrections",
     "overviewCorrections",
-  ]);
+  ];
 
-  if (value.formatVersion !== 1) {
+  if (
+    value.formatVersion !== 1 &&
+    value.formatVersion !== 2 &&
+    value.formatVersion !== 3
+  ) {
     throw new Error("domain snapshot version is unsupported");
   }
+
+  const tagGovernanceKeys = ["tagAliases", "tagMerges"];
+  const v3Keys = [
+    "duplicateSuggestions",
+    "duplicateConsolidations",
+    "relationSuggestions",
+    "relationSuggestionEvidence",
+    "knowledgeRelations",
+    "coverageAnalyses",
+    "coverageAnalysisPoints",
+    "coverageAnalysisItems",
+    "coverageItemPoints",
+  ];
+
+  requireExactKeys(
+    value,
+    value.formatVersion === 3
+      ? [...commonKeys, ...tagGovernanceKeys, ...v3Keys]
+      : value.formatVersion === 2
+        ? [...commonKeys, ...tagGovernanceKeys]
+        : commonKeys,
+  );
 
   const records = requireRows(value.records, "records");
   const fragmentRevisions = requireRows(
@@ -532,6 +759,10 @@ function validateDomainSnapshot(value: unknown): asserts value is DomainSnapshot
   );
   const tags = requireRows(value.tags, "tags");
   const tagAssignments = requireRows(value.tagAssignments, "tagAssignments");
+  const tagAliases =
+    value.formatVersion >= 2 ? requireRows(value.tagAliases, "tagAliases") : [];
+  const tagMerges =
+    value.formatVersion >= 2 ? requireRows(value.tagMerges, "tagMerges") : [];
   const analyses = requireRows(value.analyses, "analyses");
   const knowledgePoints = requireRows(value.knowledgePoints, "knowledgePoints");
   const evidenceSpans = requireRows(value.evidenceSpans, "evidenceSpans");
@@ -540,20 +771,86 @@ function validateDomainSnapshot(value: unknown): asserts value is DomainSnapshot
     value.overviewCorrections,
     "overviewCorrections",
   );
+  const duplicateSuggestions =
+    value.formatVersion === 3
+      ? requireRows(value.duplicateSuggestions, "duplicateSuggestions")
+      : [];
+  const duplicateConsolidations =
+    value.formatVersion === 3
+      ? requireRows(value.duplicateConsolidations, "duplicateConsolidations")
+      : [];
+  const relationSuggestions =
+    value.formatVersion === 3
+      ? requireRows(value.relationSuggestions, "relationSuggestions")
+      : [];
+  const relationSuggestionEvidence =
+    value.formatVersion === 3
+      ? requireRows(
+          value.relationSuggestionEvidence,
+          "relationSuggestionEvidence",
+        )
+      : [];
+  const knowledgeRelations =
+    value.formatVersion === 3
+      ? requireRows(value.knowledgeRelations, "knowledgeRelations")
+      : [];
+  const coverageAnalyses =
+    value.formatVersion === 3
+      ? requireRows(value.coverageAnalyses, "coverageAnalyses")
+      : [];
+  const coverageAnalysisPoints =
+    value.formatVersion === 3
+      ? requireRows(value.coverageAnalysisPoints, "coverageAnalysisPoints")
+      : [];
+  const coverageAnalysisItems =
+    value.formatVersion === 3
+      ? requireRows(value.coverageAnalysisItems, "coverageAnalysisItems")
+      : [];
+  const coverageItemPoints =
+    value.formatVersion === 3
+      ? requireRows(value.coverageItemPoints, "coverageItemPoints")
+      : [];
 
   records.forEach(validateRecordRow);
   fragmentRevisions.forEach(validateFragmentRevisionRow);
   tags.forEach(validateTagRow);
   tagAssignments.forEach(validateTagAssignmentRow);
+  tagAliases.forEach(validateTagAliasRow);
+  tagMerges.forEach(validateTagMergeRow);
   analyses.forEach(validateAnalysisRow);
   knowledgePoints.forEach(validateKnowledgePointRow);
   evidenceSpans.forEach(validateEvidenceSpanRow);
   corrections.forEach(validateCorrectionRow);
   overviewCorrections.forEach(validateOverviewCorrectionRow);
+  duplicateSuggestions.forEach(validateDuplicateSuggestionRow);
+  duplicateConsolidations.forEach(validateDuplicateConsolidationRow);
+  relationSuggestions.forEach(validateRelationSuggestionRow);
+  relationSuggestionEvidence.forEach(validateRelationEvidenceRow);
+  knowledgeRelations.forEach(validateKnowledgeRelationRow);
+  coverageAnalyses.forEach(validateCoverageAnalysisRow);
+  coverageAnalysisPoints.forEach(validateCoverageAnalysisPointRow);
+  coverageAnalysisItems.forEach(validateCoverageAnalysisItemRow);
+  coverageItemPoints.forEach(validateCoverageItemPointRow);
 
-  const snapshot = value as unknown as DomainSnapshot;
+  const snapshot = {
+    ...value,
+    formatVersion: 3,
+    tagAliases,
+    tagMerges,
+    duplicateSuggestions,
+    duplicateConsolidations,
+    relationSuggestions,
+    relationSuggestionEvidence,
+    knowledgeRelations,
+    coverageAnalyses,
+    coverageAnalysisPoints,
+    coverageAnalysisItems,
+    coverageItemPoints,
+  } as unknown as DomainSnapshot;
 
   validateSnapshotReferences(snapshot);
+
+  return snapshot;
 }
 
 function validateRecordRow(row: DomainRow): void {
@@ -676,6 +973,42 @@ function validateTagAssignmentRow(row: DomainRow): void {
   }
 }
 
+function validateTagAliasRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "tag_id",
+    "display_name",
+    "normalized_name",
+    "created_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "tag_id");
+  requireNonEmptyString(row, "display_name");
+  requireNonEmptyString(row, "normalized_name");
+  requireTimestamp(row, "created_at");
+}
+
+function validateTagMergeRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "operation_id",
+    "source_tag_id",
+    "target_tag_id",
+    "created_at",
+    "undone_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "operation_id");
+  requireUuid(row, "source_tag_id");
+  requireUuid(row, "target_tag_id");
+  requireTimestamp(row, "created_at");
+  requireNullableTimestamp(row, "undone_at");
+
+  if (row.source_tag_id === row.target_tag_id) {
+    throw new Error("tag merge source and target must differ");
+  }
+}
+
 function validateAnalysisRow(row: DomainRow): void {
   requireExactKeys(row, [
     "id",
@@ -780,6 +1113,258 @@ function validateOverviewCorrectionRow(row: DomainRow): void {
   requireTimestamp(row, "updated_at");
 }
 
+function validateDuplicateSuggestionRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "source_a_type",
+    "source_a_id",
+    "source_a_record_id",
+    "source_a_fingerprint",
+    "source_b_type",
+    "source_b_id",
+    "source_b_record_id",
+    "source_b_fingerprint",
+    "detection_kind",
+    "similarity_score",
+    "reason",
+    "status",
+    "primary_source_id",
+    "configuration_version",
+    "created_at",
+    "updated_at",
+    "decided_at",
+  ]);
+  requireUuid(row, "id");
+  requireEnum(row, "source_a_type", ["ORIGINAL", "KNOWLEDGE_POINT"]);
+  requireUuid(row, "source_a_id");
+  requireUuid(row, "source_a_record_id");
+  requireFingerprint(row, "source_a_fingerprint");
+  requireEnum(row, "source_b_type", ["ORIGINAL", "KNOWLEDGE_POINT"]);
+  requireUuid(row, "source_b_id");
+  requireUuid(row, "source_b_record_id");
+  requireFingerprint(row, "source_b_fingerprint");
+  requireEnum(row, "detection_kind", ["EXACT", "SEMANTIC"]);
+  requireNumberInRange(row, "similarity_score", 0, 1);
+  requireNonEmptyString(row, "reason");
+  requireEnum(row, "status", [
+    "PENDING_REVIEW",
+    "ACCEPTED",
+    "REJECTED",
+    "REMOVED",
+  ]);
+  requireNullableUuid(row, "primary_source_id");
+  requireNullableInteger(row, "configuration_version", 1);
+  requireTimestamp(row, "created_at");
+  requireTimestamp(row, "updated_at");
+  requireNullableTimestamp(row, "decided_at");
+
+  const primaryMatches =
+    row.primary_source_id === row.source_a_id ||
+    row.primary_source_id === row.source_b_id;
+
+  if (
+    row.source_a_type !== row.source_b_type ||
+    row.source_a_id === row.source_b_id ||
+    row.source_a_record_id === row.source_b_record_id ||
+    (row.detection_kind === "EXACT" && row.similarity_score !== 1) ||
+    (row.status === "PENDING_REVIEW" &&
+      (row.primary_source_id !== null || row.decided_at !== null)) ||
+    (row.status === "REJECTED" &&
+      (row.primary_source_id !== null || row.decided_at === null)) ||
+    ((row.status === "ACCEPTED" || row.status === "REMOVED") &&
+      (!primaryMatches || row.decided_at === null))
+  ) {
+    throw new Error("duplicate suggestion lifecycle is invalid");
+  }
+}
+
+function validateDuplicateConsolidationRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "suggestion_id",
+    "primary_source_id",
+    "created_at",
+    "removed_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "suggestion_id");
+  requireUuid(row, "primary_source_id");
+  requireTimestamp(row, "created_at");
+  requireNullableTimestamp(row, "removed_at");
+
+  if (
+    row.removed_at !== null &&
+    Date.parse(row.removed_at as string) < Date.parse(row.created_at as string)
+  ) {
+    throw new Error("duplicate consolidation lifecycle is invalid");
+  }
+}
+
+function validateRelationSuggestionRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "pair_key",
+    "input_fingerprint",
+    "source_knowledge_point_id",
+    "target_knowledge_point_id",
+    "source_content_fingerprint",
+    "target_content_fingerprint",
+    "relation_type",
+    "description",
+    "reason",
+    "confidence",
+    "model_configuration_version",
+    "text_model",
+    "status",
+    "created_at",
+    "updated_at",
+    "decided_at",
+  ]);
+  requireUuid(row, "id");
+  requireNonEmptyString(row, "pair_key");
+  requireFingerprint(row, "input_fingerprint");
+  requireUuid(row, "source_knowledge_point_id");
+  requireUuid(row, "target_knowledge_point_id");
+  requireFingerprint(row, "source_content_fingerprint");
+  requireFingerprint(row, "target_content_fingerprint");
+  requireRelationType(row, "relation_type");
+  requireNonEmptyString(row, "description");
+  requireNonEmptyString(row, "reason");
+  requireNumberInRange(row, "confidence", 0, 1);
+  requireInteger(row, "model_configuration_version", 1);
+  requireNonEmptyString(row, "text_model");
+  requireEnum(row, "status", [
+    "PENDING_REVIEW",
+    "CONFIRMED",
+    "REJECTED",
+    "REMOVED",
+  ]);
+  requireTimestamp(row, "created_at");
+  requireTimestamp(row, "updated_at");
+  requireNullableTimestamp(row, "decided_at");
+
+  if (
+    row.source_knowledge_point_id === row.target_knowledge_point_id ||
+    (row.status === "PENDING_REVIEW") !== (row.decided_at === null)
+  ) {
+    throw new Error("relation suggestion lifecycle is invalid");
+  }
+}
+
+function validateRelationEvidenceRow(row: DomainRow): void {
+  requireExactKeys(row, ["suggestion_id", "evidence_span_id", "side"]);
+  requireUuid(row, "suggestion_id");
+  requireUuid(row, "evidence_span_id");
+  requireEnum(row, "side", ["SOURCE", "TARGET"]);
+}
+
+function validateKnowledgeRelationRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "suggestion_id",
+    "source_knowledge_point_id",
+    "target_knowledge_point_id",
+    "relation_type",
+    "description",
+    "confirmed_at",
+    "removed_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "suggestion_id");
+  requireUuid(row, "source_knowledge_point_id");
+  requireUuid(row, "target_knowledge_point_id");
+  requireRelationType(row, "relation_type");
+  requireNonEmptyString(row, "description");
+  requireTimestamp(row, "confirmed_at");
+  requireNullableTimestamp(row, "removed_at");
+
+  if (
+    row.source_knowledge_point_id === row.target_knowledge_point_id ||
+    (row.removed_at !== null &&
+      Date.parse(row.removed_at as string) < Date.parse(row.confirmed_at as string))
+  ) {
+    throw new Error("knowledge relation lifecycle is invalid");
+  }
+}
+
+function validateCoverageAnalysisRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "topic",
+    "framework_summary",
+    "caveat",
+    "input_count",
+    "model_configuration_version",
+    "text_model",
+    "created_at",
+  ]);
+  requireUuid(row, "id");
+  requireNonEmptyString(row, "topic");
+  requireNonEmptyString(row, "framework_summary");
+  requireNonEmptyString(row, "caveat");
+  requireInteger(row, "input_count", 1, 50);
+  requireInteger(row, "model_configuration_version", 1);
+  requireNonEmptyString(row, "text_model");
+  requireTimestamp(row, "created_at");
+}
+
+function validateCoverageAnalysisPointRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "analysis_id",
+    "knowledge_point_id",
+    "content_fingerprint",
+    "position",
+  ]);
+  requireUuid(row, "analysis_id");
+  requireUuid(row, "knowledge_point_id");
+  requireFingerprint(row, "content_fingerprint");
+  requireInteger(row, "position", 1, 50);
+}
+
+function validateCoverageAnalysisItemRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "analysis_id",
+    "kind",
+    "position",
+    "title",
+    "assessment",
+    "recommendation",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "analysis_id");
+  requireEnum(row, "kind", ["COVERED", "POSSIBLE_GAP"]);
+  requireInteger(row, "position", 1);
+  requireNonEmptyString(row, "title");
+  requireNonEmptyString(row, "assessment");
+
+  if (
+    (row.kind === "COVERED" && row.recommendation !== null) ||
+    (row.kind === "POSSIBLE_GAP" &&
+      (typeof row.recommendation !== "string" ||
+        row.recommendation.length === 0))
+  ) {
+    throw new Error("coverage item recommendation is invalid");
+  }
+}
+
+function validateCoverageItemPointRow(row: DomainRow): void {
+  requireExactKeys(row, ["item_id", "knowledge_point_id"]);
+  requireUuid(row, "item_id");
+  requireUuid(row, "knowledge_point_id");
+}
+
+function requireRelationType(row: DomainRow, key: string): void {
+  requireEnum(row, key, [
+    "SIMILAR",
+    "CONTRASTS",
+    "PREREQUISITE",
+    "EXTENDS",
+    "APPLIES",
+    "ANALOGY",
+  ]);
+}
+
 function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   assertUnique(snapshot.records, (row) => row.id, "record id");
   assertUnique(
@@ -790,6 +1375,9 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   assertUnique(snapshot.tags, (row) => row.id, "tag id");
   assertUnique(snapshot.tags, (row) => row.normalized_name, "tag name");
   assertUnique(snapshot.tagAssignments, (row) => row.id, "tag assignment id");
+  assertUnique(snapshot.tagAliases, (row) => row.id, "tag alias id");
+  assertUnique(snapshot.tagAliases, (row) => row.normalized_name, "tag alias name");
+  assertUnique(snapshot.tagMerges, (row) => row.id, "tag merge id");
   assertUnique(snapshot.analyses, (row) => row.id, "analysis id");
   assertUnique(snapshot.knowledgePoints, (row) => row.id, "knowledge point id");
   assertUnique(snapshot.evidenceSpans, (row) => row.id, "evidence id");
@@ -802,6 +1390,84 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     snapshot.overviewCorrections,
     (row) => row.record_id,
     "overview correction record",
+  );
+  assertUnique(
+    snapshot.duplicateSuggestions,
+    (row) => row.id,
+    "duplicate suggestion id",
+  );
+  assertUnique(
+    snapshot.duplicateSuggestions,
+    (row) =>
+      `${row.detection_kind}:${row.source_a_type}:${row.source_a_id}:` +
+      `${row.source_a_fingerprint}:${row.source_b_type}:${row.source_b_id}:` +
+      row.source_b_fingerprint,
+    "duplicate suggestion input",
+  );
+  assertUnique(
+    snapshot.duplicateConsolidations,
+    (row) => row.id,
+    "duplicate consolidation id",
+  );
+  assertUnique(
+    snapshot.duplicateConsolidations,
+    (row) => row.suggestion_id,
+    "duplicate consolidation suggestion",
+  );
+  assertUnique(
+    snapshot.relationSuggestions,
+    (row) => row.id,
+    "relation suggestion id",
+  );
+  assertUnique(
+    snapshot.relationSuggestions,
+    (row) => `${row.pair_key}:${row.input_fingerprint}`,
+    "relation suggestion input",
+  );
+  assertUnique(
+    snapshot.relationSuggestionEvidence,
+    (row) => `${row.suggestion_id}:${row.evidence_span_id}`,
+    "relation suggestion evidence",
+  );
+  assertUnique(
+    snapshot.knowledgeRelations,
+    (row) => row.id,
+    "knowledge relation id",
+  );
+  assertUnique(
+    snapshot.knowledgeRelations,
+    (row) => row.suggestion_id,
+    "knowledge relation suggestion",
+  );
+  assertUnique(
+    snapshot.coverageAnalyses,
+    (row) => row.id,
+    "coverage analysis id",
+  );
+  assertUnique(
+    snapshot.coverageAnalysisPoints,
+    (row) => `${row.analysis_id}:${row.knowledge_point_id}`,
+    "coverage analysis point",
+  );
+  assertUnique(
+    snapshot.coverageAnalysisPoints,
+    (row) => `${row.analysis_id}:${row.position}`,
+    "coverage analysis point position",
+  );
+  assertUnique(
+    snapshot.coverageAnalysisItems,
+    (row) => row.id,
+    "coverage analysis item id",
+  );
+  assertUnique(
+    snapshot.coverageAnalysisItems,
+    (row) => `${row.analysis_id}:${row.position}`,
+    "coverage analysis item position",
+  );
+  assertUnique(
+    snapshot.coverageItemPoints,
+    (row) => `${row.item_id}:${row.knowledge_point_id}`,
+    "coverage item point",
   );
   assertUnique(
     snapshot.fragmentRevisions,
@@ -832,6 +1498,69 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   const tags = new Map(snapshot.tags.map((row) => [row.id, row]));
   const analyses = new Map(snapshot.analyses.map((row) => [row.id, row]));
   const points = new Map(snapshot.knowledgePoints.map((row) => [row.id, row]));
+  const evidenceSpans = new Map(
+    snapshot.evidenceSpans.map((row) => [row.id, row]),
+  );
+  const duplicateSuggestions = new Map(
+    snapshot.duplicateSuggestions.map((row) => [row.id, row]),
+  );
+  const relationSuggestions = new Map(
+    snapshot.relationSuggestions.map((row) => [row.id, row]),
+  );
+  const coverageAnalyses = new Map(
+    snapshot.coverageAnalyses.map((row) => [row.id, row]),
+  );
+  const coverageItems = new Map(
+    snapshot.coverageAnalysisItems.map((row) => [row.id, row]),
+  );
+
+  for (const alias of snapshot.tagAliases) {
+    const tag = tags.get(alias.tag_id);
+
+    if (
+      !tag ||
+      tag.approval_status !== "USER_APPROVED" ||
+      tag.archived_at !== null ||
+      snapshot.tags.some(
+        (candidate) => candidate.normalized_name === alias.normalized_name,
+      )
+    ) {
+      throw new Error("tag alias reference is invalid");
+    }
+  }
+
+  const activeMerges = snapshot.tagMerges.filter((merge) => merge.undone_at === null);
+
+  assertUnique(activeMerges, (row) => row.source_tag_id, "active tag merge source");
+
+  const activeSourceIds = new Set(activeMerges.map((merge) => merge.source_tag_id));
+  const activeTargetIds = new Set(activeMerges.map((merge) => merge.target_tag_id));
+  const operationTargets = new Map<string, string>();
+
+  for (const merge of snapshot.tagMerges) {
+    const source = tags.get(merge.source_tag_id);
+    const target = tags.get(merge.target_tag_id);
+    const existingTarget = operationTargets.get(merge.operation_id);
+
+    if (!source || !target || (existingTarget && existingTarget !== target.id)) {
+      throw new Error("tag merge reference is invalid");
+    }
+
+    operationTargets.set(merge.operation_id, target.id);
+
+    if (
+      merge.undone_at === null &&
+      (source.archived_at !== null ||
+        target.approval_status !== "USER_APPROVED" ||
+        target.archived_at !== null)
+    ) {
+      throw new Error("active tag merge lifecycle is invalid");
+    }
+  }
+
+  if ([...activeSourceIds].some((id) => activeTargetIds.has(id))) {
+    throw new Error("active tag merge chains are not supported");
+  }
 
   for (const revision of snapshot.fragmentRevisions) {
     if (!records.has(revision.record_id)) {
@@ -977,6 +1706,138 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
       throw new Error("tag assignment reference is invalid");
     }
   }
+
+  for (const suggestion of snapshot.duplicateSuggestions) {
+    const sourceARecord = records.get(suggestion.source_a_record_id);
+    const sourceBRecord = records.get(suggestion.source_b_record_id);
+    const sourceA =
+      suggestion.source_a_type === "ORIGINAL"
+        ? revisions.get(suggestion.source_a_id)
+        : points.get(suggestion.source_a_id);
+    const sourceB =
+      suggestion.source_b_type === "ORIGINAL"
+        ? revisions.get(suggestion.source_b_id)
+        : points.get(suggestion.source_b_id);
+
+    if (
+      !sourceARecord ||
+      !sourceBRecord ||
+      !sourceA ||
+      !sourceB ||
+      sourceA.record_id !== sourceARecord.id ||
+      sourceB.record_id !== sourceBRecord.id
+    ) {
+      throw new Error("duplicate suggestion source reference is invalid");
+    }
+  }
+
+  for (const consolidation of snapshot.duplicateConsolidations) {
+    const suggestion = duplicateSuggestions.get(consolidation.suggestion_id);
+    const active = suggestion?.status === "ACCEPTED";
+    const removed = suggestion?.status === "REMOVED";
+
+    if (
+      !suggestion ||
+      consolidation.primary_source_id !== suggestion.primary_source_id ||
+      (!active && !removed) ||
+      (active && consolidation.removed_at !== null) ||
+      (removed && consolidation.removed_at === null)
+    ) {
+      throw new Error("duplicate consolidation reference is invalid");
+    }
+  }
+
+  for (const suggestion of snapshot.relationSuggestions) {
+    if (
+      !points.has(suggestion.source_knowledge_point_id) ||
+      !points.has(suggestion.target_knowledge_point_id)
+    ) {
+      throw new Error("relation suggestion endpoint is invalid");
+    }
+  }
+
+  for (const link of snapshot.relationSuggestionEvidence) {
+    const suggestion = relationSuggestions.get(link.suggestion_id);
+    const evidence = evidenceSpans.get(link.evidence_span_id);
+    const expectedPointId =
+      link.side === "SOURCE"
+        ? suggestion?.source_knowledge_point_id
+        : suggestion?.target_knowledge_point_id;
+
+    if (!suggestion || !evidence || evidence.knowledge_point_id !== expectedPointId) {
+      throw new Error("relation suggestion evidence reference is invalid");
+    }
+  }
+
+  for (const relation of snapshot.knowledgeRelations) {
+    const suggestion = relationSuggestions.get(relation.suggestion_id);
+    const active = suggestion?.status === "CONFIRMED";
+    const removed = suggestion?.status === "REMOVED";
+
+    if (
+      !suggestion ||
+      relation.source_knowledge_point_id !==
+        suggestion.source_knowledge_point_id ||
+      relation.target_knowledge_point_id !==
+        suggestion.target_knowledge_point_id ||
+      (!active && !removed) ||
+      (active && relation.removed_at !== null) ||
+      (removed && relation.removed_at === null)
+    ) {
+      throw new Error("knowledge relation reference is invalid");
+    }
+  }
+
+  for (const analysis of snapshot.coverageAnalyses) {
+    const inputs = snapshot.coverageAnalysisPoints.filter(
+      (point) => point.analysis_id === analysis.id,
+    );
+
+    if (inputs.length !== analysis.input_count) {
+      throw new Error("coverage analysis input count is invalid");
+    }
+  }
+
+  for (const input of snapshot.coverageAnalysisPoints) {
+    if (
+      !coverageAnalyses.has(input.analysis_id) ||
+      !points.has(input.knowledge_point_id)
+    ) {
+      throw new Error("coverage analysis input reference is invalid");
+    }
+  }
+
+  for (const item of snapshot.coverageAnalysisItems) {
+    if (!coverageAnalyses.has(item.analysis_id)) {
+      throw new Error("coverage analysis item reference is invalid");
+    }
+  }
+
+  for (const link of snapshot.coverageItemPoints) {
+    const item = coverageItems.get(link.item_id);
+    const belongsToInput = snapshot.coverageAnalysisPoints.some(
+      (input) =>
+        input.analysis_id === item?.analysis_id &&
+        input.knowledge_point_id === link.knowledge_point_id,
+    );
+
+    if (!item || item.kind !== "COVERED" || !belongsToInput) {
+      throw new Error("coverage item evidence reference is invalid");
+    }
+  }
+
+  for (const item of snapshot.coverageAnalysisItems) {
+    const evidenceCount = snapshot.coverageItemPoints.filter(
+      (link) => link.item_id === item.id,
+    ).length;
+
+    if (
+      (item.kind === "COVERED" && evidenceCount === 0) ||
+      (item.kind === "POSSIBLE_GAP" && evidenceCount !== 0)
+    ) {
+      throw new Error("coverage item evidence lifecycle is invalid");
+    }
+  }
 }
 
 function requireRows(value: unknown, name: string): DomainRow[] {
@@ -1027,6 +1888,45 @@ function requireNullableTimestamp(row: DomainRow, key: string): void {
   if (row[key] !== null && !isTimestamp(row[key])) {
     throw new Error(`${key} must be a nullable timestamp`);
   }
+}
+
+function requireFingerprint(row: DomainRow, key: string): void {
+  if (
+    typeof row[key] !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(row[key] as string)
+  ) {
+    throw new Error(`${key} must be a SHA-256 fingerprint`);
+  }
+}
+
+function requireNumberInRange(
+  row: DomainRow,
+  key: string,
+  minimum: number,
+  maximum: number,
+): void {
+  const value = row[key];
+
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new Error(`${key} must be a number in range`);
+  }
+}
+
+function requireNullableInteger(
+  row: DomainRow,
+  key: string,
+  minimum: number,
+): void {
+  if (row[key] === null) {
+    return;
+  }
+
+  requireInteger(row, key, minimum);
 }
 
 function requireInteger(
@@ -1111,6 +2011,21 @@ async function restoreSnapshot(
     "created_at",
     "updated_at",
   ], snapshot.tags);
+  await insertRows(client, "tag_aliases", [
+    "id",
+    "tag_id",
+    "display_name",
+    "normalized_name",
+    "created_at",
+  ], snapshot.tagAliases);
+  await insertRows(client, "tag_merges", [
+    "id",
+    "operation_id",
+    "source_tag_id",
+    "target_tag_id",
+    "created_at",
+    "undone_at",
+  ], snapshot.tagMerges);
   await insertRows(client, "records", [
     "id",
     "current_fragment_revision_id",
@@ -1182,6 +2097,96 @@ async function restoreSnapshot(
     "analysis_revision_id",
     "raw_label",
   ], snapshot.tagAssignments);
+  await insertRows(client, "duplicate_suggestions", [
+    "id",
+    "source_a_type",
+    "source_a_id",
+    "source_a_record_id",
+    "source_a_fingerprint",
+    "source_b_type",
+    "source_b_id",
+    "source_b_record_id",
+    "source_b_fingerprint",
+    "detection_kind",
+    "similarity_score",
+    "reason",
+    "status",
+    "primary_source_id",
+    "configuration_version",
+    "created_at",
+    "updated_at",
+    "decided_at",
+  ], snapshot.duplicateSuggestions);
+  await insertRows(client, "duplicate_consolidations", [
+    "id",
+    "suggestion_id",
+    "primary_source_id",
+    "created_at",
+    "removed_at",
+  ], snapshot.duplicateConsolidations);
+  await insertRows(client, "relation_suggestions", [
+    "id",
+    "pair_key",
+    "input_fingerprint",
+    "source_knowledge_point_id",
+    "target_knowledge_point_id",
+    "source_content_fingerprint",
+    "target_content_fingerprint",
+    "relation_type",
+    "description",
+    "reason",
+    "confidence",
+    "model_configuration_version",
+    "text_model",
+    "status",
+    "created_at",
+    "updated_at",
+    "decided_at",
+  ], snapshot.relationSuggestions);
+  await insertRows(client, "relation_suggestion_evidence", [
+    "suggestion_id",
+    "evidence_span_id",
+    "side",
+  ], snapshot.relationSuggestionEvidence);
+  await insertRows(client, "knowledge_relations", [
+    "id",
+    "suggestion_id",
+    "source_knowledge_point_id",
+    "target_knowledge_point_id",
+    "relation_type",
+    "description",
+    "confirmed_at",
+    "removed_at",
+  ], snapshot.knowledgeRelations);
+  await insertRows(client, "coverage_analyses", [
+    "id",
+    "topic",
+    "framework_summary",
+    "caveat",
+    "input_count",
+    "model_configuration_version",
+    "text_model",
+    "created_at",
+  ], snapshot.coverageAnalyses);
+  await insertRows(client, "coverage_analysis_points", [
+    "analysis_id",
+    "knowledge_point_id",
+    "content_fingerprint",
+    "position",
+  ], snapshot.coverageAnalysisPoints);
+  await insertRows(client, "coverage_analysis_items", [
+    "id",
+    "analysis_id",
+    "kind",
+    "position",
+    "title",
+    "assessment",
+    "recommendation",
+  ], snapshot.coverageAnalysisItems);
+  await insertRows(client, "coverage_item_points", [
+    "item_id",
+    "knowledge_point_id",
+  ], snapshot.coverageItemPoints);
 }
 
 async function insertRows(

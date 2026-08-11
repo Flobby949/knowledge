@@ -831,7 +831,7 @@ function documentKey(document: SearchDocument): string {
   return `${document.sourceType}:${document.sourceId}`;
 }
 
-function cosineSimilarity(left: number[], right: number[]): number {
+export function cosineSimilarity(left: number[], right: number[]): number {
   if (left.length !== right.length || left.length === 0) {
     return -1;
   }

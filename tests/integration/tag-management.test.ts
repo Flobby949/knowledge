@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
+import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisGenerator } from "../../src/analysis-generator.js";
@@ -22,6 +23,8 @@ type PublicTag = {
 
 type TagDetail = {
   tag: PublicTag;
+  aliases: Array<{ id: string; name: string }>;
+  mergedSources: Array<{ id: string; mergeId: string; name: string }>;
   records: Array<{
     record: { id: string; title: string };
     sourceSummary: {
@@ -224,6 +227,8 @@ describe("V1 tag management public HTTP contract", () => {
         approvalStatus: "candidate",
         recordCount: 1,
       },
+      aliases: [],
+      mergedSources: [],
       records: [
         {
           record: { id: record.id, title: plan.title },
@@ -550,6 +555,259 @@ describe("V1 tag management public HTTP contract", () => {
       ],
     });
   });
+
+  it("resolves user-maintained aliases to one approved tag", async () => {
+    const marker = randomUUID().slice(0, 8);
+    const canonicalName = `Change Data Capture ${marker}`;
+    const aliasName = `变更数据捕获 ${marker}`;
+    const canonicalRecord = await createRecord(app, `主标签记录 ${marker}`, [
+      { name: canonicalName },
+    ]);
+    const canonicalTag = requiredTag(canonicalRecord, canonicalName);
+    const aliasResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/tags/${canonicalTag.id}/aliases`,
+      payload: { name: aliasName },
+    });
+
+    expect(aliasResponse.statusCode).toBe(201);
+    expect(aliasResponse.json()).toMatchObject({
+      alias: { id: expect.any(String), name: aliasName },
+      tag: { id: canonicalTag.id, name: canonicalName },
+    });
+
+    expect(
+      (await getJson<TagDetail>(app, `/api/v1/tags/${canonicalTag.id}`))
+        .aliases,
+    ).toEqual([{ id: expect.any(String), name: aliasName }]);
+
+    const aliasRecord = await createRecord(app, `别名录入 ${marker}`, [
+      { name: aliasName },
+    ]);
+
+    expect(aliasRecord.myTags).toEqual([canonicalTag]);
+    expect((await listTags(app, "user_approved", aliasName)).items).toEqual([
+      expect.objectContaining({
+        id: canonicalTag.id,
+        name: canonicalName,
+        recordCount: 2,
+      }),
+    ]);
+
+    const duplicateName = await app.inject({
+      method: "POST",
+      url: "/api/v1/tags",
+      payload: { name: aliasName },
+    });
+
+    expect(duplicateName.statusCode).toBe(409);
+    expect(duplicateName.json()).toMatchObject({
+      error: {
+        code: "TAG_NAME_CONFLICT",
+        details: { existingTag: canonicalTag },
+      },
+    });
+
+    const blockedArchive = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/tags/${canonicalTag.id}`,
+      payload: { approvalStatus: "archived" },
+    });
+
+    expect(blockedArchive.statusCode).toBe(409);
+    expect(blockedArchive.json()).toMatchObject({
+      error: { code: "TAG_GOVERNANCE_IN_USE" },
+    });
+  });
+
+  it("merges several tags without rewriting assignments and undoes the operation", async () => {
+    const marker = randomUUID().slice(0, 8);
+    const targetName = `数据同步 ${marker}`;
+    const firstSourceName = `CDC ${marker}`;
+    const secondSourceName = `Change Data Capture ${marker}`;
+    const targetRecord = await createRecord(app, `主知识 ${marker}`, [
+      { name: targetName },
+    ]);
+    const firstSourceRecord = await createRecord(app, `来源一 ${marker}`, [
+      { name: firstSourceName },
+    ]);
+    const secondSourceRecord = await createRecord(app, `来源二 ${marker}`, [
+      { name: secondSourceName },
+    ]);
+    const targetTag = requiredTag(targetRecord, targetName);
+    const firstSourceTag = requiredTag(firstSourceRecord, firstSourceName);
+    const secondSourceTag = requiredTag(secondSourceRecord, secondSourceName);
+    const pool = new Pool({ connectionString: database.databaseUrl });
+
+    try {
+      const before = await pool.query(
+        `SELECT id, record_id, tag_id, assigned_by, status, created_at
+           FROM tag_assignments
+          WHERE tag_id = ANY($1::uuid[])
+          ORDER BY id`,
+        [[targetTag.id, firstSourceTag.id, secondSourceTag.id]],
+      );
+      const merged = await app.inject({
+        method: "POST",
+        url: "/api/v1/tag-merges",
+        payload: {
+          targetTagId: targetTag.id,
+          sourceTagIds: [firstSourceTag.id, secondSourceTag.id],
+        },
+      });
+
+      expect(merged.statusCode).toBe(201);
+      const operation = merged.json() as {
+        merge: {
+          id: string;
+          sourceTags: PublicTag[];
+          targetTag: PublicTag;
+        };
+      };
+
+      expect(operation.merge).toMatchObject({
+        id: expect.any(String),
+        sourceTags: [
+          { id: firstSourceTag.id, name: firstSourceName },
+          { id: secondSourceTag.id, name: secondSourceName },
+        ],
+        targetTag: { id: targetTag.id, name: targetName, recordCount: 3 },
+      });
+
+      expect(
+        (await getJson<TagDetail>(app, `/api/v1/tags/${targetTag.id}`))
+          .mergedSources,
+      ).toEqual([
+        { id: firstSourceTag.id, mergeId: operation.merge.id, name: firstSourceName },
+        {
+          id: secondSourceTag.id,
+          mergeId: operation.merge.id,
+          name: secondSourceName,
+        },
+      ]);
+
+      expect((await listTags(app, "user_approved", marker)).items).toEqual([
+        expect.objectContaining({
+          id: targetTag.id,
+          name: targetName,
+          recordCount: 3,
+        }),
+      ]);
+      await expectEffectiveRecords(app, targetTag.id, [
+        targetRecord.id,
+        firstSourceRecord.id,
+        secondSourceRecord.id,
+      ]);
+      await expectEffectiveRecords(app, firstSourceTag.id, [
+        targetRecord.id,
+        firstSourceRecord.id,
+        secondSourceRecord.id,
+      ]);
+      expect((await getRecord(app, firstSourceRecord.id)).editable.myTags).toEqual(
+        [targetTag],
+      );
+
+      const afterMerge = await pool.query(
+        `SELECT id, record_id, tag_id, assigned_by, status, created_at
+           FROM tag_assignments
+          WHERE tag_id = ANY($1::uuid[])
+          ORDER BY id`,
+        [[targetTag.id, firstSourceTag.id, secondSourceTag.id]],
+      );
+
+      expect(afterMerge.rows).toEqual(before.rows);
+
+      const undone = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/tag-merges/${operation.merge.id}`,
+      });
+
+      expect(undone.statusCode).toBe(204);
+      expect(
+        (await getJson<TagDetail>(app, `/api/v1/tags/${targetTag.id}`))
+          .mergedSources,
+      ).toEqual([]);
+      expect((await listTags(app, "user_approved", marker)).items).toHaveLength(3);
+      await expectEffectiveRecords(app, firstSourceTag.id, [firstSourceRecord.id]);
+      expect((await getRecord(app, firstSourceRecord.id)).editable.myTags).toEqual(
+        [firstSourceTag],
+      );
+
+      const afterUndo = await pool.query(
+        `SELECT id, record_id, tag_id, assigned_by, status, created_at
+           FROM tag_assignments
+          WHERE tag_id = ANY($1::uuid[])
+          ORDER BY id`,
+        [[targetTag.id, firstSourceTag.id, secondSourceTag.id]],
+      );
+
+      expect(afterUndo.rows).toEqual(before.rows);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("blocks approval and deletion of a merged candidate until the merge is undone", async () => {
+    const marker = randomUUID().slice(0, 8);
+    const sourceText = `候选合并第一行 ${marker}\n候选合并第二行 ${marker}`;
+    const plan = registerAnalysis(sourceText, marker, "candidate-merge-guard");
+    const organized = await createOrganizedRecord(
+      app,
+      sourceText,
+      `候选合并入口 ${marker}`,
+    );
+    const candidate = requiredOrganizedTag(organized, plan.sharedTagName);
+    const targetCreated = await app.inject({
+      method: "POST",
+      url: "/api/v1/tags",
+      payload: { name: `候选合并目标 ${marker}` },
+    });
+    const target = (targetCreated.json() as { tag: PublicTag }).tag;
+    const merged = await app.inject({
+      method: "POST",
+      url: "/api/v1/tag-merges",
+      payload: { sourceTagIds: [candidate.id], targetTagId: target.id },
+    });
+
+    expect(merged.statusCode).toBe(201);
+    const mergeId = (merged.json() as { merge: { id: string } }).merge.id;
+    const blockedApproval = await app.inject({
+      method: "POST",
+      url: `/api/v1/tags/${candidate.id}/approve`,
+    });
+    const blockedDeletion = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/tags/${candidate.id}`,
+    });
+
+    expect(blockedApproval.statusCode).toBe(409);
+    expect(blockedApproval.json()).toMatchObject({
+      error: { code: "TAG_GOVERNANCE_IN_USE" },
+    });
+    expect(blockedDeletion.statusCode).toBe(409);
+    expect(blockedDeletion.json()).toMatchObject({
+      error: { code: "TAG_GOVERNANCE_IN_USE" },
+    });
+
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/api/v1/tag-merges/${mergeId}`,
+        })
+      ).statusCode,
+    ).toBe(204);
+
+    const approved = await app.inject({
+      method: "POST",
+      url: `/api/v1/tags/${candidate.id}/approve`,
+    });
+
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({
+      tag: { id: candidate.id, approvalStatus: "user_approved" },
+    });
+  });
 });
 
 function registerAnalysis(
@@ -617,6 +875,7 @@ async function createOrganizedRecord(
 
 async function getRecord(app: FastifyInstance, recordId: string) {
   return getJson<{
+    editable: { myTags: Array<{ id: string; name: string }> };
     id: string;
     organizedItems: Array<{
       id: string;

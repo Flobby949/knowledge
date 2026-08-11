@@ -17,6 +17,8 @@ export interface UserTagListItem extends TagListItem {
 
 export interface TagDetail {
   tag: TagListItem;
+  aliases: Array<{ id: string; name: string }>;
+  mergedSources: Array<{ id: string; mergeId: string; name: string }>;
   records: Array<{
     record: { id: string; title: string };
     sourceSummary: {
@@ -29,6 +31,119 @@ export interface TagDetail {
       suppressed: boolean;
     }>;
   }>;
+}
+
+export interface DuplicateSuggestionSource {
+  changedSinceSuggestion: boolean;
+  current: boolean;
+  excerpt: string;
+  id: string;
+  recordId: string;
+  recordTitle: string;
+  title: string;
+  type: "knowledge_point" | "original";
+}
+
+export interface DuplicateSuggestion {
+  canDecide: boolean;
+  consolidationId: string | null;
+  createdAt: string;
+  id: string;
+  kind: "exact" | "semantic";
+  primarySourceId: string | null;
+  reason: string;
+  score: number;
+  sources: [DuplicateSuggestionSource, DuplicateSuggestionSource];
+  status: "accepted" | "pending_review" | "rejected" | "removed";
+}
+
+export interface DuplicateScanResult {
+  exactCandidates: number;
+  pendingSuggestions: number;
+  semanticCandidates: number;
+  semanticReadySources: number;
+  semanticStatus: "ready" | "unavailable";
+}
+
+export interface RelationSuggestionPoint {
+  body: string;
+  changedSinceSuggestion: boolean;
+  current: boolean;
+  evidence: Array<{ id: string; quote: string }>;
+  id: string;
+  recordId: string;
+  recordTitle: string;
+  title: string;
+}
+
+export type KnowledgeRelationType =
+  | "analogy"
+  | "applies"
+  | "contrasts"
+  | "extends"
+  | "prerequisite"
+  | "similar";
+
+export interface RelationSuggestion {
+  canDecide: boolean;
+  confidence: number;
+  description: string;
+  id: string;
+  model: { configurationVersion: number; name: string };
+  needsReview: boolean;
+  reason: string;
+  relation: null | {
+    description: string;
+    id: string;
+    removed: boolean;
+    type: KnowledgeRelationType;
+  };
+  source: RelationSuggestionPoint;
+  status: "confirmed" | "pending_review" | "rejected" | "removed";
+  target: RelationSuggestionPoint;
+  type: KnowledgeRelationType;
+}
+
+export interface CoverageSource {
+  excerpt: string;
+  id: string;
+  recordId: string;
+  recordTitle: string;
+  title: string;
+}
+
+export interface CoverageAnalysisSource extends CoverageSource {
+  changedSinceAnalysis: boolean;
+  current: boolean;
+}
+
+export interface CoverageAnalysis {
+  advisory: true;
+  caveat: string;
+  covered: Array<{
+    assessment: string;
+    id: string;
+    kind: "covered";
+    recommendation: null;
+    sources: CoverageAnalysisSource[];
+    title: string;
+  }>;
+  createdAt: string;
+  frameworkSummary: string;
+  id: string;
+  inputChanged: boolean;
+  inputCount: number;
+  model: { configurationVersion: number; name: string };
+  possibleGaps: Array<{
+    assessment: string;
+    id: string;
+    kind: "possible_gap";
+    recommendation: string;
+    sources: [];
+    title: string;
+  }>;
+  sources: CoverageAnalysisSource[];
+  topic: string;
 }
 
 export interface RecordCard {
@@ -208,6 +323,14 @@ interface ListTagsResponse {
 
 interface TagMutationResponse {
   tag: TagListItem;
+}
+
+interface TagMergeResponse {
+  merge: {
+    id: string;
+    sourceTags: TagListItem[];
+    targetTag: TagListItem;
+  };
 }
 
 interface TagRecordsResponse {
@@ -571,6 +694,61 @@ export async function getTagDetail(tagId: string): Promise<TagDetail> {
   return parseTagResponse<TagDetail>(response);
 }
 
+export async function createTagAlias(
+  tagId: string,
+  name: string,
+): Promise<{ id: string; name: string }> {
+  const response = await fetch(
+    `/api/v1/tags/${encodeURIComponent(tagId)}/aliases`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  );
+  const body = await parseTagResponse<{
+    alias: { id: string; name: string };
+  }>(response);
+
+  return body.alias;
+}
+
+export async function deleteTagAlias(
+  tagId: string,
+  aliasId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/v1/tags/${encodeURIComponent(tagId)}` +
+      `/aliases/${encodeURIComponent(aliasId)}`,
+    { method: "DELETE" },
+  );
+
+  await ensureTagMutation(response);
+}
+
+export async function mergeTags(
+  targetTagId: string,
+  sourceTagIds: string[],
+): Promise<TagMergeResponse["merge"]> {
+  const response = await fetch("/api/v1/tag-merges", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ targetTagId, sourceTagIds }),
+  });
+  const body = await parseTagResponse<TagMergeResponse>(response);
+
+  return body.merge;
+}
+
+export async function undoTagMerge(mergeId: string): Promise<void> {
+  const response = await fetch(
+    `/api/v1/tag-merges/${encodeURIComponent(mergeId)}`,
+    { method: "DELETE" },
+  );
+
+  await ensureTagMutation(response);
+}
+
 export async function updateTag(
   tagId: string,
   input:
@@ -636,6 +814,185 @@ export async function putTagKnowledgePointVisibility(
   );
 
   await ensureTagMutation(response);
+}
+
+export async function scanDuplicateSuggestions(): Promise<DuplicateScanResult> {
+  const response = await fetch("/api/v1/duplicate-suggestions/scan", {
+    method: "POST",
+  });
+  const body = await parseTagResponse<{ scan: DuplicateScanResult }>(response);
+
+  return body.scan;
+}
+
+export async function listDuplicateSuggestions(
+  status: "pending" | "resolved",
+): Promise<DuplicateSuggestion[]> {
+  const response = await fetch(
+    `/api/v1/duplicate-suggestions?status=${status}`,
+  );
+  const body = await parseTagResponse<{ items: DuplicateSuggestion[] }>(response);
+
+  return body.items;
+}
+
+export async function acceptDuplicateSuggestion(
+  suggestionId: string,
+  primarySourceId: string,
+): Promise<DuplicateSuggestion> {
+  const response = await fetch(
+    `/api/v1/duplicate-suggestions/${encodeURIComponent(suggestionId)}/accept`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ primarySourceId }),
+    },
+  );
+  const body = await parseTagResponse<{ suggestion: DuplicateSuggestion }>(
+    response,
+  );
+
+  return body.suggestion;
+}
+
+export async function rejectDuplicateSuggestion(
+  suggestionId: string,
+): Promise<DuplicateSuggestion> {
+  const response = await fetch(
+    `/api/v1/duplicate-suggestions/${encodeURIComponent(suggestionId)}/reject`,
+    { method: "POST" },
+  );
+  const body = await parseTagResponse<{ suggestion: DuplicateSuggestion }>(
+    response,
+  );
+
+  return body.suggestion;
+}
+
+export async function undoDuplicateConsolidation(
+  suggestionId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/v1/duplicate-suggestions/${encodeURIComponent(suggestionId)}/consolidation`,
+    { method: "DELETE" },
+  );
+
+  await ensureTagMutation(response);
+}
+
+export async function scanRelationSuggestions(): Promise<{
+  alreadyReviewedPairs: number;
+  embeddingStatus: "building" | "ready";
+  failedPairs: number;
+  pendingSuggestions: number;
+  recalledPairs: number;
+  skippedPairs: number;
+  suggestedRelations: number;
+}> {
+  const response = await fetch("/api/v1/relation-suggestions/scan", {
+    method: "POST",
+  });
+  const body = await parseTagResponse<{
+    scan: {
+      alreadyReviewedPairs: number;
+      embeddingStatus: "building" | "ready";
+      failedPairs: number;
+      pendingSuggestions: number;
+      recalledPairs: number;
+      skippedPairs: number;
+      suggestedRelations: number;
+    };
+  }>(response);
+
+  return body.scan;
+}
+
+export async function listRelationSuggestions(
+  status: "pending" | "resolved",
+): Promise<RelationSuggestion[]> {
+  const response = await fetch(
+    `/api/v1/relation-suggestions?status=${status}`,
+  );
+  const body = await parseTagResponse<{ items: RelationSuggestion[] }>(response);
+
+  return body.items;
+}
+
+export async function confirmRelationSuggestion(
+  suggestionId: string,
+  input: { description: string; type: KnowledgeRelationType },
+): Promise<RelationSuggestion> {
+  const response = await fetch(
+    `/api/v1/relation-suggestions/${encodeURIComponent(suggestionId)}/confirm`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await parseTagResponse<{ suggestion: RelationSuggestion }>(
+    response,
+  );
+
+  return body.suggestion;
+}
+
+export async function rejectRelationSuggestion(
+  suggestionId: string,
+): Promise<RelationSuggestion> {
+  const response = await fetch(
+    `/api/v1/relation-suggestions/${encodeURIComponent(suggestionId)}/reject`,
+    { method: "POST" },
+  );
+  const body = await parseTagResponse<{ suggestion: RelationSuggestion }>(
+    response,
+  );
+
+  return body.suggestion;
+}
+
+export async function removeKnowledgeRelation(relationId: string): Promise<void> {
+  const response = await fetch(
+    `/api/v1/knowledge-relations/${encodeURIComponent(relationId)}`,
+    { method: "DELETE" },
+  );
+
+  await ensureTagMutation(response);
+}
+
+export async function listCoverageSources(
+  query: string,
+  signal?: AbortSignal,
+): Promise<CoverageSource[]> {
+  const search = new URLSearchParams({ q: query });
+  const response = await fetch(
+    `/api/v1/coverage-sources?${search.toString()}`,
+    signal ? { signal } : undefined,
+  );
+  const body = await parseTagResponse<{ items: CoverageSource[] }>(response);
+
+  return body.items;
+}
+
+export async function createCoverageAnalysis(input: {
+  knowledgePointIds: string[];
+  topic: string;
+}): Promise<CoverageAnalysis> {
+  const response = await fetch("/api/v1/coverage-analyses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await parseTagResponse<{ analysis: CoverageAnalysis }>(response);
+
+  return body.analysis;
+}
+
+export async function listCoverageAnalyses(): Promise<CoverageAnalysis[]> {
+  const response = await fetch("/api/v1/coverage-analyses");
+  const body = await parseTagResponse<{ items: CoverageAnalysis[] }>(response);
+
+  return body.items;
 }
 
 export async function listTagRecords(tagId: string): Promise<RecordCard[]> {

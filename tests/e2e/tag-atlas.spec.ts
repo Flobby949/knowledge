@@ -329,22 +329,113 @@ test.describe("tag atlas", () => {
     expect(remaining.status()).toBe(200);
     expect(((await remaining.json()) as { items: unknown[] }).items).toEqual([]);
   });
+
+  test("user adds aliases, batch merges approved tags, and undoes without losing sources", async ({
+    page,
+    request,
+  }) => {
+    const marker = `tag-governance-${randomUUID().slice(0, 8)}`;
+    const seeded = await seedApprovedTags(request, marker);
+    const [target, firstSource, secondSource] = seeded.tags;
+
+    if (!target || !firstSource || !secondSource) {
+      throw new Error("Tag governance E2E requires three approved tags");
+    }
+
+    await page.goto(appUrl("/tags"));
+
+    const main = page.getByRole("main", { name: "标签图鉴" });
+    const search = main.getByRole("searchbox", { name: "搜索标签" });
+    const atlas = main.getByRole("list", { name: "标签图鉴" });
+    const toolbar = main.getByRole("region", {
+      name: "批量治理我的标签",
+    });
+
+    await search.fill(marker);
+
+    for (const tag of [target, firstSource, secondSource]) {
+      await atlas
+        .getByRole("checkbox", { name: `选择 ${tag.name}`, exact: true })
+        .check();
+    }
+
+    await toolbar
+      .getByRole("button", { name: "合并已选（3）", exact: true })
+      .click();
+
+    const confirmation = toolbar.getByRole("group", {
+      name: "确认标签合并",
+    });
+
+    await confirmation
+      .getByRole("radio", { name: new RegExp(target.name, "u") })
+      .check();
+    await confirmation
+      .getByRole("button", { name: "确认合并", exact: true })
+      .click();
+
+    await expect(
+      atlas.getByRole("button", { name: firstSource.name, exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      atlas.getByRole("button", { name: secondSource.name, exact: true }),
+    ).toHaveCount(0);
+
+    const targetCard = atlas.getByRole("button", {
+      name: target.name,
+      exact: true,
+    });
+
+    await expect(targetCard).toContainText("4 条记录");
+
+    const drawer = page.getByRole("region", { name: "标签详情" });
+    const governance = drawer.getByRole("region", { name: "词汇治理" });
+    const aliasName = `治理别名 ${marker.slice(-8)}`;
+
+    await expect(governance).toContainText(firstSource.name);
+    await expect(governance).toContainText(secondSource.name);
+    await governance
+      .getByRole("textbox", { name: "新别名", exact: true })
+      .fill(aliasName);
+    await governance
+      .getByRole("button", { name: "添加别名", exact: true })
+      .click();
+    await expect(
+      governance.getByRole("list", { name: "标签别名" }),
+    ).toContainText(aliasName);
+
+    await search.fill(aliasName);
+    await expect(targetCard).toBeVisible();
+
+    await governance
+      .getByRole("button", { name: "撤销这次合并", exact: true })
+      .click();
+    await search.fill(marker);
+    await expect(
+      atlas.getByRole("button", { name: firstSource.name, exact: true }),
+    ).toBeVisible();
+    await expect(
+      atlas.getByRole("button", { name: secondSource.name, exact: true }),
+    ).toBeVisible();
+    await expect(targetCard).toContainText("2 条记录");
+  });
 });
 
 async function seedApprovedTags(
   request: APIRequestContext,
   marker: string,
 ): Promise<{
-  tags: Array<{ name: string; recordCount: number }>;
+  tags: Array<{ id: string; name: string; recordCount: number }>;
   targetTagName: string;
 }> {
-  const tags = Array.from({ length: 6 }, (_, index) => ({
+  const tagInputs = Array.from({ length: 6 }, (_, index) => ({
     name: `图鉴标签 ${String(index + 1).padStart(2, "0")} ${marker}`,
     recordCount: index === 0 ? 2 : 1,
   }));
+  const tags: Array<{ id: string; name: string; recordCount: number }> = [];
   let targetTagId = "";
 
-  for (const [index, tag] of tags.entries()) {
+  for (const [index, tag] of tagInputs.entries()) {
     const response = await request.post(appUrl("/api/v1/records"), {
       data: {
         text: `图鉴记录 ${index + 1} ${marker}`,
@@ -355,12 +446,16 @@ async function seedApprovedTags(
 
     expect(response.status()).toBe(201);
 
-    if (index === 0) {
-      const body = (await response.json()) as {
-        record: { myTags: Array<{ id: string }> };
-      };
+    const body = (await response.json()) as {
+      record: { myTags: Array<{ id: string }> };
+    };
+    const tagId = body.record.myTags[0]?.id ?? "";
 
-      targetTagId = body.record.myTags[0]?.id ?? "";
+    expect(tagId).not.toBe("");
+    tags.push({ ...tag, id: tagId });
+
+    if (index === 0) {
+      targetTagId = tagId;
     }
   }
 

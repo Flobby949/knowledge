@@ -796,6 +796,7 @@ export function AppNavigation({
           <Link aria-current={location.pathname.startsWith("/records") ? "page" : undefined} className={location.pathname.startsWith("/records") ? "active" : undefined} to="/records">记录</Link>
           <Link aria-current={location.pathname.startsWith("/review") ? "page" : undefined} className={location.pathname.startsWith("/review") ? "active" : undefined} to="/review">待审查</Link>
           <Link aria-current={location.pathname.startsWith("/tags") ? "page" : undefined} className={location.pathname.startsWith("/tags") ? "active" : undefined} to="/tags">标签</Link>
+          <Link aria-current={location.pathname.startsWith("/insights") ? "page" : undefined} className={location.pathname.startsWith("/insights") ? "active" : undefined} to="/insights">发现</Link>
         </div>
 
         <form

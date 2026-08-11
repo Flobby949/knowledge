@@ -225,6 +225,11 @@
   border-color: #e8cdd0;
 }
 
+.tag-batch-toolbar.is-confirming.is-merge {
+  background: #f7fbf9;
+  border-color: #cfe2d9;
+}
+
 .tag-batch-row,
 .tag-batch-confirmation {
   display: flex;
@@ -284,6 +289,108 @@
   color: #fff;
   background: #a33c45;
   border-color: #8f3039;
+}
+
+.tag-merge-confirmation {
+  display: grid;
+  gap: 13px;
+}
+
+.tag-merge-confirmation fieldset {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.tag-merge-confirmation legend {
+  padding: 0;
+  color: #3f5148;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.tag-merge-confirmation fieldset > p {
+  margin: 3px 0 10px;
+  color: #677c72;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tag-merge-targets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.tag-merge-targets label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 7px 10px;
+  background: #fff;
+  border: 1px solid #d8e2dd;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tag-merge-targets label:has(input:checked) {
+  background: #f0f8f4;
+  border-color: #7da38f;
+}
+
+.tag-merge-targets input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #3f7f5d;
+}
+
+.tag-merge-targets span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.tag-merge-targets strong {
+  overflow: hidden;
+  color: #405249;
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-merge-targets small {
+  color: #71867c;
+  font-size: 10px;
+}
+
+.tag-merge-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+  border-top: 1px solid #dce8e2;
+}
+
+.tag-merge-confirm-actions > span {
+  color: #657b70;
+  font-size: 11px;
+}
+
+.tag-merge-confirm-actions > div {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.tag-merge-confirm-actions button {
+  min-height: 36px;
+  padding-inline: 12px;
 }
 
 .tag-batch-error {
@@ -549,10 +656,160 @@
   font-size: 12px;
 }
 
-.tag-related-records {
+.tag-drawer-body {
   min-height: 0;
-  padding: 22px 30px 28px;
   overflow-y: auto;
+}
+
+.tag-governance {
+  display: grid;
+  gap: 17px;
+  padding: 20px 30px 22px;
+  background: #f9fcfa;
+  border-bottom: 1px solid #dce8e2;
+}
+
+.tag-governance-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tag-governance-heading h3 {
+  margin: 0;
+  color: #405149;
+  font-size: 15px;
+}
+
+.tag-governance-heading p {
+  margin: 4px 0 0;
+  color: #6b8076;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tag-governance-heading > span {
+  padding: 2px 7px;
+  color: #426b57;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  background: #eaf5ef;
+  border: 1px solid #cce3d7;
+  border-radius: 999px;
+}
+
+.tag-alias-editor,
+.tag-merged-sources {
+  display: grid;
+  gap: 8px;
+}
+
+.tag-governance-subheading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tag-governance-subheading strong {
+  color: #4f6259;
+  font-size: 12px;
+}
+
+.tag-governance-subheading span,
+.tag-governance-empty {
+  color: #7a8e84;
+  font-size: 10px;
+}
+
+.tag-governance-empty {
+  margin: 0;
+}
+
+.tag-alias-editor > ul,
+.tag-merged-sources > ul {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border-top: 1px solid #dce7e1;
+}
+
+.tag-alias-editor > ul > li,
+.tag-merged-sources > ul > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid #dce7e1;
+}
+
+.tag-alias-editor > ul span {
+  overflow: hidden;
+  color: #45584f;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-alias-editor > ul button,
+.tag-merged-sources > ul button {
+  min-height: 30px;
+  padding-inline: 8px;
+  color: #667c71;
+  font-size: 10px;
+  white-space: nowrap;
+  background: transparent;
+  border-color: #cfddd6;
+}
+
+.tag-alias-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.tag-alias-form input {
+  min-width: 0;
+  min-height: 36px;
+  padding-inline: 10px;
+  color: #405149;
+  background: #fff;
+  border: 1px solid #cfddd6;
+  border-radius: 5px;
+}
+
+.tag-alias-form button {
+  min-height: 36px;
+  padding-inline: 10px;
+  color: #456452;
+  font-size: 11px;
+  background: #fff;
+  border-color: #bcd2c6;
+}
+
+.tag-merged-sources > ul > li > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tag-merged-sources > ul > li > div span {
+  padding: 2px 7px;
+  color: #4d6459;
+  font-size: 10px;
+  background: #edf5f1;
+  border: 1px solid #d4e4dc;
+  border-radius: 999px;
+}
+
+.tag-related-records {
+  padding: 22px 30px 28px;
 }
 
 .tag-related-heading {
@@ -804,7 +1061,9 @@
 .tag-atlas-toolbar input:focus-visible,
 .tag-atlas-toolbar select:focus-visible,
 .tag-batch-toolbar button:focus-visible,
+.tag-merge-targets input:focus-visible,
 .new-tag-form input:focus-visible,
+.tag-alias-form input:focus-visible,
 .tag-rename-form input:focus-visible,
 .tag-section-tabs button:focus-visible,
 .tag-card-selection input:focus-visible,
@@ -837,6 +1096,12 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .tag-merge-confirm-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
   }
 }
 

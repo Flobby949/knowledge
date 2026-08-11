@@ -8,6 +8,11 @@ import {
   type AnalysisGenerator,
 } from "./analysis-generator.js";
 import {
+  generateOpenAICompatibleCoverage,
+  type CoverageGenerator,
+} from "./coverage-generator.js";
+import { registerCoverageRoutes } from "./coverage-routes.js";
+import {
   embedOpenAICompatibleText,
   type EmbedText,
 } from "./embedding-provider.js";
@@ -20,6 +25,7 @@ import {
 import { countGraphemes, hasNonWhitespace } from "./domain/fragment-text.js";
 import { normalizeTagName } from "./domain/tag-name.js";
 import { registerDataTransferRoutes } from "./data-transfer-routes.js";
+import { registerDuplicateRoutes } from "./duplicate-routes.js";
 import {
   ensureBootstrapModelDraft,
   registerModelConfigRoutes,
@@ -29,6 +35,11 @@ import {
   testOpenAICompatibleEndpoint,
   type ModelEndpointTester,
 } from "./model-endpoint-tester.js";
+import {
+  generateOpenAICompatibleRelation,
+  type RelationGenerator,
+} from "./relation-generator.js";
+import { registerRelationRoutes } from "./relation-routes.js";
 import {
   createSemanticIndexScheduler,
   findSemanticMatches,
@@ -42,6 +53,8 @@ export interface BuildAppOptions {
   databaseUrl: string;
   embedText?: EmbedText;
   generateAnalysis?: AnalysisGenerator;
+  generateCoverage?: CoverageGenerator;
+  generateRelation?: RelationGenerator;
   logger?: boolean;
   onAiTaskSettled?: (taskId: string) => void;
   testModelEndpoint?: ModelEndpointTester;
@@ -120,6 +133,14 @@ interface TagParams {
   id: string;
 }
 
+interface TagAliasParams extends TagParams {
+  aliasId: string;
+}
+
+interface TagMergeParams {
+  id: string;
+}
+
 interface TagVisibilityParams extends TagParams {
   itemId: string;
   recordId: string;
@@ -135,6 +156,11 @@ interface TagVisibilityBody {
 
 interface CreateTagBody {
   name: string;
+}
+
+interface CreateTagMergeBody {
+  sourceTagIds: string[];
+  targetTagId: string;
 }
 
 interface DeleteCandidateTagsBody {
@@ -256,10 +282,10 @@ interface StoredRecord {
 }
 
 const EFFECTIVE_TAG_RECORDS_CTE = `effective_tag_records AS (
-  SELECT assignment.tag_id, assignment.record_id
+  SELECT resolve_tag_id(assignment.tag_id) AS tag_id, assignment.record_id
     FROM tag_assignments AS assignment
     INNER JOIN tags AS effective_tag
-      ON effective_tag.id = assignment.tag_id
+      ON effective_tag.id = resolve_tag_id(assignment.tag_id)
      AND effective_tag.approval_status IN ('CANDIDATE', 'USER_APPROVED')
      AND effective_tag.archived_at IS NULL
     INNER JOIN records AS effective_record
@@ -268,10 +294,10 @@ const EFFECTIVE_TAG_RECORDS_CTE = `effective_tag_records AS (
    WHERE assignment.assigned_by = 'USER'
      AND assignment.status = 'ACTIVE'
   UNION
-  SELECT assignment.tag_id, point.record_id
+  SELECT resolve_tag_id(assignment.tag_id) AS tag_id, point.record_id
     FROM tag_assignments AS assignment
     INNER JOIN tags AS effective_tag
-      ON effective_tag.id = assignment.tag_id
+      ON effective_tag.id = resolve_tag_id(assignment.tag_id)
      AND effective_tag.approval_status IN ('CANDIDATE', 'USER_APPROVED')
      AND effective_tag.archived_at IS NULL
     INNER JOIN knowledge_points AS point
@@ -290,19 +316,19 @@ const EFFECTIVE_TAG_RECORDS_CTE = `effective_tag_records AS (
 )`;
 
 const LIBRARY_TAG_RECORDS_CTE = `library_tag_records AS (
-  SELECT assignment.tag_id, assignment.record_id
+  SELECT resolve_tag_id(assignment.tag_id) AS tag_id, assignment.record_id
     FROM tag_assignments AS assignment
     INNER JOIN tags AS library_tag
-      ON library_tag.id = assignment.tag_id
+      ON library_tag.id = resolve_tag_id(assignment.tag_id)
      AND library_tag.approval_status IN ('CANDIDATE', 'USER_APPROVED')
      AND library_tag.archived_at IS NULL
    WHERE assignment.assigned_by = 'USER'
      AND assignment.status = 'ACTIVE'
   UNION
-  SELECT assignment.tag_id, point.record_id
+  SELECT resolve_tag_id(assignment.tag_id) AS tag_id, point.record_id
     FROM tag_assignments AS assignment
     INNER JOIN tags AS library_tag
-      ON library_tag.id = assignment.tag_id
+      ON library_tag.id = resolve_tag_id(assignment.tag_id)
      AND library_tag.approval_status IN ('CANDIDATE', 'USER_APPROVED')
      AND library_tag.archived_at IS NULL
     INNER JOIN knowledge_points AS point
@@ -372,6 +398,19 @@ export async function buildApp(
   registerSemanticSearchRoutes(app, {
     pool,
     scheduler: semanticIndexScheduler,
+  });
+  registerDuplicateRoutes(app, { pool });
+  registerRelationRoutes(app, {
+    pool,
+    credentialSecret,
+    generateRelation:
+      options.generateRelation ?? generateOpenAICompatibleRelation,
+  });
+  registerCoverageRoutes(app, {
+    pool,
+    credentialSecret,
+    generateCoverage:
+      options.generateCoverage ?? generateOpenAICompatibleCoverage,
   });
 
   app.post<{ Body: CreateRecordBody }>(
@@ -829,23 +868,17 @@ export async function buildApp(
         });
       }
 
-      const existing = await pool.query<{
-        display_name: string;
-        id: string;
-      }>(
-        "SELECT id, display_name FROM tags WHERE normalized_name = $1",
-        [normalizedName],
-      );
+      const existing = await readTagByNormalizedName(pool, normalizedName);
 
-      if (existing.rows[0]) {
+      if (existing) {
         return reply.code(409).send({
           error: {
             code: "TAG_NAME_CONFLICT",
             message: "已存在同名标签，请使用现有标签或换一个名称。",
             details: {
               existingTag: {
-                id: existing.rows[0].id,
-                name: existing.rows[0].display_name,
+                id: existing.id,
+                name: existing.name,
               },
             },
           },
@@ -867,15 +900,9 @@ export async function buildApp(
           throw error;
         }
 
-        const conflict = await pool.query<{
-          display_name: string;
-          id: string;
-        }>(
-          "SELECT id, display_name FROM tags WHERE normalized_name = $1",
-          [normalizedName],
-        );
+        const conflict = await readTagByNormalizedName(pool, normalizedName);
 
-        if (!conflict.rows[0]) {
+        if (!conflict) {
           throw error;
         }
 
@@ -885,8 +912,8 @@ export async function buildApp(
             message: "已存在同名标签，请使用现有标签或换一个名称。",
             details: {
               existingTag: {
-                id: conflict.rows[0].id,
-                name: conflict.rows[0].display_name,
+                id: conflict.id,
+                name: conflict.name,
               },
             },
           },
@@ -948,7 +975,31 @@ export async function buildApp(
              ON effective_record.tag_id = tag.id
           WHERE tag.approval_status = $2
             AND tag.archived_at IS NULL
-            AND ($1::text = '' OR tag.display_name ILIKE '%' || $1 || '%')
+            AND NOT EXISTS (
+              SELECT 1
+                FROM tag_merges AS active_merge
+               WHERE active_merge.source_tag_id = tag.id
+                 AND active_merge.undone_at IS NULL
+            )
+            AND (
+              $1::text = ''
+              OR tag.display_name ILIKE '%' || $1 || '%'
+              OR EXISTS (
+                SELECT 1
+                  FROM tag_aliases AS alias
+                 WHERE resolve_tag_id(alias.tag_id) = tag.id
+                   AND alias.display_name ILIKE '%' || $1 || '%'
+              )
+              OR EXISTS (
+                SELECT 1
+                  FROM tag_merges AS active_merge
+                  INNER JOIN tags AS source_tag
+                    ON source_tag.id = active_merge.source_tag_id
+                 WHERE active_merge.target_tag_id = tag.id
+                   AND active_merge.undone_at IS NULL
+                   AND source_tag.display_name ILIKE '%' || $1 || '%'
+              )
+            )
           GROUP BY tag.id
           ORDER BY ${orderBy}`,
         [query, approvalStatus],
@@ -978,6 +1029,12 @@ export async function buildApp(
            ON effective_record.tag_id = tag.id
         WHERE tag.approval_status IN ('CANDIDATE', 'USER_APPROVED')
           AND tag.archived_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+              FROM tag_merges AS active_merge
+             WHERE active_merge.source_tag_id = tag.id
+               AND active_merge.undone_at IS NULL
+          )
         GROUP BY tag.id
         ORDER BY tag.display_name, tag.id`,
     );
@@ -1008,12 +1065,37 @@ export async function buildApp(
           WHERE id = $1
             AND origin = 'AI_CREATED'
             AND approval_status = 'CANDIDATE'
+            AND NOT EXISTS (
+              SELECT 1
+                FROM tag_merges AS active_merge
+               WHERE active_merge.source_tag_id = tags.id
+                 AND active_merge.undone_at IS NULL
+            )
           RETURNING id, display_name, origin`,
         [request.params.id],
       );
       const tag = result.rows[0];
 
       if (!tag) {
+        const governed = await pool.query<{ in_use: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1
+               FROM tag_merges
+              WHERE source_tag_id = $1
+                AND undone_at IS NULL
+           ) AS in_use`,
+          [request.params.id],
+        );
+
+        if (governed.rows[0]?.in_use) {
+          return reply.code(409).send({
+            error: {
+              code: "TAG_GOVERNANCE_IN_USE",
+              message: "合并来源标签需先撤销合并，再认可为独立标签。",
+            },
+          });
+        }
+
         return reply.code(404).send({ error: "Candidate tag not found" });
       }
 
@@ -1025,6 +1107,200 @@ export async function buildApp(
           approvalStatus: "user_approved",
         },
       };
+    },
+  );
+
+  app.post<{ Body: CreateTagBody; Params: TagParams }>(
+    "/api/v1/tags/:id/aliases",
+    async (request, reply) => {
+      const name = request.body?.name;
+      const normalizedName =
+        typeof name === "string" ? normalizeTagName(name) : "";
+
+      if (!normalizedName) {
+        return reply.code(422).send({
+          error: {
+            code: "TAG_ALIAS_INVALID",
+            message: "标签别名不能为空。",
+          },
+        });
+      }
+
+      const tag = await readPublicTag(pool, request.params.id);
+
+      if (!tag || tag.approvalStatus !== "user_approved") {
+        return reply.code(404).send({
+          error: {
+            code: "TAG_ALIAS_TARGET_NOT_FOUND",
+            message: "只能为当前有效的“我的标签”添加别名。",
+          },
+        });
+      }
+
+      const existing = await readTagByNormalizedName(pool, normalizedName);
+
+      if (existing) {
+        return tagNameConflict(reply, existing);
+      }
+
+      const aliasId = randomUUID();
+
+      try {
+        await pool.query(
+          `INSERT INTO tag_aliases
+             (id, tag_id, display_name, normalized_name)
+           VALUES ($1, $2, $3, $4)`,
+          [aliasId, tag.id, name, normalizedName],
+        );
+      } catch (error) {
+        if (!isTagVocabularyNameViolation(error)) {
+          throw error;
+        }
+
+        const conflict = await readTagByNormalizedName(pool, normalizedName);
+
+        if (!conflict) {
+          throw error;
+        }
+
+        return tagNameConflict(reply, conflict);
+      }
+
+      scheduleSemanticIndex();
+
+      return reply
+        .code(201)
+        .header(
+          "location",
+          `/api/v1/tags/${tag.id}/aliases/${aliasId}`,
+        )
+        .send({ alias: { id: aliasId, name }, tag });
+    },
+  );
+
+  app.delete<{ Params: TagAliasParams }>(
+    "/api/v1/tags/:id/aliases/:aliasId",
+    async (request, reply) => {
+      const deleted = await pool.query(
+        `DELETE FROM tag_aliases
+              WHERE id = $2
+                AND resolve_tag_id(tag_id) = resolve_tag_id($1::uuid)
+          RETURNING id`,
+        [request.params.id, request.params.aliasId],
+      );
+
+      if (!deleted.rows[0]) {
+        return reply.code(404).send({
+          error: { code: "TAG_ALIAS_NOT_FOUND", message: "标签别名不存在。" },
+        });
+      }
+
+      scheduleSemanticIndex();
+      return reply.code(204).send();
+    },
+  );
+
+  app.post<{ Body: CreateTagMergeBody }>(
+    "/api/v1/tag-merges",
+    async (request, reply) => {
+      if (!isCreateTagMergeBody(request.body)) {
+        return reply.code(422).send({
+          error: {
+            code: "TAG_MERGE_INVALID",
+            message: "请选择一个主标签和至少一个不同的来源标签。",
+          },
+        });
+      }
+
+      const { sourceTagIds, targetTagId } = request.body;
+      const [targetTag, ...sourceTags] = await Promise.all([
+        readPublicTag(pool, targetTagId),
+        ...sourceTagIds.map((id) => readPublicTag(pool, id)),
+      ]);
+
+      if (
+        !targetTag ||
+        targetTag.id !== targetTagId ||
+        targetTag.approvalStatus !== "user_approved" ||
+        sourceTags.some(
+          (tag, index) =>
+            !tag ||
+            tag.id !== sourceTagIds[index] ||
+            tag.approvalStatus === "archived",
+        )
+      ) {
+        return reply.code(409).send({
+          error: {
+            code: "TAG_MERGE_NOT_ALLOWED",
+            message: "主标签必须已认可，且来源标签必须是尚未合并的有效标签。",
+          },
+        });
+      }
+
+      const operationId = randomUUID();
+
+      try {
+        await pool.query(
+          `INSERT INTO tag_merges
+             (operation_id, source_tag_id, target_tag_id)
+           SELECT $1, source_tag_id, $3
+             FROM unnest($2::uuid[]) AS source_tag_id`,
+          [operationId, sourceTagIds, targetTagId],
+        );
+      } catch (error) {
+        if (!isTagMergeConstraintViolation(error)) {
+          throw error;
+        }
+
+        return reply.code(409).send({
+          error: {
+            code: "TAG_MERGE_NOT_ALLOWED",
+            message: "标签已参与其他有效合并，不能形成合并链或重复合并。",
+          },
+        });
+      }
+
+      const mergedTarget = await readPublicTag(pool, targetTagId);
+
+      if (!mergedTarget) {
+        throw new Error("Merged target tag could not be read");
+      }
+
+      scheduleSemanticIndex();
+
+      return reply.code(201).send({
+        merge: {
+          id: operationId,
+          sourceTags,
+          targetTag: mergedTarget,
+        },
+      });
+    },
+  );
+
+  app.delete<{ Params: TagMergeParams }>(
+    "/api/v1/tag-merges/:id",
+    async (request, reply) => {
+      const undone = await pool.query(
+        `UPDATE tag_merges
+            SET undone_at = clock_timestamp()
+          WHERE operation_id = $1
+            AND undone_at IS NULL
+        RETURNING id`,
+        [request.params.id],
+      );
+
+      if (!undone.rows[0]) {
+        return reply.code(404).send({
+          error: {
+            code: "TAG_MERGE_NOT_FOUND",
+            message: "有效的标签合并不存在。",
+          },
+        });
+      }
+
+      scheduleSemanticIndex();
+      return reply.code(204).send();
     },
   );
 
@@ -1067,30 +1343,10 @@ export async function buildApp(
           });
         }
 
-        const existing = await pool.query<{
-          id: string;
-          display_name: string;
-        }>(
-          `SELECT id, display_name
-             FROM tags
-            WHERE normalized_name = $1
-              AND id <> $2`,
-          [normalizedName, request.params.id],
-        );
+        const existing = await readTagByNormalizedName(pool, normalizedName);
 
-        if (existing.rows[0]) {
-          return reply.code(409).send({
-            error: {
-              code: "TAG_NAME_CONFLICT",
-              message: "已存在同名标签，请使用现有标签或换一个名称。",
-              details: {
-                existingTag: {
-                  id: existing.rows[0].id,
-                  name: existing.rows[0].display_name,
-                },
-              },
-            },
-          });
+        if (existing && existing.id !== request.params.id) {
+          return tagNameConflict(reply, existing);
         }
 
         try {
@@ -1113,30 +1369,13 @@ export async function buildApp(
             throw error;
           }
 
-          const conflict = await pool.query<{
-            display_name: string;
-            id: string;
-          }>(
-            "SELECT id, display_name FROM tags WHERE normalized_name = $1",
-            [normalizedName],
-          );
+          const conflict = await readTagByNormalizedName(pool, normalizedName);
 
-          if (!conflict.rows[0]) {
+          if (!conflict) {
             throw error;
           }
 
-          return reply.code(409).send({
-            error: {
-              code: "TAG_NAME_CONFLICT",
-              message: "已存在同名标签，请使用现有标签或换一个名称。",
-              details: {
-                existingTag: {
-                  id: conflict.rows[0].id,
-                  name: conflict.rows[0].display_name,
-                },
-              },
-            },
-          });
+          return tagNameConflict(reply, conflict);
         }
       } else {
         const client = await pool.connect();
@@ -1173,6 +1412,33 @@ export async function buildApp(
             }
 
             if (tag.approval_status === "USER_APPROVED") {
+              const governed = await client.query<{ in_use: boolean }>(
+                `SELECT EXISTS (
+                   SELECT 1
+                     FROM tag_aliases AS alias
+                    WHERE alias.tag_id = $1
+                 ) OR EXISTS (
+                   SELECT 1
+                     FROM tag_merges AS active_merge
+                    WHERE (
+                      active_merge.source_tag_id = $1
+                      OR active_merge.target_tag_id = $1
+                    )
+                      AND active_merge.undone_at IS NULL
+                 ) AS in_use`,
+                [request.params.id],
+              );
+
+              if (governed.rows[0]?.in_use) {
+                await client.query("ROLLBACK");
+                return reply.code(409).send({
+                  error: {
+                    code: "TAG_GOVERNANCE_IN_USE",
+                    message: "请先移除标签别名或撤销相关合并，再变更标签状态。",
+                  },
+                });
+              }
+
               const blocked = await client.query<{ record_id: string }>(
                 `SELECT assignment.record_id
                    FROM tag_assignments AS assignment
@@ -1253,6 +1519,15 @@ export async function buildApp(
             });
           }
 
+          if (isTagGovernanceStateViolation(error)) {
+            return reply.code(409).send({
+              error: {
+                code: "TAG_GOVERNANCE_IN_USE",
+                message: "请先移除标签别名或撤销相关合并，再变更标签状态。",
+              },
+            });
+          }
+
           throw error;
         } finally {
           client.release();
@@ -1288,9 +1563,17 @@ export async function buildApp(
         const current = await client.query<{
           approval_status: "ARCHIVED" | "CANDIDATE" | "USER_APPROVED";
           id: string;
+          is_merge_source: boolean;
         }>(
-          `SELECT id, approval_status
-             FROM tags
+          `SELECT tag.id,
+                  tag.approval_status,
+                  EXISTS (
+                    SELECT 1
+                      FROM tag_merges AS active_merge
+                     WHERE active_merge.source_tag_id = tag.id
+                       AND active_merge.undone_at IS NULL
+                  ) AS is_merge_source
+             FROM tags AS tag
             WHERE id = ANY($1::uuid[])
             ORDER BY id
             FOR UPDATE`,
@@ -1313,6 +1596,16 @@ export async function buildApp(
             error: {
               code: "TAG_DELETE_NOT_ALLOWED",
               message: "已认可标签不能删除，请使用归档。",
+            },
+          });
+        }
+
+        if (current.rows.some((tag) => tag.is_merge_source)) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({
+            error: {
+              code: "TAG_GOVERNANCE_IN_USE",
+              message: "合并来源标签需先撤销合并，不能直接删除。",
             },
           });
         }
@@ -1345,10 +1638,17 @@ export async function buildApp(
         await client.query("BEGIN");
         const current = await client.query<{
           approval_status: "ARCHIVED" | "CANDIDATE" | "USER_APPROVED";
+          is_merge_source: boolean;
         }>(
-          `SELECT approval_status
-             FROM tags
-            WHERE id = $1
+          `SELECT tag.approval_status,
+                  EXISTS (
+                    SELECT 1
+                      FROM tag_merges AS active_merge
+                     WHERE active_merge.source_tag_id = tag.id
+                       AND active_merge.undone_at IS NULL
+                  ) AS is_merge_source
+             FROM tags AS tag
+            WHERE tag.id = $1
             FOR UPDATE`,
           [request.params.id],
         );
@@ -1367,6 +1667,16 @@ export async function buildApp(
             error: {
               code: "TAG_DELETE_NOT_ALLOWED",
               message: "已认可标签不能删除，请使用归档。",
+            },
+          });
+        }
+
+        if (tag.is_merge_source) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({
+            error: {
+              code: "TAG_GOVERNANCE_IN_USE",
+              message: "合并来源标签需先撤销合并，不能直接删除。",
             },
           });
         }
@@ -1408,7 +1718,7 @@ export async function buildApp(
         `UPDATE tag_assignments AS assignment
             SET status = $4
            FROM knowledge_points AS point
-          WHERE assignment.tag_id = $1
+          WHERE resolve_tag_id(assignment.tag_id) = resolve_tag_id($1::uuid)
             AND assignment.knowledge_point_id = $3
             AND assignment.assigned_by = 'AI'
             AND point.id = assignment.knowledge_point_id
@@ -1444,7 +1754,7 @@ export async function buildApp(
       }>(
         `SELECT id, display_name
            FROM tags
-          WHERE id = $1
+          WHERE id = resolve_tag_id($1::uuid)
             AND approval_status IN ('CANDIDATE', 'USER_APPROVED')
             AND archived_at IS NULL`,
         [request.params.id],
@@ -2005,6 +2315,7 @@ async function assignRequestedTags(
   requestedTags: RequestedTag[],
 ): Promise<TagChip[]> {
   const tags: TagChip[] = [];
+  const assignedTagIds = new Set<string>();
 
   for (const requestedTag of requestedTags) {
     let tag: TagChip;
@@ -2016,7 +2327,7 @@ async function assignRequestedTags(
       }>(
         `SELECT id, display_name
            FROM tags
-          WHERE id = $1
+          WHERE id = resolve_tag_id($1::uuid)
             AND approval_status = 'USER_APPROVED'
             AND archived_at IS NULL`,
         [requestedTag.id],
@@ -2034,30 +2345,89 @@ async function assignRequestedTags(
       const tagId = randomUUID();
       const normalizedName = normalizeTagName(requestedTag.name);
       const existingTag = await client.query<{
+        approval_status: "ARCHIVED" | "CANDIDATE" | "USER_APPROVED";
         id: string;
         display_name: string;
+        match_kind: "ALIAS" | "TAG";
+        matched_tag_id: string;
       }>(
-        `SELECT id, display_name
-           FROM tags
-          WHERE normalized_name = $1`,
+        `WITH name_match AS (
+           SELECT tag.id AS tag_id, 'TAG'::text AS match_kind, 0 AS priority
+             FROM tags AS tag
+            WHERE tag.normalized_name = $1
+           UNION ALL
+           SELECT alias.tag_id, 'ALIAS'::text, 1
+             FROM tag_aliases AS alias
+            WHERE alias.normalized_name = $1
+         )
+         SELECT resolved.id,
+                resolved.display_name,
+                resolved.approval_status,
+                name_match.match_kind,
+                name_match.tag_id AS matched_tag_id
+           FROM name_match
+           INNER JOIN tags AS resolved
+             ON resolved.id = resolve_tag_id(name_match.tag_id)
+          ORDER BY name_match.priority
+          LIMIT 1`,
         [normalizedName],
       );
 
       if (existingTag.rows[0]) {
-        throw new TagNameConflictError({
-          id: existingTag.rows[0].id,
-          name: existingTag.rows[0].display_name,
-        });
-      }
+        const existing = existingTag.rows[0];
 
-      await client.query(
-        `INSERT INTO tags
-           (id, display_name, normalized_name, origin, approval_status,
-            user_approved_at)
-         VALUES ($1, $2, $3, 'USER_CREATED', 'USER_APPROVED', now())`,
-        [tagId, requestedTag.name, normalizedName],
-      );
-      tag = { id: tagId, name: requestedTag.name };
+        if (
+          existing.approval_status === "USER_APPROVED" &&
+          (existing.match_kind === "ALIAS" ||
+            existing.matched_tag_id !== existing.id)
+        ) {
+          tag = { id: existing.id, name: existing.display_name };
+        } else {
+          throw new TagNameConflictError({
+            id: existing.id,
+            name: existing.display_name,
+          });
+        }
+      } else {
+        try {
+          await client.query(
+            `INSERT INTO tags
+               (id, display_name, normalized_name, origin, approval_status,
+                user_approved_at)
+             VALUES ($1, $2, $3, 'USER_CREATED', 'USER_APPROVED', now())`,
+            [tagId, requestedTag.name, normalizedName],
+          );
+        } catch (error) {
+          if (!isTagVocabularyNameViolation(error)) {
+            throw error;
+          }
+
+          const conflict = await client.query<{
+            display_name: string;
+            id: string;
+          }>(
+            `SELECT id, display_name
+               FROM tags
+              WHERE id = resolve_tag_name($1)`,
+            [normalizedName],
+          );
+
+          if (!conflict.rows[0]) {
+            throw error;
+          }
+
+          throw new TagNameConflictError({
+            id: conflict.rows[0].id,
+            name: conflict.rows[0].display_name,
+          });
+        }
+
+        tag = { id: tagId, name: requestedTag.name };
+      }
+    }
+
+    if (assignedTagIds.has(tag.id)) {
+      continue;
     }
 
     await client.query(
@@ -2066,6 +2436,7 @@ async function assignRequestedTags(
       [recordId, tag.id],
     );
     tags.push(tag);
+    assignedTagIds.add(tag.id);
   }
 
   return tags;
@@ -2101,6 +2472,24 @@ async function readOverviewCorrection(pool: Pool, recordId: string) {
     : null;
 }
 
+async function readTagByNormalizedName(
+  database: Pool | PoolClient,
+  normalizedName: string,
+): Promise<TagChip | null> {
+  const result = await database.query<{
+    display_name: string;
+    id: string;
+  }>(
+    `SELECT tag.id, tag.display_name
+       FROM tags AS tag
+      WHERE tag.id = resolve_tag_name($1)`,
+    [normalizedName],
+  );
+  const tag = result.rows[0];
+
+  return tag ? { id: tag.id, name: tag.display_name } : null;
+}
+
 async function readPublicTag(
   pool: Pool,
   tagId: string,
@@ -2115,7 +2504,7 @@ async function readPublicTag(
        FROM tags AS tag
        LEFT JOIN effective_tag_records AS effective_record
          ON effective_record.tag_id = tag.id
-      WHERE tag.id = $1
+      WHERE tag.id = resolve_tag_id($1::uuid)
       GROUP BY tag.id`,
     [tagId],
   );
@@ -2130,7 +2519,8 @@ async function readTagDetail(pool: Pool, tagId: string) {
     return null;
   }
 
-  const result = await pool.query<{
+  const [result, aliasResult, mergedSourceResult] = await Promise.all([
+    pool.query<{
     assignment_status: "ACTIVE" | "SUPPRESSED" | null;
     content: string;
     effective_title: string | null;
@@ -2138,8 +2528,8 @@ async function readTagDetail(pool: Pool, tagId: string) {
     knowledge_point_id: string | null;
     knowledge_point_title: string | null;
     record_id: string;
-  }>(
-    `WITH sources AS (
+    }>(
+    `WITH raw_sources AS (
        SELECT assignment.record_id,
               TRUE AS from_my_tags,
               NULL::uuid AS knowledge_point_id,
@@ -2147,7 +2537,7 @@ async function readTagDetail(pool: Pool, tagId: string) {
               NULL::tag_assignment_status AS assignment_status,
               0 AS knowledge_point_position
          FROM tag_assignments AS assignment
-        WHERE assignment.tag_id = $1
+        WHERE resolve_tag_id(assignment.tag_id) = resolve_tag_id($1::uuid)
           AND assignment.assigned_by = 'USER'
        UNION ALL
        SELECT point.record_id,
@@ -2165,7 +2555,7 @@ async function readTagDetail(pool: Pool, tagId: string) {
            ON source_record.id = point.record_id
          LEFT JOIN knowledge_point_corrections AS correction
            ON correction.knowledge_point_id = point.id
-        WHERE assignment.tag_id = $1
+        WHERE resolve_tag_id(assignment.tag_id) = resolve_tag_id($1::uuid)
           AND assignment.assigned_by = 'AI'
           AND (
             (
@@ -2190,6 +2580,26 @@ async function readTagDetail(pool: Pool, tagId: string) {
               )
             )
           )
+     ),
+     sources AS (
+       SELECT raw_source.record_id,
+              raw_source.from_my_tags,
+              raw_source.knowledge_point_id,
+              raw_source.knowledge_point_title,
+              CASE
+                WHEN raw_source.knowledge_point_id IS NULL
+                  THEN NULL::tag_assignment_status
+                WHEN BOOL_OR(raw_source.assignment_status = 'ACTIVE')
+                  THEN 'ACTIVE'::tag_assignment_status
+                ELSE 'SUPPRESSED'::tag_assignment_status
+              END AS assignment_status,
+              raw_source.knowledge_point_position
+         FROM raw_sources AS raw_source
+        GROUP BY raw_source.record_id,
+                 raw_source.from_my_tags,
+                 raw_source.knowledge_point_id,
+                 raw_source.knowledge_point_title,
+                 raw_source.knowledge_point_position
      )
      SELECT source.record_id,
             source.from_my_tags,
@@ -2214,8 +2624,30 @@ async function readTagDetail(pool: Pool, tagId: string) {
                source.from_my_tags DESC,
                source.knowledge_point_position,
                source.knowledge_point_id`,
-    [tagId],
-  );
+      [tag.id],
+    ),
+    pool.query<{ display_name: string; id: string }>(
+      `SELECT alias.id, alias.display_name
+         FROM tag_aliases AS alias
+        WHERE resolve_tag_id(alias.tag_id) = $1
+        ORDER BY alias.display_name, alias.id`,
+      [tag.id],
+    ),
+    pool.query<{
+      display_name: string;
+      id: string;
+      operation_id: string;
+    }>(
+      `SELECT source.id, source.display_name, active_merge.operation_id
+         FROM tag_merges AS active_merge
+         INNER JOIN tags AS source
+           ON source.id = active_merge.source_tag_id
+        WHERE active_merge.target_tag_id = $1
+          AND active_merge.undone_at IS NULL
+        ORDER BY active_merge.created_at, source.display_name, source.id`,
+      [tag.id],
+    ),
+  ]);
   const records = new Map<
     string,
     {
@@ -2266,7 +2698,19 @@ async function readTagDetail(pool: Pool, tagId: string) {
     }
   }
 
-  return { tag, records: [...records.values()] };
+  return {
+    tag,
+    aliases: aliasResult.rows.map((alias) => ({
+      id: alias.id,
+      name: alias.display_name,
+    })),
+    mergedSources: mergedSourceResult.rows.map((source) => ({
+      id: source.id,
+      mergeId: source.operation_id,
+      name: source.display_name,
+    })),
+    records: [...records.values()],
+  };
 }
 
 function publicTagFromRow(row: TagSummaryRow): PublicTag {
@@ -2335,6 +2779,39 @@ function isDeleteCandidateTagsBody(
   );
 }
 
+function isCreateTagMergeBody(value: unknown): value is CreateTagMergeBody {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  const keys = Object.keys(body).sort();
+
+  return (
+    keys.length === 2 &&
+    keys[0] === "sourceTagIds" &&
+    keys[1] === "targetTagId" &&
+    typeof body.targetTagId === "string" &&
+    isUuid(body.targetTagId) &&
+    Array.isArray(body.sourceTagIds) &&
+    body.sourceTagIds.length > 0 &&
+    body.sourceTagIds.length <= 100 &&
+    body.sourceTagIds.every((id) => typeof id === "string" && isUuid(id)) &&
+    new Set(body.sourceTagIds).size === body.sourceTagIds.length &&
+    !body.sourceTagIds.includes(body.targetTagId)
+  );
+}
+
+function tagNameConflict(reply: FastifyReply, existingTag: TagChip) {
+  return reply.code(409).send({
+    error: {
+      code: "TAG_NAME_CONFLICT",
+      message: "已存在同名标签或别名，请使用现有标签或换一个名称。",
+      details: { existingTag },
+    },
+  });
+}
+
 async function tagUpdateNotFoundOrAllowed(
   pool: Pool,
   tagId: string,
@@ -2371,6 +2848,10 @@ function isRecordTagRequiredViolation(error: unknown): boolean {
 }
 
 function isTagNameUniqueViolation(error: unknown): boolean {
+  return isTagVocabularyNameViolation(error);
+}
+
+function isTagVocabularyNameViolation(error: unknown): boolean {
   if (!error || typeof error !== "object") {
     return false;
   }
@@ -2379,7 +2860,37 @@ function isTagNameUniqueViolation(error: unknown): boolean {
 
   return (
     postgresError.code === "23505" &&
-    postgresError.constraint === "tags_normalized_name_unique"
+    (postgresError.constraint === "tags_normalized_name_unique" ||
+      postgresError.constraint === "tag_aliases_normalized_name_unique" ||
+      postgresError.constraint === "tag_vocabulary_normalized_name_unique")
+  );
+}
+
+function isTagMergeConstraintViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const postgresError = error as { code?: string; constraint?: string };
+
+  return (
+    (postgresError.code === "23505" &&
+      postgresError.constraint === "tag_merges_one_active_source_idx") ||
+    (postgresError.code === "23514" &&
+      postgresError.constraint?.startsWith("tag_merges_") === true)
+  );
+}
+
+function isTagGovernanceStateViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const postgresError = error as { code?: string; constraint?: string };
+
+  return (
+    postgresError.code === "23514" &&
+    postgresError.constraint?.startsWith("tag_governance_") === true
   );
 }
 
@@ -2567,7 +3078,7 @@ async function findRecords(
         AND assignment.assigned_by = 'USER'
         AND assignment.status = 'ACTIVE'
        INNER JOIN tags AS tag
-         ON tag.id = assignment.tag_id
+         ON tag.id = resolve_tag_id(assignment.tag_id)
         AND tag.approval_status = 'USER_APPROVED'
        LEFT JOIN ai_analysis_revisions AS active_analysis
          ON active_analysis.id = record.current_analysis_revision_id
@@ -2652,7 +3163,11 @@ async function findRecords(
             SELECT 1
               FROM library_tag_records AS filter_assignment
              WHERE filter_assignment.record_id = record.id
-               AND filter_assignment.tag_id = ANY($4::uuid[])
+               AND EXISTS (
+                 SELECT 1
+                   FROM unnest($4::uuid[]) AS requested_tag(id)
+                  WHERE filter_assignment.tag_id = resolve_tag_id(requested_tag.id)
+               )
           )
         )
         AND (
@@ -2705,7 +3220,9 @@ async function findRecords(
     const existing = records.get(row.id);
 
     if (existing) {
-      existing.card.myTags.push({ id: row.tag_id, name: row.display_name });
+      if (!existing.card.myTags.some(({ id }) => id === row.tag_id)) {
+        existing.card.myTags.push({ id: row.tag_id, name: row.display_name });
+      }
       continue;
     }
 

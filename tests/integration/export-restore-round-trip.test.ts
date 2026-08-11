@@ -39,6 +39,18 @@ type DomainJson = {
     Record<string, unknown> & { id: string; content: string }
   >;
   tags: Array<Record<string, unknown> & { id: string }>;
+  tagAliases: Array<
+    Record<string, unknown> & { id: string; tag_id: string; display_name: string }
+  >;
+  tagMerges: Array<
+    Record<string, unknown> & {
+      id: string;
+      operation_id: string;
+      source_tag_id: string;
+      target_tag_id: string;
+      undone_at: string | null;
+    }
+  >;
   tagAssignments: Array<
     Record<string, unknown> & {
       id: string;
@@ -63,18 +75,30 @@ type DomainJson = {
       analysis_revision_id: string;
     }
   >;
+  duplicateSuggestions: Array<Record<string, unknown>>;
+  duplicateConsolidations: Array<Record<string, unknown>>;
+  relationSuggestions: Array<Record<string, unknown>>;
+  relationSuggestionEvidence: Array<Record<string, unknown>>;
+  knowledgeRelations: Array<Record<string, unknown>>;
+  coverageAnalyses: Array<Record<string, unknown>>;
+  coverageAnalysisPoints: Array<Record<string, unknown>>;
+  coverageAnalysisItems: Array<Record<string, unknown>>;
+  coverageItemPoints: Array<Record<string, unknown>>;
 };
 
 describe("complete export and empty-instance restore", () => {
   let sourceApp: FastifyInstance;
   let targetApp: FastifyInstance;
+  let legacyTargetApp: FastifyInstance;
   let sourceDatabase: PreparedTestDatabase;
   let targetDatabase: PreparedTestDatabase;
+  let legacyTargetDatabase: PreparedTestDatabase;
   const testModelEndpoint = vi.fn(async () => ({ status: "passed" as const }));
 
   beforeAll(async () => {
     sourceDatabase = prepareTestDatabase();
     targetDatabase = prepareTestDatabase();
+    legacyTargetDatabase = prepareTestDatabase();
     sourceApp = await buildApp({
       databaseUrl: sourceDatabase.databaseUrl,
       embedText: async ({ purpose }) =>
@@ -91,13 +115,31 @@ describe("complete export and empty-instance restore", () => {
       },
       testModelEndpoint,
     });
-    await Promise.all([sourceApp.ready(), targetApp.ready()]);
+    legacyTargetApp = await buildApp({
+      databaseUrl: legacyTargetDatabase.databaseUrl,
+      embedText: async ({ purpose }) =>
+        purpose === "document" ? [1, 0, 0] : [0, 1, 0],
+      generateAnalysis: async () => {
+        throw new Error("legacy restore must not call an analysis model");
+      },
+      testModelEndpoint,
+    });
+    await Promise.all([
+      sourceApp.ready(),
+      targetApp.ready(),
+      legacyTargetApp.ready(),
+    ]);
   }, 30_000);
 
   afterAll(async () => {
-    await Promise.all([sourceApp?.close(), targetApp?.close()]);
+    await Promise.all([
+      sourceApp?.close(),
+      targetApp?.close(),
+      legacyTargetApp?.close(),
+    ]);
     sourceDatabase?.dispose();
     targetDatabase?.dispose();
+    legacyTargetDatabase?.dispose();
   }, 30_000);
 
   it("round-trips versioned domain data without runtime or credential data", async () => {
@@ -132,6 +174,42 @@ describe("complete export and empty-instance restore", () => {
     };
     const recordId = createdBody.record.id;
     const userTag = createdBody.record.myTags[0]!;
+    const aliasName = `Unicode 别名 ${marker}`;
+    const alias = await sourceApp.inject({
+      method: "POST",
+      url: `/api/v1/tags/${userTag.id}/aliases`,
+      payload: { name: aliasName },
+    });
+
+    expect(alias.statusCode).toBe(201);
+
+    const aliasId = (alias.json() as { alias: { id: string } }).alias.id;
+    const mergeSourceName = `Unicode 同义来源 ${marker}`;
+    const mergeSourceCreated = await sourceApp.inject({
+      method: "POST",
+      url: "/api/v1/tags",
+      payload: { name: mergeSourceName },
+    });
+
+    expect(mergeSourceCreated.statusCode).toBe(201);
+
+    const mergeSourceTag = (
+      mergeSourceCreated.json() as { tag: { id: string; name: string } }
+    ).tag;
+    const mergeCreated = await sourceApp.inject({
+      method: "POST",
+      url: "/api/v1/tag-merges",
+      payload: {
+        sourceTagIds: [mergeSourceTag.id],
+        targetTagId: userTag.id,
+      },
+    });
+
+    expect(mergeCreated.statusCode).toBe(201);
+
+    const mergeOperationId = (
+      mergeCreated.json() as { merge: { id: string } }
+    ).merge.id;
     const updated = await sourceApp.inject({
       method: "PUT",
       url: `/api/v1/records/${recordId}`,
@@ -226,7 +304,7 @@ describe("complete export and empty-instance restore", () => {
       completedAt: expect.any(String),
       downloadUrl: expect.any(String),
       manifest: {
-        formatVersion: 1,
+        formatVersion: 3,
         recordCount: 1,
         included: expect.arrayContaining(["markdown", "domain_json"]),
         excluded: expect.arrayContaining([
@@ -268,6 +346,40 @@ describe("complete export and empty-instance restore", () => {
     const recordMarkdownName = `records/${recordId}.md`;
     const recordMarkdown = entries.get(recordMarkdownName)?.toString("utf8");
     const domain = parseDomainJson(entries);
+    const legacyArchive = downgradeToV1Archive(archive);
+    const legacyInspection = await inspectRestorePackage(
+      legacyTargetApp,
+      legacyArchive,
+    );
+
+    expect(legacyInspection).toMatchObject({
+      formatVersion: 1,
+      recordCount: 1,
+      canRestore: true,
+    });
+
+    const legacyRestored = await legacyTargetApp.inject({
+      method: "POST",
+      url: "/api/v1/restores",
+      payload: { inspectionId: legacyInspection.id },
+    });
+
+    expect(legacyRestored.statusCode).toBe(201);
+    expect(await getRecordDetail(legacyTargetApp, recordId)).toMatchObject({
+      id: recordId,
+      editable: { myTags: [{ id: userTag.id, name: tagName }] },
+    });
+
+    const legacyIndependentSource = await legacyTargetApp.inject({
+      method: "GET",
+      url:
+        "/api/v1/tags?approval=user_approved&q=" +
+        encodeURIComponent(mergeSourceName),
+    });
+
+    expect(legacyIndependentSource.json()).toMatchObject({
+      items: [expect.objectContaining({ id: mergeSourceTag.id })],
+    });
 
     expect([...entries.keys()].sort()).toEqual(
       ["README.md", "domain.json", "manifest.json", recordMarkdownName].sort(),
@@ -332,8 +444,19 @@ describe("complete export and empty-instance restore", () => {
         "fragmentRevisions",
         "knowledgePoints",
         "overviewCorrections",
+        "duplicateSuggestions",
+        "duplicateConsolidations",
+        "relationSuggestions",
+        "relationSuggestionEvidence",
+        "knowledgeRelations",
+        "coverageAnalyses",
+        "coverageAnalysisPoints",
+        "coverageAnalysisItems",
+        "coverageItemPoints",
         "records",
         "tagAssignments",
+        "tagAliases",
+        "tagMerges",
         "tags",
       ].sort(),
     );
@@ -346,6 +469,21 @@ describe("complete export and empty-instance restore", () => {
         archived_at: expect.any(String),
       }),
     );
+    expect(domain.tagAliases).toEqual([
+      expect.objectContaining({
+        id: aliasId,
+        tag_id: userTag.id,
+        display_name: aliasName,
+      }),
+    ]);
+    expect(domain.tagMerges).toEqual([
+      expect.objectContaining({
+        operation_id: mergeOperationId,
+        source_tag_id: mergeSourceTag.id,
+        target_tag_id: userTag.id,
+        undone_at: null,
+      }),
+    ]);
     expect(domain.corrections).toContainEqual(
       expect.objectContaining({
         knowledge_point_id: sourceItem.id,
@@ -380,7 +518,7 @@ describe("complete export and empty-instance restore", () => {
       }),
     );
     expect(JSON.stringify(domain)).not.toMatch(
-      /credential|api[_-]?key|task_id|model_config|embedding|search_index|log/iu,
+      /credential_ciphertext|api[_-]?key|task_id|base_url|embedding|search_index|log/iu,
     );
 
     const tamperedPackages = [
@@ -461,7 +599,7 @@ describe("complete export and empty-instance restore", () => {
     expect(inspection).toMatchObject({
       id: expect.any(String),
       status: "valid",
-      formatVersion: 1,
+      formatVersion: 3,
       recordCount: 1,
       canRestore: true,
     });
@@ -578,6 +716,49 @@ describe("complete export and empty-instance restore", () => {
       ],
     });
 
+    const restoredAliasLookup = await targetApp.inject({
+      method: "GET",
+      url:
+        "/api/v1/tags?approval=user_approved&q=" +
+        encodeURIComponent(aliasName),
+    });
+    const restoredMergedLookup = await targetApp.inject({
+      method: "GET",
+      url:
+        "/api/v1/tags?approval=user_approved&q=" +
+        encodeURIComponent(mergeSourceName),
+    });
+
+    expect(restoredAliasLookup.json()).toMatchObject({
+      items: [expect.objectContaining({ id: userTag.id })],
+    });
+    expect(restoredMergedLookup.json()).toMatchObject({
+      items: [expect.objectContaining({ id: userTag.id })],
+    });
+
+    const undoRestoredMerge = await targetApp.inject({
+      method: "DELETE",
+      url: `/api/v1/tag-merges/${mergeOperationId}`,
+    });
+
+    expect(undoRestoredMerge.statusCode).toBe(204);
+
+    const restoredSourceAfterUndo = await targetApp.inject({
+      method: "GET",
+      url:
+        "/api/v1/tags?approval=user_approved&q=" +
+        encodeURIComponent(mergeSourceName),
+    });
+
+    expect(restoredSourceAfterUndo.json()).toMatchObject({
+      items: [
+        expect.objectContaining({
+          id: mergeSourceTag.id,
+          name: mergeSourceName,
+        }),
+      ],
+    });
+
     const restoredSearch = await targetApp.inject({
       method: "GET",
       url: "/api/v1/search?q=" + encodeURIComponent("原文保留机制"),
@@ -630,6 +811,10 @@ describe("complete export and empty-instance restore", () => {
     expect(emptyRecordList.json()).toMatchObject({ items: [] });
     expect(retainedTagList.json()).toMatchObject({
       items: [
+        expect.objectContaining({
+          id: mergeSourceTag.id,
+          recordCount: 0,
+        }),
         expect.objectContaining({
           id: userTag.id,
           recordCount: 0,
@@ -687,6 +872,48 @@ function mutateDomainJson(
   return createZip(
     [...entries].map(([name, data]) => ({ name, data })),
   );
+}
+
+function downgradeToV1Archive(archive: Buffer): Buffer {
+  const entries = readStoredZip(archive);
+  const domain = structuredClone(parseDomainJson(entries));
+  const manifestEntry = entries.get("manifest.json");
+
+  if (!manifestEntry) {
+    throw new Error("manifest.json is missing from export");
+  }
+
+  const publicManifest = JSON.parse(manifestEntry.toString("utf8")) as Record<
+    string,
+    unknown
+  >;
+  const {
+    tagAliases: _aliases,
+    tagMerges: _merges,
+    duplicateSuggestions: _duplicateSuggestions,
+    duplicateConsolidations: _duplicateConsolidations,
+    relationSuggestions: _relationSuggestions,
+    relationSuggestionEvidence: _relationSuggestionEvidence,
+    knowledgeRelations: _knowledgeRelations,
+    coverageAnalyses: _coverageAnalyses,
+    coverageAnalysisPoints: _coverageAnalysisPoints,
+    coverageAnalysisItems: _coverageAnalysisItems,
+    coverageItemPoints: _coverageItemPoints,
+    ...legacyDomain
+  } = domain;
+
+  legacyDomain.formatVersion = 1;
+  publicManifest.formatVersion = 1;
+  entries.set(
+    "domain.json",
+    Buffer.from(JSON.stringify(legacyDomain), "utf8"),
+  );
+  entries.set(
+    "manifest.json",
+    Buffer.from(JSON.stringify(publicManifest), "utf8"),
+  );
+
+  return createZip([...entries].map(([name, data]) => ({ name, data })));
 }
 
 async function expectInvalidRestorePackage(

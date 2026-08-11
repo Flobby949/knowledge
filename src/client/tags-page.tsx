@@ -9,12 +9,16 @@ import { Link } from "react-router-dom";
 
 import {
   approveCandidateTag,
+  createTagAlias,
   createTag,
   deleteCandidateTag,
   deleteCandidateTags,
+  deleteTagAlias,
   getTagDetail,
   listTags,
+  mergeTags,
   putTagKnowledgePointVisibility,
+  undoTagMerge,
   updateTag,
   type TagDetail,
   type TagListItem,
@@ -45,8 +49,14 @@ export function TagsPage() {
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [selectedApprovedIds, setSelectedApprovedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [batchDeleteConfirming, setBatchDeleteConfirming] = useState(false);
   const [batchDeleteError, setBatchDeleteError] = useState("");
+  const [batchMergeConfirming, setBatchMergeConfirming] = useState(false);
+  const [batchMergeError, setBatchMergeError] = useState("");
+  const [mergeTargetId, setMergeTargetId] = useState("");
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [newTagError, setNewTagError] = useState("");
@@ -59,6 +69,8 @@ export function TagsPage() {
   const candidateTab = useRef<HTMLButtonElement>(null);
   const batchDeleteButton = useRef<HTMLButtonElement>(null);
   const batchConfirmButton = useRef<HTMLButtonElement>(null);
+  const batchMergeButton = useRef<HTMLButtonElement>(null);
+  const batchMergeConfirmButton = useRef<HTMLButtonElement>(null);
   const detailRequest = useRef(0);
 
   useEffect(() => {
@@ -77,6 +89,14 @@ export function TagsPage() {
         if (active) {
           setTags(items);
           setSelectedCandidateIds((current) => {
+            const availableIds = new Set(items.map(({ id }) => id));
+            const next = new Set(
+              [...current].filter((id) => availableIds.has(id)),
+            );
+
+            return next.size === current.size ? current : next;
+          });
+          setSelectedApprovedIds((current) => {
             const availableIds = new Set(items.map(({ id }) => id));
             const next = new Set(
               [...current].filter((id) => availableIds.has(id)),
@@ -140,8 +160,12 @@ export function TagsPage() {
 
   function resetBatchSelection() {
     setSelectedCandidateIds(new Set());
+    setSelectedApprovedIds(new Set());
     setBatchDeleteConfirming(false);
     setBatchDeleteError("");
+    setBatchMergeConfirming(false);
+    setBatchMergeError("");
+    setMergeTargetId("");
   }
 
   function changeQuery(next: string) {
@@ -171,6 +195,24 @@ export function TagsPage() {
     setPageNotice("");
   }
 
+  function toggleApprovedSelection(tagId: string) {
+    setSelectedApprovedIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(tagId)) {
+        next.delete(tagId);
+      } else {
+        next.add(tagId);
+      }
+
+      return next;
+    });
+    setBatchMergeConfirming(false);
+    setBatchMergeError("");
+    setMergeTargetId("");
+    setPageNotice("");
+  }
+
   function selectZeroAssociationCandidates() {
     setSelectedCandidateIds(
       new Set(tags.filter(({ recordCount }) => recordCount === 0).map(({ id }) => id)),
@@ -194,6 +236,29 @@ export function TagsPage() {
     setBatchDeleteConfirming(false);
     setBatchDeleteError("");
     window.requestAnimationFrame(() => batchDeleteButton.current?.focus());
+  }
+
+  function beginBatchMerge() {
+    if (selectedApprovedIds.size < 2) {
+      return;
+    }
+
+    const defaultTarget =
+      selectedTag && selectedApprovedIds.has(selectedTag.id)
+        ? selectedTag.id
+        : tags.find(({ id }) => selectedApprovedIds.has(id))?.id;
+
+    setMergeTargetId(defaultTarget ?? "");
+    setBatchMergeConfirming(true);
+    setBatchMergeError("");
+    window.requestAnimationFrame(() => batchMergeConfirmButton.current?.focus());
+  }
+
+  function cancelBatchMerge() {
+    setBatchMergeConfirming(false);
+    setBatchMergeError("");
+    setMergeTargetId("");
+    window.requestAnimationFrame(() => batchMergeButton.current?.focus());
   }
 
   function selectTag(tag: TagListItem) {
@@ -446,6 +511,110 @@ export function TagsPage() {
     }
   }
 
+  async function handleBatchMerge() {
+    const sourceTagIds = [...selectedApprovedIds].filter(
+      (id) => id !== mergeTargetId,
+    );
+
+    if (!mergeTargetId || sourceTagIds.length === 0) {
+      return;
+    }
+
+    setActionBusy("batch-merge");
+    setActionError("");
+    setBatchMergeError("");
+    setPageNotice("");
+
+    try {
+      const operation = await mergeTags(mergeTargetId, sourceTagIds);
+
+      setTags((current) =>
+        current
+          .filter(({ id }) => !sourceTagIds.includes(id))
+          .map((tag) =>
+            tag.id === operation.targetTag.id ? operation.targetTag : tag,
+          ),
+      );
+      resetBatchSelection();
+      setReloadVersion((current) => current + 1);
+      setPageNotice(
+        `已将 ${operation.sourceTags.length} 个来源标签合并到“${operation.targetTag.name}”。历史标签与关联没有改写，可在详情中撤销。`,
+      );
+      selectTag(operation.targetTag);
+    } catch (error) {
+      setBatchMergeError(
+        tagActionMessage(error, "标签未能合并，请刷新后重试。"),
+      );
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function handleCreateAlias(name: string): Promise<boolean> {
+    if (!selectedTag) {
+      return false;
+    }
+
+    setActionBusy("alias:add");
+    setActionError("");
+    setActionNotice("");
+
+    try {
+      await createTagAlias(selectedTag.id, name);
+      await refreshSelected(selectedTag.id);
+      setReloadVersion((current) => current + 1);
+      setActionNotice(`已添加别名“${name}”。`);
+      return true;
+    } catch (error) {
+      setActionError(tagActionMessage(error, "别名未能添加，请重试。"));
+      return false;
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function handleDeleteAlias(aliasId: string) {
+    if (!selectedTag) {
+      return;
+    }
+
+    setActionBusy(`alias:${aliasId}`);
+    setActionError("");
+    setActionNotice("");
+
+    try {
+      await deleteTagAlias(selectedTag.id, aliasId);
+      await refreshSelected(selectedTag.id);
+      setReloadVersion((current) => current + 1);
+      setActionNotice("标签别名已移除。");
+    } catch (error) {
+      setActionError(tagActionMessage(error, "别名未能移除，请重试。"));
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function handleUndoMerge(mergeId: string) {
+    if (!selectedTag) {
+      return;
+    }
+
+    setActionBusy(`merge:${mergeId}`);
+    setActionError("");
+    setActionNotice("");
+
+    try {
+      await undoTagMerge(mergeId);
+      await refreshSelected(selectedTag.id);
+      setReloadVersion((current) => current + 1);
+      setActionNotice("标签合并已撤销，来源标签已恢复独立展示。");
+    } catch (error) {
+      setActionError(tagActionMessage(error, "标签合并未能撤销，请重试。"));
+    } finally {
+      setActionBusy("");
+    }
+  }
+
   async function handleCreateTag(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = newTagName.trim();
@@ -504,6 +673,9 @@ export function TagsPage() {
   const selectedLinkedCount = selectedCandidates.filter(
     ({ recordCount }) => recordCount > 0,
   ).length;
+  const selectedApprovedTags = tags.filter(({ id }) =>
+    selectedApprovedIds.has(id),
+  );
 
   return (
     <div className="tags-shell">
@@ -732,6 +904,115 @@ export function TagsPage() {
             </section>
           ) : null}
 
+          {section === "user_approved" ? (
+            <section
+              aria-label="批量治理我的标签"
+              className={
+                batchMergeConfirming
+                  ? "tag-batch-toolbar is-confirming is-merge"
+                  : "tag-batch-toolbar"
+              }
+            >
+              {batchMergeConfirming ? (
+                <div
+                  aria-label="确认标签合并"
+                  className="tag-merge-confirmation"
+                  role="group"
+                >
+                  <fieldset>
+                    <legend>选择合并后保留的主标签</legend>
+                    <p>
+                      只改变有效展示与检索；来源标签、历史身份和全部关联均会保留。
+                    </p>
+                    <div className="tag-merge-targets">
+                      {selectedApprovedTags.map((tag) => (
+                        <label key={tag.id}>
+                          <input
+                            checked={mergeTargetId === tag.id}
+                            disabled={actionBusy === "batch-merge"}
+                            name="merge-target"
+                            onChange={() => setMergeTargetId(tag.id)}
+                            type="radio"
+                            value={tag.id}
+                          />
+                          <span>
+                            <strong>{tag.name}</strong>
+                            <small>{tag.recordCount} 条记录</small>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <div className="tag-merge-confirm-actions">
+                    <span>
+                      其余 {Math.max(selectedApprovedTags.length - 1, 0)} 个标签将作为可撤销来源
+                    </span>
+                    <div>
+                      <button
+                        className="primary-button"
+                        disabled={!mergeTargetId || actionBusy === "batch-merge"}
+                        onClick={() => void handleBatchMerge()}
+                        ref={batchMergeConfirmButton}
+                        type="button"
+                      >
+                        {actionBusy === "batch-merge" ? "合并中…" : "确认合并"}
+                      </button>
+                      <button
+                        disabled={actionBusy === "batch-merge"}
+                        onClick={cancelBatchMerge}
+                        type="button"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="tag-batch-row">
+                  <div className="tag-batch-summary">
+                    <strong>同义标签治理</strong>
+                    <span role="status">
+                      {selectedApprovedIds.size > 0
+                        ? `已选 ${selectedApprovedIds.size} 个标签`
+                        : "勾选两个或更多同义标签，再选择要保留的主标签"}
+                    </span>
+                  </div>
+                  <div className="tag-batch-actions">
+                    {selectedApprovedIds.size > 0 ? (
+                      <button
+                        disabled={Boolean(actionBusy)}
+                        onClick={resetBatchSelection}
+                        type="button"
+                      >
+                        清空选择
+                      </button>
+                    ) : null}
+                    <button
+                      className="secondary-button"
+                      disabled={
+                        selectedApprovedIds.size < 2 || Boolean(actionBusy)
+                      }
+                      onClick={beginBatchMerge}
+                      ref={batchMergeButton}
+                      type="button"
+                    >
+                      合并已选
+                      {selectedApprovedIds.size > 1
+                        ? `（${selectedApprovedIds.size}）`
+                        : ""}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {batchMergeError ? (
+                <p className="tag-batch-error" role="alert">
+                  {batchMergeError}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
           <div
             aria-labelledby={
               section === "user_approved" ? "approved-tags-tab" : "candidate-tags-tab"
@@ -754,24 +1035,37 @@ export function TagsPage() {
             {listLoading ? <p className="tag-atlas-feedback" role="status">正在载入{sectionLabel}…</p> : null}
 
             <ul
-              aria-busy={actionBusy === "batch-delete"}
+              aria-busy={
+                actionBusy === "batch-delete" || actionBusy === "batch-merge"
+              }
               aria-label="标签图鉴"
               className="tag-atlas-grid"
             >
               {tags.map((tag, index) => (
                 <li
                   className={
-                    selectedCandidateIds.has(tag.id) ? "is-batch-selected" : undefined
+                    selectedCandidateIds.has(tag.id) ||
+                    selectedApprovedIds.has(tag.id)
+                      ? "is-batch-selected"
+                      : undefined
                   }
                   key={tag.id}
                 >
-                  {tag.approvalStatus === "candidate" ? (
+                  {tag.approvalStatus !== "archived" ? (
                     <label className="tag-card-selection">
                       <input
                         aria-label={`选择 ${tag.name}`}
-                        checked={selectedCandidateIds.has(tag.id)}
+                        checked={
+                          tag.approvalStatus === "candidate"
+                            ? selectedCandidateIds.has(tag.id)
+                            : selectedApprovedIds.has(tag.id)
+                        }
                         disabled={Boolean(actionBusy)}
-                        onChange={() => toggleCandidateSelection(tag.id)}
+                        onChange={() =>
+                          tag.approvalStatus === "candidate"
+                            ? toggleCandidateSelection(tag.id)
+                            : toggleApprovedSelection(tag.id)
+                        }
                         type="checkbox"
                       />
                     </label>
@@ -779,13 +1073,11 @@ export function TagsPage() {
                   <button
                     aria-label={tag.name}
                     aria-pressed={selectedTag?.id === tag.id}
-                    className={
-                      tag.approvalStatus === "candidate"
-                        ? "has-selection-control"
-                        : undefined
-                    }
+                    className="has-selection-control"
                     data-tag-id={tag.id}
-                    disabled={actionBusy === "batch-delete"}
+                    disabled={
+                      actionBusy === "batch-delete" || actionBusy === "batch-merge"
+                    }
                     onClick={() => selectTag(tag)}
                     type="button"
                   >
@@ -819,11 +1111,14 @@ export function TagsPage() {
             detail={detail}
             error={drawerError}
             loading={drawerLoading}
+            onAddAlias={handleCreateAlias}
             onApprove={() => void handleApprove()}
             onArchiveStatus={(status) => void handleArchiveStatus(status)}
             onClose={() => closeDrawer(true)}
             onDelete={() => void handleDeleteCandidate()}
+            onDeleteAlias={(aliasId) => void handleDeleteAlias(aliasId)}
             onRename={handleRename}
+            onUndoMerge={(mergeId) => void handleUndoMerge(mergeId)}
             onVisibility={(recordId, itemId, status) =>
               void handleVisibility(recordId, itemId, status)
             }
@@ -851,11 +1146,14 @@ function TagDetailDrawer({
   detail,
   error,
   loading,
+  onAddAlias,
   onApprove,
   onArchiveStatus,
   onClose,
   onDelete,
+  onDeleteAlias,
   onRename,
+  onUndoMerge,
   onVisibility,
   tag,
 }: {
@@ -865,11 +1163,14 @@ function TagDetailDrawer({
   detail: TagDetail | null;
   error: string;
   loading: boolean;
+  onAddAlias: (name: string) => Promise<boolean>;
   onApprove: () => void;
   onArchiveStatus: (status: "archived" | "user_approved") => void;
   onClose: () => void;
   onDelete: () => void;
+  onDeleteAlias: (aliasId: string) => void;
   onRename: (name: string) => Promise<boolean>;
+  onUndoMerge: (mergeId: string) => void;
   onVisibility: (
     recordId: string,
     itemId: string,
@@ -880,13 +1181,16 @@ function TagDetailDrawer({
   const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(tag.name);
+  const [aliasValue, setAliasValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const renameInput = useRef<HTMLInputElement>(null);
+  const aliasInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setExpandedRecords(new Set());
     setRenaming(false);
     setRenameValue(tag.name);
+    setAliasValue("");
     setConfirmDelete(false);
   }, [tag.id]);
 
@@ -918,9 +1222,25 @@ function TagDetailDrawer({
     }
   }
 
+  async function submitAlias(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = aliasValue.trim();
+
+    if (!name) {
+      aliasInput.current?.focus();
+      return;
+    }
+
+    if (await onAddAlias(name)) {
+      setAliasValue("");
+      aliasInput.current?.focus();
+    }
+  }
+
   const records = detail?.records ?? [];
   const candidate = tag.approvalStatus === "candidate";
   const archived = tag.approvalStatus === "archived";
+  const mergeGroups = groupMergedSources(detail?.mergedSources ?? []);
 
   return (
     <aside aria-label="标签详情" className="tag-detail-drawer" role="region">
@@ -933,7 +1253,98 @@ function TagDetailDrawer({
         <span>{tag.recordCount} 条当前有效关联记录 · {tagOriginLabel(tag)}</span>
       </header>
 
-      <section aria-labelledby="tag-records-title" className="tag-related-records">
+      <div className="tag-drawer-body">
+        {!candidate && !archived ? (
+          <section aria-labelledby="tag-governance-title" className="tag-governance">
+            <div className="tag-governance-heading">
+              <div>
+                <h3 id="tag-governance-title">词汇治理</h3>
+                <p>别名与来源都解析到当前主标签，但不会改写历史身份或关联。</p>
+              </div>
+              <span>可撤销</span>
+            </div>
+
+            <div className="tag-alias-editor">
+              <div className="tag-governance-subheading">
+                <strong>标签别名</strong>
+                <span>{detail?.aliases.length ?? 0} 个</span>
+              </div>
+              {detail?.aliases.length ? (
+                <ul aria-label="标签别名">
+                  {detail.aliases.map((alias) => (
+                    <li key={alias.id}>
+                      <span>{alias.name}</span>
+                      <button
+                        aria-label={`移除别名 ${alias.name}`}
+                        disabled={actionBusy === `alias:${alias.id}`}
+                        onClick={() => onDeleteAlias(alias.id)}
+                        type="button"
+                      >
+                        {actionBusy === `alias:${alias.id}` ? "移除中…" : "移除"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="tag-governance-empty">还没有别名。</p>
+              )}
+              <form
+                aria-label="添加标签别名"
+                className="tag-alias-form"
+                onSubmit={(event) => void submitAlias(event)}
+              >
+                <label className="visually-hidden" htmlFor="tag-alias-input">
+                  新别名
+                </label>
+                <input
+                  id="tag-alias-input"
+                  onChange={(event) => setAliasValue(event.target.value)}
+                  placeholder="输入缩写、译名或其他常用写法"
+                  ref={aliasInput}
+                  type="text"
+                  value={aliasValue}
+                />
+                <button
+                  disabled={!aliasValue.trim() || actionBusy === "alias:add"}
+                  type="submit"
+                >
+                  {actionBusy === "alias:add" ? "添加中…" : "添加别名"}
+                </button>
+              </form>
+            </div>
+
+            {mergeGroups.length > 0 ? (
+              <div className="tag-merged-sources">
+                <div className="tag-governance-subheading">
+                  <strong>已合并来源</strong>
+                  <span>{detail?.mergedSources.length ?? 0} 个</span>
+                </div>
+                <ul aria-label="已合并来源标签">
+                  {mergeGroups.map((group) => (
+                    <li key={group.mergeId}>
+                      <div>
+                        {group.sources.map((source) => (
+                          <span key={source.id}>{source.name}</span>
+                        ))}
+                      </div>
+                      <button
+                        disabled={actionBusy === `merge:${group.mergeId}`}
+                        onClick={() => onUndoMerge(group.mergeId)}
+                        type="button"
+                      >
+                        {actionBusy === `merge:${group.mergeId}`
+                          ? "撤销中…"
+                          : "撤销这次合并"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        <section aria-labelledby="tag-records-title" className="tag-related-records">
         <div className="tag-related-heading">
           <h3 id="tag-records-title">关联记录</h3>
           <span>每条记录仅显示一次</span>
@@ -1009,7 +1420,8 @@ function TagDetailDrawer({
             );
           })}
         </ul>
-      </section>
+        </section>
+      </div>
 
       <footer>
         {actionError ? <p className="tag-action-message is-error" role="alert">{actionError}</p> : null}
@@ -1079,6 +1491,25 @@ function TagDetailDrawer({
       </footer>
     </aside>
   );
+}
+
+function groupMergedSources(sources: TagDetail["mergedSources"]) {
+  const groups = new Map<
+    string,
+    { mergeId: string; sources: TagDetail["mergedSources"] }
+  >();
+
+  for (const source of sources) {
+    const group = groups.get(source.mergeId) ?? {
+      mergeId: source.mergeId,
+      sources: [],
+    };
+
+    group.sources.push(source);
+    groups.set(source.mergeId, group);
+  }
+
+  return [...groups.values()];
 }
 
 function sourceSummary(
