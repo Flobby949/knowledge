@@ -17,8 +17,10 @@ const V2_TABLES = [
   "knowledge_relations",
   "coverage_analyses",
   "coverage_analysis_points",
+  "coverage_analysis_records",
   "coverage_analysis_items",
   "coverage_item_points",
+  "coverage_item_records",
 ] as const;
 
 describe("V2 governance export and restore", () => {
@@ -79,7 +81,7 @@ describe("V2 governance export and restore", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
-      manifest: { formatVersion: 3, recordCount: 2 },
+      manifest: { formatVersion: 4, recordCount: 2 },
     });
 
     const downloaded = await sourceApp.inject({
@@ -101,7 +103,7 @@ describe("V2 governance export and restore", () => {
     >;
 
     expect(domain).toMatchObject({
-      formatVersion: 3,
+      formatVersion: 4,
       duplicateSuggestions: [expect.objectContaining({ id: ids.duplicateSuggestionId })],
       duplicateConsolidations: [
         expect.objectContaining({ id: ids.duplicateConsolidationId }),
@@ -140,7 +142,7 @@ describe("V2 governance export and restore", () => {
       }
     ).inspection;
 
-    expect(inspection).toMatchObject({ canRestore: true, formatVersion: 3 });
+    expect(inspection).toMatchObject({ canRestore: true, formatVersion: 4 });
 
     const restored = await targetApp.inject({
       method: "POST",
@@ -333,9 +335,9 @@ async function seedCompleteV2Domain(pool: Pool) {
     await client.query(
       `INSERT INTO coverage_analyses
          (id, topic, framework_summary, caveat, input_count,
-          model_configuration_version, text_model)
+          model_configuration_version, text_model, started_at, completed_at)
        VALUES ($1, '恢复覆盖分析', '按输入和缺口两个方面检查。',
-               '这是建议性快照。', 2, 7, 'v2-export-model')`,
+               '这是建议性快照。', 2, 7, 'v2-export-model', now(), now())`,
       [ids.coverageAnalysisId],
     );
     await client.query(

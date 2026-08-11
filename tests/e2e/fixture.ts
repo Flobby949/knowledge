@@ -104,6 +104,7 @@ async function resetKnowledgeInstance(pool: Pool): Promise<void> {
          data_restores,
          restore_inspections,
          data_exports,
+         coverage_analyses,
          model_configurations,
          records,
          tags

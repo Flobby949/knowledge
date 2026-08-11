@@ -82,23 +82,22 @@ type DomainJson = {
   knowledgeRelations: Array<Record<string, unknown>>;
   coverageAnalyses: Array<Record<string, unknown>>;
   coverageAnalysisPoints: Array<Record<string, unknown>>;
+  coverageAnalysisRecords: Array<Record<string, unknown>>;
   coverageAnalysisItems: Array<Record<string, unknown>>;
   coverageItemPoints: Array<Record<string, unknown>>;
+  coverageItemRecords: Array<Record<string, unknown>>;
 };
 
 describe("complete export and empty-instance restore", () => {
   let sourceApp: FastifyInstance;
   let targetApp: FastifyInstance;
-  let legacyTargetApp: FastifyInstance;
   let sourceDatabase: PreparedTestDatabase;
   let targetDatabase: PreparedTestDatabase;
-  let legacyTargetDatabase: PreparedTestDatabase;
   const testModelEndpoint = vi.fn(async () => ({ status: "passed" as const }));
 
   beforeAll(async () => {
     sourceDatabase = prepareTestDatabase();
     targetDatabase = prepareTestDatabase();
-    legacyTargetDatabase = prepareTestDatabase();
     sourceApp = await buildApp({
       databaseUrl: sourceDatabase.databaseUrl,
       embedText: async ({ purpose }) =>
@@ -115,31 +114,13 @@ describe("complete export and empty-instance restore", () => {
       },
       testModelEndpoint,
     });
-    legacyTargetApp = await buildApp({
-      databaseUrl: legacyTargetDatabase.databaseUrl,
-      embedText: async ({ purpose }) =>
-        purpose === "document" ? [1, 0, 0] : [0, 1, 0],
-      generateAnalysis: async () => {
-        throw new Error("legacy restore must not call an analysis model");
-      },
-      testModelEndpoint,
-    });
-    await Promise.all([
-      sourceApp.ready(),
-      targetApp.ready(),
-      legacyTargetApp.ready(),
-    ]);
+    await Promise.all([sourceApp.ready(), targetApp.ready()]);
   }, 30_000);
 
   afterAll(async () => {
-    await Promise.all([
-      sourceApp?.close(),
-      targetApp?.close(),
-      legacyTargetApp?.close(),
-    ]);
+    await Promise.all([sourceApp?.close(), targetApp?.close()]);
     sourceDatabase?.dispose();
     targetDatabase?.dispose();
-    legacyTargetDatabase?.dispose();
   }, 30_000);
 
   it("round-trips versioned domain data without runtime or credential data", async () => {
@@ -304,7 +285,7 @@ describe("complete export and empty-instance restore", () => {
       completedAt: expect.any(String),
       downloadUrl: expect.any(String),
       manifest: {
-        formatVersion: 3,
+        formatVersion: 4,
         recordCount: 1,
         included: expect.arrayContaining(["markdown", "domain_json"]),
         excluded: expect.arrayContaining([
@@ -346,40 +327,6 @@ describe("complete export and empty-instance restore", () => {
     const recordMarkdownName = `records/${recordId}.md`;
     const recordMarkdown = entries.get(recordMarkdownName)?.toString("utf8");
     const domain = parseDomainJson(entries);
-    const legacyArchive = downgradeToV1Archive(archive);
-    const legacyInspection = await inspectRestorePackage(
-      legacyTargetApp,
-      legacyArchive,
-    );
-
-    expect(legacyInspection).toMatchObject({
-      formatVersion: 1,
-      recordCount: 1,
-      canRestore: true,
-    });
-
-    const legacyRestored = await legacyTargetApp.inject({
-      method: "POST",
-      url: "/api/v1/restores",
-      payload: { inspectionId: legacyInspection.id },
-    });
-
-    expect(legacyRestored.statusCode).toBe(201);
-    expect(await getRecordDetail(legacyTargetApp, recordId)).toMatchObject({
-      id: recordId,
-      editable: { myTags: [{ id: userTag.id, name: tagName }] },
-    });
-
-    const legacyIndependentSource = await legacyTargetApp.inject({
-      method: "GET",
-      url:
-        "/api/v1/tags?approval=user_approved&q=" +
-        encodeURIComponent(mergeSourceName),
-    });
-
-    expect(legacyIndependentSource.json()).toMatchObject({
-      items: [expect.objectContaining({ id: mergeSourceTag.id })],
-    });
 
     expect([...entries.keys()].sort()).toEqual(
       ["README.md", "domain.json", "manifest.json", recordMarkdownName].sort(),
@@ -451,8 +398,10 @@ describe("complete export and empty-instance restore", () => {
         "knowledgeRelations",
         "coverageAnalyses",
         "coverageAnalysisPoints",
+        "coverageAnalysisRecords",
         "coverageAnalysisItems",
         "coverageItemPoints",
+        "coverageItemRecords",
         "records",
         "tagAssignments",
         "tagAliases",
@@ -522,6 +471,7 @@ describe("complete export and empty-instance restore", () => {
     );
 
     const tamperedPackages = [
+      mutatePackageFormatVersion(archive, 3),
       mutateDomainJson(archive, (snapshot) => {
         snapshot.records[0]!.current_fragment_revision_id = crypto.randomUUID();
       }),
@@ -599,7 +549,7 @@ describe("complete export and empty-instance restore", () => {
     expect(inspection).toMatchObject({
       id: expect.any(String),
       status: "valid",
-      formatVersion: 3,
+      formatVersion: 4,
       recordCount: 1,
       canRestore: true,
     });
@@ -874,7 +824,10 @@ function mutateDomainJson(
   );
 }
 
-function downgradeToV1Archive(archive: Buffer): Buffer {
+function mutatePackageFormatVersion(
+  archive: Buffer,
+  formatVersion: number,
+): Buffer {
   const entries = readStoredZip(archive);
   const domain = structuredClone(parseDomainJson(entries));
   const manifestEntry = entries.get("manifest.json");
@@ -887,26 +840,12 @@ function downgradeToV1Archive(archive: Buffer): Buffer {
     string,
     unknown
   >;
-  const {
-    tagAliases: _aliases,
-    tagMerges: _merges,
-    duplicateSuggestions: _duplicateSuggestions,
-    duplicateConsolidations: _duplicateConsolidations,
-    relationSuggestions: _relationSuggestions,
-    relationSuggestionEvidence: _relationSuggestionEvidence,
-    knowledgeRelations: _knowledgeRelations,
-    coverageAnalyses: _coverageAnalyses,
-    coverageAnalysisPoints: _coverageAnalysisPoints,
-    coverageAnalysisItems: _coverageAnalysisItems,
-    coverageItemPoints: _coverageItemPoints,
-    ...legacyDomain
-  } = domain;
 
-  legacyDomain.formatVersion = 1;
-  publicManifest.formatVersion = 1;
+  domain.formatVersion = formatVersion;
+  publicManifest.formatVersion = formatVersion;
   entries.set(
     "domain.json",
-    Buffer.from(JSON.stringify(legacyDomain), "utf8"),
+    Buffer.from(JSON.stringify(domain), "utf8"),
   );
   entries.set(
     "manifest.json",

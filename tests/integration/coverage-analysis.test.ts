@@ -4,7 +4,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisGenerator } from "../../src/analysis-generator.js";
 import { buildApp } from "../../src/app.js";
-import type { CoverageGenerator } from "../../src/coverage-generator.js";
+import type {
+  CoverageGenerator,
+  GeneratedCoverageAnalysis,
+} from "../../src/coverage-generator.js";
 import type { EmbedText } from "../../src/embedding-provider.js";
 import {
   prepareTestDatabase,
@@ -12,39 +15,54 @@ import {
 } from "../support/prepare-test-database.js";
 
 type CoverageSource = {
+  excerpt: string;
   id: string;
-  recordId: string;
+  organization: "organized" | "original";
+  tags: string[];
   title: string;
 };
 
 type CoverageAnalysis = {
   advisory: boolean;
-  caveat: string;
+  attemptCount: number;
+  canRetry: boolean;
+  caveat: string | null;
   covered: Array<{
     assessment: string;
     kind: "covered";
-    sources: CoverageSource[];
+    sources: CoverageAnalysisSource[];
     title: string;
   }>;
-  frameworkSummary: string;
+  failure: null | { code: string; message: string };
+  frameworkSummary: string | null;
   id: string;
   inputChanged: boolean;
+  inputKind: "knowledge_points" | "records";
   possibleGaps: Array<{
     assessment: string;
     kind: "possible_gap";
     recommendation: string;
     title: string;
   }>;
-  sources: Array<
-    CoverageSource & { current: boolean; changedSinceAnalysis: boolean }
-  >;
+  sources: CoverageAnalysisSource[];
+  status: "failed" | "queued" | "running" | "succeeded";
   topic: string;
 };
 
-describe("V2 experimental knowledge coverage analysis", () => {
+type CoverageAnalysisSource = {
+  changedSinceAnalysis: boolean;
+  current: boolean;
+  id: string;
+  recordId: string;
+  title: string;
+};
+
+describe("V2 experimental record coverage analysis", () => {
   let app: FastifyInstance;
   let database: PreparedTestDatabase;
   let pool: Pool;
+  let releaseSlowAnalysis: (() => void) | null = null;
+  let retryShouldSucceed = false;
   const testModelEndpoint = vi.fn(async () => ({ status: "passed" as const }));
   const embedText = vi.fn<EmbedText>(async () => [1, 0, 0]);
   const generateAnalysis = vi.fn<AnalysisGenerator>(async ({ sourceText }) => {
@@ -67,39 +85,21 @@ describe("V2 experimental knowledge coverage analysis", () => {
     };
   });
   const generateCoverage = vi.fn<CoverageGenerator>(async (input) => {
-    if (input.topic === "无效覆盖") {
-      return {
-        frameworkSummary: "无效结果",
-        covered: [
-          {
-            title: "错误引用",
-            assessment: "引用不存在的知识点。",
-            knowledgePointIds: ["00000000-0000-4000-8000-000000000000"],
-          },
-        ],
-        possibleGaps: [],
-        caveat: "这仍然是建议。",
-      };
+    if (input.topic === "慢速覆盖") {
+      await new Promise<void>((resolve) => {
+        releaseSlowAnalysis = resolve;
+      });
     }
 
-    return {
-      frameworkSummary: "按变更捕获、交付可靠性和消费治理三个方面观察。",
-      covered: [
-        {
-          title: "变更捕获基础",
-          assessment: "所选知识已经覆盖日志捕获与增量交付。",
-          knowledgePointIds: input.knowledgePoints.map(({ id }) => id),
-        },
-      ],
-      possibleGaps: [
-        {
-          title: "消费端治理",
-          assessment: "参考框架中还可以继续核验消费幂等和失败恢复。",
-          recommendation: "后续可补充一条带真实案例的幂等消费记录。",
-        },
-      ],
-      caveat: "框架由模型临时提出，应结合实际目标判断。",
-    };
+    if (input.topic === "需要重试" && !retryShouldSucceed) {
+      return invalidCoverage();
+    }
+
+    if (input.topic === "网络失败") {
+      throw new Error("upstream unavailable");
+    }
+
+    return validCoverage(input.records.map(({ id }) => id));
   });
 
   beforeAll(async () => {
@@ -117,33 +117,88 @@ describe("V2 experimental knowledge coverage analysis", () => {
   }, 30_000);
 
   afterAll(async () => {
+    releaseSlowAnalysis?.();
     await app?.close();
     await pool?.end();
     database?.dispose();
   }, 30_000);
 
-  it("stores an advisory snapshot with selected sources and never rewrites those sources", async () => {
-    const firstRecord = await createOrganizedRecord(app, "COVER_A 事务日志捕获变化");
-    const secondRecord = await createOrganizedRecord(app, "COVER_B 增量事件可靠交付");
-    const sources = await listCoverageSources(app, "数据库同步");
-    const selected = sources.filter(({ recordId }) =>
-      [firstRecord.id, secondRecord.id].includes(recordId),
+  it("lists original records in one source model and exposes a queued task immediately", async () => {
+    const original = await createRecord(app, "COVER_RAW 尚未整理的原始记录");
+    const organized = await createOrganizedRecord(
+      app,
+      "COVER_ORGANIZED 已整理的输入记录",
+    );
+    const sources = await listCoverageSources(app, "COVER_");
+
+    expect(sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: original.id, organization: "original" }),
+        expect.objectContaining({ id: organized.id, organization: "organized" }),
+      ]),
     );
 
-    expect(selected).toHaveLength(2);
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/coverage-analyses",
+      payload: {
+        topic: "慢速覆盖",
+        recordIds: [original.id, organized.id],
+      },
+    });
 
+    expect(created.statusCode).toBe(202);
+    const task = (created.json() as { analysis: CoverageAnalysis }).analysis;
+
+    expect(task).toMatchObject({
+      status: "queued",
+      inputKind: "records",
+      sources: expect.arrayContaining([
+        expect.objectContaining({ id: original.id }),
+        expect.objectContaining({ id: organized.id }),
+      ]),
+    });
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/v1/coverage-analyses",
+    });
+    const listedTask = (
+      listed.json() as { items: CoverageAnalysis[] }
+    ).items.find(({ id }) => id === task.id);
+
+    expect(listedTask?.status).toMatch(/queued|running/u);
+
+    releaseSlowAnalysis?.();
+    const completed = await waitForCoverage(app, task.id, "succeeded");
+
+    expect(completed.covered[0]?.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: original.id }),
+        expect.objectContaining({ id: organized.id }),
+      ]),
+    );
+  });
+
+  it("stores a record-version snapshot without rewriting sources and detects later changes", async () => {
+    const firstRecord = await createOrganizedRecord(
+      app,
+      "COVER_A 事务日志捕获变化",
+    );
+    const secondRecord = await createRecord(app, "COVER_B 增量事件可靠交付");
     const before = await sourceSnapshot(pool, [firstRecord.id, secondRecord.id]);
     const created = await app.inject({
       method: "POST",
       url: "/api/v1/coverage-analyses",
       payload: {
         topic: "数据库增量同步",
-        knowledgePointIds: selected.map(({ id }) => id),
+        recordIds: [firstRecord.id, secondRecord.id],
       },
     });
 
-    expect(created.statusCode).toBe(201);
-    const analysis = (created.json() as { analysis: CoverageAnalysis }).analysis;
+    expect(created.statusCode).toBe(202);
+    const task = (created.json() as { analysis: CoverageAnalysis }).analysis;
+    const analysis = await waitForCoverage(app, task.id, "succeeded");
 
     expect(analysis).toMatchObject({
       advisory: true,
@@ -154,9 +209,10 @@ describe("V2 experimental knowledge coverage analysis", () => {
         {
           kind: "covered",
           title: "变更捕获基础",
-          sources: expect.arrayContaining(
-            selected.map(({ id }) => expect.objectContaining({ id })),
-          ),
+          sources: expect.arrayContaining([
+            expect.objectContaining({ id: firstRecord.id }),
+            expect.objectContaining({ id: secondRecord.id }),
+          ]),
         },
       ],
       possibleGaps: [
@@ -173,72 +229,120 @@ describe("V2 experimental knowledge coverage analysis", () => {
       before,
     );
 
-    const listed = await app.inject({
-      method: "GET",
-      url: "/api/v1/coverage-analyses",
-    });
+    await updateRecord(app, firstRecord, "COVER_A_UPDATED 更新后的捕获记录");
+    const historical = await getCoverage(app, analysis.id);
 
-    expect(listed.statusCode).toBe(200);
-    expect((listed.json() as { items: CoverageAnalysis[] }).items).toContainEqual(
-      expect.objectContaining({ id: analysis.id, advisory: true }),
-    );
-
-    await replaceActiveKnowledge(
-      app,
-      firstRecord,
-      "COVER_A_UPDATED 更新后的捕获知识",
-    );
-
-    const historical = await app.inject({
-      method: "GET",
-      url: `/api/v1/coverage-analyses/${analysis.id}`,
-    });
-
-    expect(historical.statusCode).toBe(200);
-    expect(historical.json()).toMatchObject({
-      analysis: {
-        id: analysis.id,
-        inputChanged: true,
-        frameworkSummary: analysis.frameworkSummary,
-        caveat: analysis.caveat,
-      },
+    expect(historical).toMatchObject({
+      id: analysis.id,
+      inputChanged: true,
+      frameworkSummary: analysis.frameworkSummary,
+      caveat: analysis.caveat,
     });
   });
 
-  it("rejects unsupported source references without persisting a partial analysis", async () => {
-    const record = await createOrganizedRecord(app, "COVER_INVALID 校验输入");
-    const source = (await listCoverageSources(app, "COVER_INVALID")).find(
-      ({ recordId }) => recordId === record.id,
-    );
-
-    if (!source) {
-      throw new Error("Expected coverage source");
-    }
-
-    const before = await pool.query<{ count: number }>(
-      "SELECT COUNT(*)::integer AS count FROM coverage_analyses",
-    );
-    const response = await app.inject({
+  it("keeps a failed task and retries from the same frozen inputs", async () => {
+    const record = await createRecord(app, "COVER_RETRY 校验输入");
+    const created = await app.inject({
       method: "POST",
       url: "/api/v1/coverage-analyses",
-      payload: {
-        topic: "无效覆盖",
-        knowledgePointIds: [source.id],
+      payload: { topic: "需要重试", recordIds: [record.id] },
+    });
+    const task = (created.json() as { analysis: CoverageAnalysis }).analysis;
+    const failed = await waitForCoverage(app, task.id, "failed");
+
+    expect(failed).toMatchObject({
+      id: task.id,
+      status: "failed",
+      canRetry: true,
+      attemptCount: 1,
+      failure: {
+        code: "COVERAGE_GENERATION_FAILED",
+      },
+      sources: [expect.objectContaining({ id: record.id })],
+    });
+
+    await updateRecord(app, record, "COVER_RETRY_CHANGED 已经修改的当前记录");
+    retryShouldSucceed = true;
+    const retried = await app.inject({
+      method: "POST",
+      url: `/api/v1/coverage-analyses/${task.id}/retry`,
+    });
+
+    expect(retried.statusCode).toBe(202);
+    expect(retried.json()).toMatchObject({
+      analysis: {
+        id: task.id,
+        status: "queued",
+        attemptCount: 2,
+        sources: [expect.objectContaining({ id: record.id })],
       },
     });
 
-    expect(response.statusCode).toBe(502);
-    expect(generateCoverage).toHaveBeenCalledTimes(3);
+    const completed = await waitForCoverage(app, task.id, "succeeded");
 
-    const after = await pool.query<{ count: number }>(
-      "SELECT COUNT(*)::integer AS count FROM coverage_analyses",
+    expect(completed).toMatchObject({
+      id: task.id,
+      attemptCount: 2,
+      inputChanged: true,
+      status: "succeeded",
+    });
+    expect(generateCoverage.mock.calls.at(-1)?.[0].records[0]?.body).toContain(
+      "COVER_RETRY 校验输入",
     );
+  });
 
-    expect(after.rows).toEqual(before.rows);
+  it("does not retry a rejected model request inside one task attempt", async () => {
+    const record = await createRecord(app, "COVER_NETWORK 网络失败输入");
+    const beforeCalls = generateCoverage.mock.calls.length;
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/coverage-analyses",
+      payload: { topic: "网络失败", recordIds: [record.id] },
+    });
+    const task = (created.json() as { analysis: CoverageAnalysis }).analysis;
+
+    await waitForCoverage(app, task.id, "failed");
+    expect(generateCoverage.mock.calls.length - beforeCalls).toBe(1);
   });
 });
 
-async function createOrganizedRecord(app: FastifyInstance, text: string) {
+function validCoverage(recordIds: string[]): GeneratedCoverageAnalysis {
+  return {
+    frameworkSummary: "按变更捕获、交付可靠性和消费治理三个方面观察。",
+    covered: [
+      {
+        title: "变更捕获基础",
+        assessment: "所选记录已经覆盖日志捕获与增量交付。",
+        recordIds,
+      },
+    ],
+    possibleGaps: [
+      {
+        title: "消费端治理",
+        assessment: "参考框架中还可以继续核验消费幂等和失败恢复。",
+        recommendation: "后续可补充一条带真实案例的幂等消费记录。",
+      },
+    ],
+    caveat: "框架由模型临时提出，应结合实际目标判断。",
+  };
+}
+
+function invalidCoverage(): GeneratedCoverageAnalysis {
+  return {
+    frameworkSummary: "无效结果",
+    covered: [
+      {
+        title: "错误引用",
+        assessment: "引用不存在的记录。",
+        recordIds: ["00000000-0000-4000-8000-000000000000"],
+      },
+    ],
+    possibleGaps: [],
+    caveat: "这仍然是建议。",
+  };
+}
+
+async function createRecord(app: FastifyInstance, text: string) {
   const marker = text.split(/\s/u, 1)[0] ?? text;
   const created = await app.inject({
     method: "POST",
@@ -251,9 +355,13 @@ async function createOrganizedRecord(app: FastifyInstance, text: string) {
   });
 
   expect(created.statusCode).toBe(201);
-  const record = (created.json() as {
+  return (created.json() as {
     record: { id: string; myTags: Array<{ id: string }> };
   }).record;
+}
+
+async function createOrganizedRecord(app: FastifyInstance, text: string) {
+  const record = await createRecord(app, text);
   const organized = await app.inject({
     method: "POST",
     url: `/api/v1/records/${record.id}/organize`,
@@ -261,14 +369,16 @@ async function createOrganizedRecord(app: FastifyInstance, text: string) {
   });
 
   expect(organized.statusCode).toBe(202);
-  await waitForTask(app, (organized.json() as { task: { id: string } }).task.id);
-
-  return { id: record.id, tagId: record.myTags[0]!.id };
+  await waitForOrganization(
+    app,
+    (organized.json() as { task: { id: string } }).task.id,
+  );
+  return record;
 }
 
-async function replaceActiveKnowledge(
+async function updateRecord(
   app: FastifyInstance,
-  record: { id: string; tagId: string },
+  record: { id: string; myTags: Array<{ id: string }> },
   text: string,
 ) {
   const updated = await app.inject({
@@ -276,20 +386,12 @@ async function replaceActiveKnowledge(
     url: `/api/v1/records/${record.id}`,
     payload: {
       text,
-      myTags: [{ id: record.tagId }],
+      myTags: record.myTags.map(({ id }) => ({ id })),
       processing: "save_only",
     },
   });
 
   expect(updated.statusCode).toBe(200);
-  const organized = await app.inject({
-    method: "POST",
-    url: `/api/v1/records/${record.id}/organize`,
-    payload: { handling: "automatic" },
-  });
-
-  expect(organized.statusCode).toBe(202);
-  await waitForTask(app, (organized.json() as { task: { id: string } }).task.id);
 }
 
 async function listCoverageSources(
@@ -305,12 +407,46 @@ async function listCoverageSources(
   return (response.json() as { items: CoverageSource[] }).items;
 }
 
+async function getCoverage(
+  app: FastifyInstance,
+  analysisId: string,
+): Promise<CoverageAnalysis> {
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/v1/coverage-analyses/${analysisId}`,
+  });
+
+  expect(response.statusCode).toBe(200);
+  return (response.json() as { analysis: CoverageAnalysis }).analysis;
+}
+
+async function waitForCoverage(
+  app: FastifyInstance,
+  analysisId: string,
+  expected: "failed" | "succeeded",
+): Promise<CoverageAnalysis> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const analysis = await getCoverage(app, analysisId);
+
+    if (analysis.status === expected) {
+      return analysis;
+    }
+
+    if (analysis.status === "failed" || analysis.status === "succeeded") {
+      throw new Error(`Coverage task settled as ${analysis.status}`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error(`Coverage task ${analysisId} did not finish`);
+}
+
 async function sourceSnapshot(pool: Pool, recordIds: string[]) {
   const [records, revisions, analyses, points, evidence] = await Promise.all([
-    pool.query(
-      `SELECT * FROM records WHERE id = ANY($1::uuid[]) ORDER BY id`,
-      [recordIds],
-    ),
+    pool.query("SELECT * FROM records WHERE id = ANY($1::uuid[]) ORDER BY id", [
+      recordIds,
+    ]),
     pool.query(
       `SELECT * FROM fragment_revisions
         WHERE record_id = ANY($1::uuid[])
@@ -388,7 +524,7 @@ async function activateConfiguration(app: FastifyInstance): Promise<void> {
   expect(activated.statusCode).toBe(200);
 }
 
-async function waitForTask(app: FastifyInstance, taskId: string) {
+async function waitForOrganization(app: FastifyInstance, taskId: string) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const response = await app.inject({
       method: "GET",

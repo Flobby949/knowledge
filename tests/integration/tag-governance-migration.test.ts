@@ -92,6 +92,7 @@ it("adds every V2 domain table without rewriting V1 records, history, tags, or k
       "0015_duplicate_suggestions.sql",
       "0016_knowledge_relations.sql",
       "0017_coverage_analysis.sql",
+      "0018_coverage_analysis_tasks.sql",
     ]) {
       const migration = await readFile(
         new URL(`../../migrations/${filename}`, import.meta.url),
@@ -131,7 +132,9 @@ it("adds every V2 domain table without rewriting V1 records, history, tags, or k
          UNION ALL SELECT id FROM relation_suggestions
          UNION ALL SELECT id FROM knowledge_relations
          UNION ALL SELECT id FROM coverage_analyses
-         UNION ALL SELECT id FROM coverage_analysis_items`,
+         UNION ALL SELECT id FROM coverage_analysis_items
+         UNION ALL SELECT analysis_id FROM coverage_analysis_records
+         UNION ALL SELECT item_id FROM coverage_item_records`,
       ),
     ).toMatchObject({ rowCount: 0 });
   } finally {

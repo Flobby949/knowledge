@@ -18,6 +18,7 @@ import {
   rejectDuplicateSuggestion,
   rejectRelationSuggestion,
   removeKnowledgeRelation,
+  retryCoverageAnalysis,
   scanDuplicateSuggestions,
   scanRelationSuggestions,
   undoDuplicateConsolidation,
@@ -613,14 +614,27 @@ function CoveragePanel() {
   const [sources, setSources] = useState<CoverageSource[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [analyses, setAnalyses] = useState<CoverageAnalysis[]>([]);
-  const [selectedAnalysis, setSelectedAnalysis] = useState<CoverageAnalysis | null>(null);
-  const [sourceLoading, setSourceLoading] = useState(true);
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [sourceLoading, setSourceLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const createButton = useRef<HTMLButtonElement>(null);
+  const topicInput = useRef<HTMLInputElement>(null);
+  const selectedAnalysis =
+    analyses.find(({ id }) => id === selectedAnalysisId) ?? null;
+  const hasActiveTasks = analyses.some(
+    ({ status }) => status === "queued" || status === "running",
+  );
 
   useEffect(() => {
+    if (!builderOpen) {
+      return;
+    }
+
     const controller = new AbortController();
 
     setSourceLoading(true);
@@ -629,7 +643,7 @@ function CoveragePanel() {
         .then(setSources)
         .catch((caught: unknown) => {
           if (!isAbortError(caught)) {
-            setError(errorMessage(caught, "知识点暂时无法载入。"));
+            setError(errorMessage(caught, "记录暂时无法载入。"));
           }
         })
         .finally(() => setSourceLoading(false));
@@ -639,7 +653,7 @@ function CoveragePanel() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
+  }, [builderOpen, query]);
 
   useEffect(() => {
     let active = true;
@@ -648,7 +662,7 @@ function CoveragePanel() {
       .then((items) => {
         if (active) {
           setAnalyses(items);
-          setSelectedAnalysis((current) => current ?? items[0] ?? null);
+          setSelectedAnalysisId((current) => current ?? items[0]?.id ?? null);
         }
       })
       .catch((caught: unknown) => {
@@ -666,6 +680,59 @@ function CoveragePanel() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasActiveTasks) {
+      return;
+    }
+
+    let active = true;
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing) {
+        return;
+      }
+
+      refreshing = true;
+
+      try {
+        const items = await listCoverageAnalyses();
+
+        if (active) {
+          setAnalyses(items);
+        }
+      } catch (caught) {
+        if (active) {
+          setError(errorMessage(caught, "分析状态暂时无法刷新。"));
+        }
+      } finally {
+        refreshing = false;
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 1_500);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [hasActiveTasks]);
+
+  useEffect(() => {
+    if (!builderOpen) {
+      return;
+    }
+
+    topicInput.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) {
+        setBuilderOpen(false);
+        window.setTimeout(() => createButton.current?.focus());
+      }
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [builderOpen, busy]);
 
   function toggleSource(id: string) {
     setSelectedIds((current) => {
@@ -688,177 +755,428 @@ function CoveragePanel() {
 
     try {
       const analysis = await createCoverageAnalysis({
-        knowledgePointIds: [...selectedIds],
+        recordIds: [...selectedIds],
         topic: topic.trim(),
       });
-      setAnalyses((current) => [analysis, ...current]);
-      setSelectedAnalysis(analysis);
-      setNotice("覆盖快照已生成；结果仅作思考提示，不会补写或修改已选知识点。");
+      setAnalyses((current) => upsertCoverageAnalysis(current, analysis));
+      setSelectedAnalysisId(analysis.id);
+      setBuilderOpen(false);
+      setTopic("");
+      setQuery("");
+      setSelectedIds(new Set());
+      setNotice("分析任务已创建并出现在历史中；你可以离开此页，完成后报告会自动更新。");
     } catch (caught) {
-      setError(errorMessage(caught, "覆盖分析生成失败，请稍后重试。"));
+      setError(errorMessage(caught, "分析任务创建失败，请检查选择后重试。"));
     } finally {
       setBusy(false);
     }
   }
 
+  async function retry(analysisId: string) {
+    setRetryingId(analysisId);
+    setError("");
+    setNotice("");
+
+    try {
+      const analysis = await retryCoverageAnalysis(analysisId);
+
+      setAnalyses((current) => upsertCoverageAnalysis(current, analysis));
+      setSelectedAnalysisId(analysis.id);
+      setNotice("已使用原输入快照重新排队，不会读取记录的最新版本。");
+    } catch (caught) {
+      setError(errorMessage(caught, "重试未能创建，请稍后再试。"));
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   return (
     <div className="coverage-workspace">
-      <section aria-label="创建覆盖分析" className="coverage-builder">
-        <header>
-          <div>
-            <span>新建分析</span>
-            <h2>选择本次要检查的知识范围</h2>
-          </div>
-          <strong>{selectedIds.size} / 50 已选</strong>
-        </header>
-
-        <label className="coverage-topic-field">
-          <span>分析主题</span>
-          <input
-            maxLength={120}
-            onChange={(event) => setTopic(event.target.value)}
-            placeholder="例如：分布式系统故障恢复"
-            value={topic}
-          />
-        </label>
-        <label className="coverage-search-field">
-          <span className="visually-hidden">搜索当前知识点</span>
-          <span aria-hidden="true" className="search-icon" />
-          <input
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="按知识点、记录或标签筛选"
-            type="search"
-            value={query}
-          />
-        </label>
-
-        <div aria-label="可选知识点" className="coverage-source-list">
-          {sourceLoading ? <LoadingCopy /> : null}
-          {!sourceLoading && sources.length === 0 ? (
-            <EmptyCopy title="没有匹配知识点" body="换一个关键词，或先整理更多记录。" />
-          ) : null}
-          {sources.map((source) => (
-            <label className="coverage-source-row" key={source.id}>
-              <input
-                checked={selectedIds.has(source.id)}
-                onChange={() => toggleSource(source.id)}
-                type="checkbox"
-              />
-              <span>
-                <strong>{source.title}</strong>
-                <small>{source.recordTitle}</small>
-                <em>{source.excerpt}</em>
-              </span>
-            </label>
-          ))}
+      <section aria-label="创建覆盖分析" className="coverage-command">
+        <span aria-hidden="true" className="coverage-command-mark" />
+        <div>
+          <strong>从你的记录出发，检查一个主题的覆盖情况</strong>
+          <span>任务创建后立即进入历史；报告只提供参考，不会改写记录。</span>
         </div>
-
-        <footer>
-          <p>仅保存本次选择和分析快照；原知识点、证据和历史版本保持不变。</p>
-          <button
-            className="primary-button"
-            disabled={busy || !topic.trim() || selectedIds.size === 0}
-            onClick={() => void generate()}
-            type="button"
-          >
-            {busy ? "正在生成…" : "生成建议性覆盖分析"}
-          </button>
-        </footer>
+        <button
+          className="primary-button"
+          onClick={() => setBuilderOpen(true)}
+          ref={createButton}
+          type="button"
+        >
+          新建覆盖分析
+        </button>
       </section>
 
       <Feedback error={error} notice={notice} />
 
       <div className="coverage-results-layout">
         <aside aria-label="覆盖分析历史" className="coverage-history">
-          <h2>分析历史</h2>
+          <header>
+            <h2>分析历史</h2>
+            <span>{analyses.length}</span>
+          </header>
           {historyLoading ? <p>正在载入…</p> : null}
-          {!historyLoading && analyses.length === 0 ? <p>尚无分析快照。</p> : null}
+          {!historyLoading && analyses.length === 0 ? (
+            <p>创建任务后会立即显示在这里。</p>
+          ) : null}
           {analyses.map((analysis) => (
-            <button
-              aria-current={selectedAnalysis?.id === analysis.id ? "true" : undefined}
-              key={analysis.id}
-              onClick={() => setSelectedAnalysis(analysis)}
-              type="button"
-            >
-              <strong>{analysis.topic}</strong>
-              <span>{formatDate(analysis.createdAt)} · {analysis.inputCount} 个知识点</span>
-            </button>
+            <div className={`coverage-history-entry ${analysis.status}`} key={analysis.id}>
+              <button
+                aria-current={selectedAnalysis?.id === analysis.id ? "true" : undefined}
+                onClick={() => setSelectedAnalysisId(analysis.id)}
+                type="button"
+              >
+                <span className="coverage-history-title">
+                  <i aria-hidden="true" />
+                  <strong>{analysis.topic}</strong>
+                  <em>{coverageStatusLabel(analysis.status)}</em>
+                </span>
+                <span>
+                  {formatDate(analysis.createdAt)} · {analysis.inputCount} 条
+                  {analysis.inputKind === "records" ? "记录" : "知识点"}
+                </span>
+              </button>
+              {analysis.canRetry ? (
+                <button
+                  className="coverage-history-retry"
+                  disabled={retryingId === analysis.id}
+                  onClick={() => void retry(analysis.id)}
+                  type="button"
+                >
+                  {retryingId === analysis.id ? "重试中…" : "重试"}
+                </button>
+              ) : null}
+            </div>
           ))}
+          {selectedAnalysis?.status === "succeeded" ? (
+            <nav aria-label="报告目录" className="coverage-report-nav">
+              <span>本报告</span>
+              <a href="#coverage-overview">分析概览</a>
+              <a href="#coverage-covered">已有覆盖</a>
+              <a href="#coverage-gaps">可能缺口</a>
+              <a href="#coverage-scope">输入范围</a>
+            </nav>
+          ) : null}
         </aside>
 
         <section aria-label="覆盖分析结果" className="coverage-result">
           {selectedAnalysis ? (
-            <CoverageResult analysis={selectedAnalysis} />
+            selectedAnalysis.status === "succeeded" ? (
+              <CoverageResult analysis={selectedAnalysis} />
+            ) : selectedAnalysis.status === "failed" ? (
+              <CoverageFailed
+                analysis={selectedAnalysis}
+                busy={retryingId === selectedAnalysis.id}
+                onRetry={() => void retry(selectedAnalysis.id)}
+              />
+            ) : (
+              <CoverageProgress analysis={selectedAnalysis} />
+            )
           ) : (
             <EmptyCopy
-              title="选择知识点，生成第一份覆盖快照"
-              body="它会指出已有覆盖和可能缺口，但不会把建议写回你的知识库。"
+              title="还没有覆盖分析"
+              body="新建任务并选择记录后，这里会显示进度、失败原因或完整报告。"
             />
           )}
         </section>
       </div>
+
+      {builderOpen ? (
+        <div
+          className="coverage-builder-backdrop"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target && !busy) {
+              setBuilderOpen(false);
+            }
+          }}
+        >
+          <section
+            aria-labelledby="coverage-builder-title"
+            aria-modal="true"
+            className="coverage-builder"
+            role="dialog"
+          >
+            <header>
+              <div>
+                <h2 id="coverage-builder-title">新建覆盖分析</h2>
+                <p>先确定主题，再从你的输入记录中选择本次范围。</p>
+              </div>
+              <button
+                aria-label="关闭新建分析"
+                className="coverage-builder-close"
+                disabled={busy}
+                onClick={() => setBuilderOpen(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="coverage-builder-body">
+              <section className="coverage-builder-brief">
+                <label className="coverage-topic-field">
+                  <span>分析主题</span>
+                  <input
+                    maxLength={120}
+                    onChange={(event) => setTopic(event.target.value)}
+                    placeholder="例如：分布式系统故障恢复"
+                    ref={topicInput}
+                    value={topic}
+                  />
+                </label>
+                <p>
+                  系统会冻结每条记录的当前文本版本；记录以后发生变化时，历史报告仍保留并提示差异。
+                </p>
+              </section>
+
+              <section className="coverage-picker">
+                <header>
+                  <strong>选择记录</strong>
+                  <span>{selectedIds.size} / 50 已选</span>
+                </header>
+                <label className="coverage-search-field">
+                  <span className="visually-hidden">搜索记录</span>
+                  <span aria-hidden="true" className="search-icon" />
+                  <input
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="按记录标题、原文或我的标签筛选"
+                    type="search"
+                    value={query}
+                  />
+                </label>
+                <div aria-label="可选记录" className="coverage-source-list">
+                  {sourceLoading ? <LoadingCopy /> : null}
+                  {!sourceLoading && sources.length === 0 ? (
+                    <EmptyCopy title="没有匹配记录" body="换一个关键词，或先新增记录。" />
+                  ) : null}
+                  {sources.map((source) => (
+                    <label className="coverage-source-row" key={source.id}>
+                      <input
+                        checked={selectedIds.has(source.id)}
+                        onChange={() => toggleSource(source.id)}
+                        type="checkbox"
+                      />
+                      <span className="coverage-record-copy">
+                        <span className="coverage-record-top">
+                          <strong>{source.title}</strong>
+                          <em>
+                            {source.organization === "organized" ? "已整理" : "仅原文"}
+                          </em>
+                        </span>
+                        <span className="coverage-record-preview">{source.excerpt}</span>
+                        <span className="coverage-record-foot">
+                          <span className="coverage-record-tags">
+                            {source.tags.slice(0, 3).map((tag) => (
+                              <span className="coverage-record-tag" key={tag}>{tag}</span>
+                            ))}
+                            {source.tags.length > 3 ? (
+                              <span className="coverage-record-tag">+{source.tags.length - 3}</span>
+                            ) : null}
+                          </span>
+                          <span>{formatDate(source.updatedAt)}</span>
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <footer>
+              <p>创建后任务立即进入分析历史；原记录和所有历史版本保持不变。</p>
+              <div>
+                <button
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => setBuilderOpen(false)}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={busy || !topic.trim() || selectedIds.size === 0}
+                  onClick={() => void generate()}
+                  type="button"
+                >
+                  {busy ? "正在创建…" : "创建分析任务"}
+                </button>
+              </div>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function CoverageResult({ analysis }: { analysis: CoverageAnalysis }) {
   return (
-    <article>
-      <header className="coverage-result-heading">
+    <article className="coverage-report">
+      <header className="coverage-result-heading" id="coverage-overview">
         <div>
-          <span>建议性快照</span>
+          <span className="coverage-result-status">分析完成</span>
           <h2>{analysis.topic}</h2>
-          <p>{analysis.frameworkSummary}</p>
+          <p>{analysis.frameworkSummary ?? "本次分析未返回参考框架。"}</p>
         </div>
-        <span>{formatDate(analysis.createdAt)}</span>
+        <div className="coverage-result-meta">
+          <span>{analysis.inputCount} 条记录</span>
+          <span>{formatDate(analysis.completedAt ?? analysis.createdAt)}</span>
+        </div>
       </header>
 
       <div className="advisory-banner">
         <strong>这是分析提示，不是事实裁决</strong>
-        <p>{analysis.caveat}</p>
+        <p>{analysis.caveat ?? "请结合实际目标判断模型给出的参考框架。"}</p>
       </div>
       {analysis.inputChanged ? (
         <p className="stale-banner">
-          部分输入知识点已变化或不再生效。这份历史快照仍保留，请重新选择当前知识生成新分析。
+          部分输入记录已变化或归档。这份报告仍基于创建时的快照；如需最新判断，请新建分析。
         </p>
       ) : null}
 
-      <section className="coverage-section covered">
+      <section className="coverage-section covered" id="coverage-covered">
         <header>
-          <span>01</span>
-          <h3>已有覆盖</h3>
+          <div>
+            <h3>已有覆盖</h3>
+            <p>下列判断都有本次输入记录作为依据。</p>
+          </div>
           <strong>{analysis.covered.length}</strong>
         </header>
-        {analysis.covered.map((item) => (
-          <article key={item.id}>
-            <h4>{item.title}</h4>
-            <p>{item.assessment}</p>
-            <div className="coverage-source-links">
-              {item.sources.map((source) => (
-                <Link key={source.id} to={`/records/${source.recordId}`}>
-                  {source.title}
-                </Link>
-              ))}
+        {analysis.covered.map((item, index) => (
+          <details className="coverage-report-item" key={item.id} open={index < 2}>
+            <summary>
+              <span>
+                <strong>{item.title}</strong>
+                <small>{item.sources.length} 条记录支撑</small>
+              </span>
+              <i aria-hidden="true">⌄</i>
+            </summary>
+            <div>
+              <p>{item.assessment}</p>
+              <div className="coverage-source-links">
+                {item.sources.map((source) => (
+                  <Link key={source.id} to={`/records/${source.recordId}`}>
+                    {source.title}
+                  </Link>
+                ))}
+              </div>
             </div>
-          </article>
+          </details>
         ))}
       </section>
 
-      <section className="coverage-section gaps">
+      <section className="coverage-section gaps" id="coverage-gaps">
         <header>
-          <span>02</span>
-          <h3>可能缺口</h3>
+          <div>
+            <h3>可能缺口</h3>
+            <p>来自模型参考框架的探索方向，不代表客观缺失。</p>
+          </div>
           <strong>{analysis.possibleGaps.length}</strong>
         </header>
-        {analysis.possibleGaps.map((item) => (
-          <article key={item.id}>
-            <h4>{item.title}</h4>
-            <p>{item.assessment}</p>
-            <span>{item.recommendation}</span>
-          </article>
+        {analysis.possibleGaps.map((item, index) => (
+          <details className="coverage-report-item" key={item.id} open={index < 2}>
+            <summary>
+              <span>
+                <strong>{item.title}</strong>
+                <small>建议继续核验</small>
+              </span>
+              <i aria-hidden="true">⌄</i>
+            </summary>
+            <div>
+              <p>{item.assessment}</p>
+              <p className="coverage-recommendation">
+                <strong>下一步</strong>{item.recommendation}
+              </p>
+            </div>
+          </details>
         ))}
       </section>
+
+      <details className="coverage-input-scope" id="coverage-scope">
+        <summary>
+          <strong>本次输入范围</strong>
+          <span>{analysis.inputCount} 条记录 · 展开核对</span>
+        </summary>
+        <div>
+          {analysis.sources.map((source) => (
+            <Link key={source.id} to={`/records/${source.recordId}`}>
+              <span>{source.title}</span>
+              {source.changedSinceAnalysis || !source.current ? <em>当前内容已变化</em> : null}
+            </Link>
+          ))}
+        </div>
+      </details>
     </article>
+  );
+}
+
+function CoverageProgress({ analysis }: { analysis: CoverageAnalysis }) {
+  return (
+    <article className="coverage-task-state" aria-live="polite">
+      <span aria-hidden="true" className="coverage-task-spinner" />
+      <p>{analysis.status === "queued" ? "正在等待分析" : "AI 正在阅读记录"}</p>
+      <h2>{analysis.topic}</h2>
+      <p>
+        已冻结 {analysis.inputCount} 条记录。根据内容长度，本次最长可能需要 10–30 分钟；离开页面不会中断任务。
+      </p>
+      <CoverageTaskSources analysis={analysis} />
+    </article>
+  );
+}
+
+function CoverageFailed({
+  analysis,
+  busy,
+  onRetry,
+}: {
+  analysis: CoverageAnalysis;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <article className="coverage-task-state failed">
+      <span aria-hidden="true" className="coverage-task-failed-mark">!</span>
+      <p>分析失败</p>
+      <h2>{analysis.topic}</h2>
+      <p>{analysis.failure?.message ?? "模型未能返回可用结果。"}</p>
+      <button className="primary-button" disabled={busy} onClick={onRetry} type="button">
+        {busy ? "正在重新排队…" : "使用原输入重试"}
+      </button>
+      <small>第 {analysis.attemptCount} 次尝试 · 重试不会改用记录的最新内容</small>
+      <CoverageTaskSources analysis={analysis} />
+    </article>
+  );
+}
+
+function CoverageTaskSources({ analysis }: { analysis: CoverageAnalysis }) {
+  return (
+    <details className="coverage-task-sources">
+      <summary>查看本次冻结的 {analysis.inputCount} 条记录</summary>
+      <div>
+        {analysis.sources.map((source) => (
+          <Link key={source.id} to={`/records/${source.recordId}`}>{source.title}</Link>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function coverageStatusLabel(status: CoverageAnalysis["status"]): string {
+  if (status === "queued") return "等待中";
+  if (status === "running") return "分析中";
+  if (status === "failed") return "失败";
+  return "已完成";
+}
+
+function upsertCoverageAnalysis(
+  analyses: CoverageAnalysis[],
+  next: CoverageAnalysis,
+): CoverageAnalysis[] {
+  return [next, ...analyses.filter(({ id }) => id !== next.id)].sort(
+    (left, right) =>
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
   );
 }
 

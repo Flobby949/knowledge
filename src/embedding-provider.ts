@@ -9,6 +9,8 @@ export interface EmbedTextInput {
 
 export type EmbedText = (input: EmbedTextInput) => Promise<number[]>;
 
+export const EMBEDDING_REQUEST_TIMEOUT_MS = 120_000;
+
 export const embedOpenAICompatibleText: EmbedText = async (input) => {
   const response = await fetch(
     new URL("embeddings", ensureTrailingSlash(input.baseUrl)),
@@ -19,7 +21,7 @@ export const embedOpenAICompatibleText: EmbedText = async (input) => {
         "content-type": "application/json",
       },
       body: JSON.stringify({ model: input.model, input: input.text }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS),
     },
   );
 

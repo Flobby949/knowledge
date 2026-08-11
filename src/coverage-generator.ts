@@ -1,4 +1,6 @@
-export interface CoveragePointInput {
+import { countGraphemes } from "./domain/fragment-text.js";
+
+export interface CoverageRecordInput {
   body: string;
   id: string;
   title: string;
@@ -8,8 +10,9 @@ export interface GenerateCoverageInput {
   apiKey: string;
   baseUrl: string;
   configurationVersion: number;
-  knowledgePoints: CoveragePointInput[];
   model: string;
+  records: CoverageRecordInput[];
+  timeoutMs?: number;
   topic: string;
 }
 
@@ -17,7 +20,7 @@ export interface GeneratedCoverageAnalysis {
   caveat: string;
   covered: Array<{
     assessment: string;
-    knowledgePointIds: string[];
+    recordIds: string[];
     title: string;
   }>;
   frameworkSummary: string;
@@ -32,10 +35,21 @@ export type CoverageGenerator = (
   input: GenerateCoverageInput,
 ) => Promise<GeneratedCoverageAnalysis>;
 
-const COVERAGE_SYSTEM_PROMPT = `你负责基于用户明确选择的知识点，提供一次实验性的主题覆盖分析。
+export function coverageTaskTimeoutMs(
+  records: Array<Pick<CoverageRecordInput, "body">>,
+): number {
+  const graphemeCount = countGraphemes(
+    records.map(({ body }) => body).join("\n"),
+  );
+  const extraMinutes = Math.max(0, Math.ceil(graphemeCount / 1_000) - 1);
+
+  return Math.min(1_800_000, 600_000 + extraMinutes * 60_000);
+}
+
+const COVERAGE_SYSTEM_PROMPT = `你负责基于用户明确选择的原始记录，提供一次实验性的主题覆盖分析。
 
 规则：
-- 只把输入知识点能够支持的内容列为“已有覆盖”；每项必须引用真实 knowledgePointIds。
+- 只把输入记录能够支持的内容列为“已有覆盖”；每项必须引用真实 recordIds。
 - “可能缺口”来自你提出的参考框架，只能写成建议或值得探索的方向，不能写成用户客观缺失的事实。
 - 不创建 Ontology、Concept，不给用户打分，不补写输入中不存在的事实。
 - 使用中文自然语言，技术专名保留常用原写法。
@@ -43,7 +57,7 @@ const COVERAGE_SYSTEM_PROMPT = `你负责基于用户明确选择的知识点，
 返回 JSON：
 {
   "frameworkSummary": "本次采用的参考框架",
-  "covered": [{"title":"...","assessment":"...","knowledgePointIds":["..."]}],
+  "covered": [{"title":"...","assessment":"...","recordIds":["..."]}],
   "possibleGaps": [{"title":"...","assessment":"为什么可能值得补充","recommendation":"建议的下一步"}],
   "caveat": "明确说明这是基于所选知识与模型参考框架的建议，不是客观完备度结论"
 }
@@ -69,14 +83,16 @@ export const generateOpenAICompatibleCoverage: CoverageGenerator = async (
             role: "user",
             content: JSON.stringify({
               topic: input.topic,
-              knowledgePoints: input.knowledgePoints,
+              records: input.records,
             }),
           },
         ],
         response_format: { type: "json_object" },
         stream: false,
       }),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(
+        input.timeoutMs ?? coverageTaskTimeoutMs(input.records),
+      ),
     },
   );
 

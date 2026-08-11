@@ -107,19 +107,27 @@ export interface RelationSuggestion {
 export interface CoverageSource {
   excerpt: string;
   id: string;
-  recordId: string;
-  recordTitle: string;
+  organization: "organized" | "original";
+  tags: string[];
   title: string;
+  updatedAt: string;
 }
 
-export interface CoverageAnalysisSource extends CoverageSource {
+export interface CoverageAnalysisSource {
   changedSinceAnalysis: boolean;
   current: boolean;
+  excerpt: string;
+  id: string;
+  recordId: string;
+  title: string;
 }
 
 export interface CoverageAnalysis {
   advisory: true;
-  caveat: string;
+  attemptCount: number;
+  canRetry: boolean;
+  caveat: string | null;
+  completedAt: string | null;
   covered: Array<{
     assessment: string;
     id: string;
@@ -129,10 +137,12 @@ export interface CoverageAnalysis {
     title: string;
   }>;
   createdAt: string;
-  frameworkSummary: string;
+  failure: null | { code: string; message: string };
+  frameworkSummary: string | null;
   id: string;
   inputChanged: boolean;
   inputCount: number;
+  inputKind: "knowledge_points" | "records";
   model: { configurationVersion: number; name: string };
   possibleGaps: Array<{
     assessment: string;
@@ -143,6 +153,8 @@ export interface CoverageAnalysis {
     title: string;
   }>;
   sources: CoverageAnalysisSource[];
+  startedAt: string | null;
+  status: "failed" | "queued" | "running" | "succeeded";
   topic: string;
 }
 
@@ -975,7 +987,7 @@ export async function listCoverageSources(
 }
 
 export async function createCoverageAnalysis(input: {
-  knowledgePointIds: string[];
+  recordIds: string[];
   topic: string;
 }): Promise<CoverageAnalysis> {
   const response = await fetch("/api/v1/coverage-analyses", {
@@ -983,6 +995,18 @@ export async function createCoverageAnalysis(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
+  const body = await parseTagResponse<{ analysis: CoverageAnalysis }>(response);
+
+  return body.analysis;
+}
+
+export async function retryCoverageAnalysis(
+  analysisId: string,
+): Promise<CoverageAnalysis> {
+  const response = await fetch(
+    `/api/v1/coverage-analyses/${encodeURIComponent(analysisId)}/retry`,
+    { method: "POST" },
+  );
   const body = await parseTagResponse<{ analysis: CoverageAnalysis }>(response);
 
   return body.analysis;

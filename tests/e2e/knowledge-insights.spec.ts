@@ -104,17 +104,19 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
         items: [
           {
             excerpt: "使用版本号避免旧缓存覆盖新值。",
-            id: sourceA,
-            recordId: recordA,
-            recordTitle: "缓存一致性笔记",
-            title: "版本化缓存读取",
+            id: recordA,
+            organization: "organized",
+            tags: ["缓存", "一致性"],
+            title: "缓存一致性笔记",
+            updatedAt: "2026-08-11T08:00:00.000Z",
           },
           {
             excerpt: "写入后主动清除相关缓存键。",
-            id: sourceB,
-            recordId: recordB,
-            recordTitle: "缓存失效实践",
-            title: "缓存失效策略",
+            id: recordB,
+            organization: "original",
+            tags: ["缓存"],
+            title: "缓存失效实践",
+            updatedAt: "2026-08-10T08:00:00.000Z",
           },
         ],
       },
@@ -123,13 +125,13 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
   await page.route("**/api/v1/coverage-analyses", async (route) => {
     if (route.request().method() === "POST") {
       expect(route.request().postDataJSON()).toEqual({
-        knowledgePointIds: [sourceA],
+        recordIds: [recordA],
         topic: "缓存一致性",
       });
       await route.fulfill({
         contentType: "application/json",
-        status: 201,
-        json: { analysis: coverageAnalysis({ coverageId, recordA, sourceA }) },
+        status: 202,
+        json: { analysis: coverageAnalysis({ coverageId, recordA }) },
       });
       return;
     }
@@ -154,7 +156,9 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
   await expect(duplicateCard).toContainText("接受只会新增一条合并关系");
   await duplicateCard.getByLabel("设为主要展示来源").first().check();
   await duplicateCard.getByRole("button", { name: "建立来源保留合并" }).click();
-  await expect(main.getByRole("status")).toContainText("两份原始内容仍完整保留");
+  await expect(
+    main.getByRole("status").filter({ hasText: "两份原始内容仍完整保留" }),
+  ).toBeVisible();
 
   await main.getByRole("tab", { name: "关系审查" }).click();
   const relationCard = main.locator(".relation-card");
@@ -165,14 +169,19 @@ test("knowledge discovery keeps every V2 decision explicit and reversible", asyn
     .getByLabel("关系描述")
     .fill("缓存失效策略扩展了版本化读取策略。");
   await relationCard.getByRole("button", { name: "确认正式关系" }).click();
-  await expect(main.getByRole("status")).toContainText("知识点原文未改变");
+  await expect(
+    main.getByRole("status").filter({ hasText: "知识点原文未改变" }),
+  ).toBeVisible();
 
   await main.getByRole("tab", { name: "覆盖分析" }).click();
+  await main.getByRole("button", { name: "新建覆盖分析" }).click();
   await main.getByLabel("分析主题").fill("缓存一致性");
   await main.getByRole("checkbox").first().check();
-  await main.getByRole("button", { name: "生成建议性覆盖分析" }).click();
+  await main.getByRole("button", { name: "创建分析任务" }).click();
 
-  await expect(main.getByRole("status")).toContainText("不会补写或修改已选知识点");
+  await expect(
+    main.getByRole("status").filter({ hasText: "分析任务已创建" }),
+  ).toBeVisible();
   await expect(main.getByRole("region", { name: "覆盖分析结果" })).toContainText(
     "这是分析提示，不是事实裁决",
   );
@@ -276,21 +285,22 @@ function relationSuggestion(input: {
 function coverageAnalysis(input: {
   coverageId: string;
   recordA: string;
-  sourceA: string;
 }) {
   const source = {
     changedSinceAnalysis: false,
     current: true,
     excerpt: "使用版本号避免旧缓存覆盖新值。",
-    id: input.sourceA,
+    id: input.recordA,
     recordId: input.recordA,
-    recordTitle: "缓存一致性笔记",
-    title: "版本化缓存读取",
+    title: "缓存一致性笔记",
   };
 
   return {
     advisory: true,
+    attemptCount: 1,
+    canRetry: false,
     caveat: "所有结论只用于辅助复盘，不代表完整性或正确性的事实裁决。",
+    completedAt: "2026-08-11T08:01:00.000Z",
     covered: [
       {
         assessment: "已经覆盖读取侧的版本校验。",
@@ -302,10 +312,12 @@ function coverageAnalysis(input: {
       },
     ],
     createdAt: "2026-08-11T08:00:00.000Z",
+    failure: null,
     frameworkSummary: "按读取、写入和故障恢复三个方面检查缓存一致性。",
     id: input.coverageId,
     inputChanged: false,
     inputCount: 1,
+    inputKind: "records",
     model: { configurationVersion: 3, name: "fake-text" },
     possibleGaps: [
       {
@@ -318,6 +330,8 @@ function coverageAnalysis(input: {
       },
     ],
     sources: [source],
+    startedAt: "2026-08-11T08:00:01.000Z",
+    status: "succeeded",
     topic: "缓存一致性",
   };
 }

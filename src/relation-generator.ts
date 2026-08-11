@@ -1,3 +1,5 @@
+import { countGraphemes } from "./domain/fragment-text.js";
+
 export type GeneratedRelationType =
   | "analogy"
   | "applies"
@@ -20,6 +22,7 @@ export interface GenerateRelationInput {
   model: string;
   pointA: RelationPointInput;
   pointB: RelationPointInput;
+  timeoutMs?: number;
 }
 
 export type GeneratedRelation =
@@ -38,6 +41,35 @@ export type GeneratedRelation =
 export type RelationGenerator = (
   input: GenerateRelationInput,
 ) => Promise<GeneratedRelation>;
+
+export function relationRequestTimeoutMs(
+  input: Pick<GenerateRelationInput, "pointA" | "pointB">,
+): number {
+  const graphemeCount = countGraphemes(
+    [
+      input.pointA.title,
+      input.pointA.body,
+      ...input.pointA.evidence.map(({ quote }) => quote),
+      input.pointB.title,
+      input.pointB.body,
+      ...input.pointB.evidence.map(({ quote }) => quote),
+    ].join("\n"),
+  );
+
+  if (graphemeCount <= 500) {
+    return 300_000;
+  }
+
+  if (graphemeCount <= 1_000) {
+    return 420_000;
+  }
+
+  if (graphemeCount <= 1_500) {
+    return 540_000;
+  }
+
+  return 600_000;
+}
 
 const RELATION_SYSTEM_PROMPT = `你负责审查两个已有知识点之间是否存在高价值关系。只能依据给定知识点和证据，不补充外部事实。
 
@@ -79,7 +111,9 @@ export const generateOpenAICompatibleRelation: RelationGenerator = async (
         response_format: { type: "json_object" },
         stream: false,
       }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(
+        input.timeoutMs ?? relationRequestTimeoutMs(input),
+      ),
     },
   );
 

@@ -4,10 +4,12 @@ import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 
 import { decryptCredential } from "./model-credentials.js";
-import type {
-  GeneratedRelation,
-  GeneratedRelationType,
-  RelationGenerator,
+import {
+  relationRequestTimeoutMs,
+  type GenerateRelationInput,
+  type GeneratedRelation,
+  type GeneratedRelationType,
+  type RelationGenerator,
 } from "./relation-generator.js";
 import { cosineSimilarity } from "./semantic-search.js";
 
@@ -91,6 +93,7 @@ interface RelationSuggestionRow {
 
 const RELATION_RECALL_THRESHOLD = 0.65;
 const MAX_RELATION_CANDIDATES = 12;
+const RELATION_SCAN_TIMEOUT_MS = 900_000;
 const PUBLIC_RELATION_TYPES = new Set<GeneratedRelationType>([
   "analogy",
   "applies",
@@ -383,26 +386,31 @@ async function scanRelationSuggestions(options: {
     configuration.text_credential_ciphertext,
     credentialSecret,
   );
+  const generationDeadline = Date.now() + RELATION_SCAN_TIMEOUT_MS;
   const outcomes = await Promise.allSettled(
     toGenerate.map(async (candidate) => {
-      const generated = await generateValidatedRelation(generateRelation, {
-        apiKey,
-        baseUrl: configuration.text_base_url,
-        configurationVersion: configuration.version,
-        model: configuration.text_model,
-        pointA: {
-          id: candidate.pointA.id,
-          title: candidate.pointA.title,
-          body: candidate.pointA.body,
-          evidence: candidate.pointA.evidence,
+      const generated = await generateValidatedRelation(
+        generateRelation,
+        {
+          apiKey,
+          baseUrl: configuration.text_base_url,
+          configurationVersion: configuration.version,
+          model: configuration.text_model,
+          pointA: {
+            id: candidate.pointA.id,
+            title: candidate.pointA.title,
+            body: candidate.pointA.body,
+            evidence: candidate.pointA.evidence,
+          },
+          pointB: {
+            id: candidate.pointB.id,
+            title: candidate.pointB.title,
+            body: candidate.pointB.body,
+            evidence: candidate.pointB.evidence,
+          },
         },
-        pointB: {
-          id: candidate.pointB.id,
-          title: candidate.pointB.title,
-          body: candidate.pointB.body,
-          evidence: candidate.pointB.evidence,
-        },
-      });
+        generationDeadline,
+      );
 
       return generated
         ? {
@@ -453,10 +461,20 @@ async function scanRelationSuggestions(options: {
 
 async function generateValidatedRelation(
   generateRelation: RelationGenerator,
-  input: Parameters<RelationGenerator>[0],
+  input: GenerateRelationInput,
+  deadlineAt: number,
 ): Promise<Exclude<GeneratedRelation, { related: false }> | null> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const generated = await generateRelation(input);
+    const remainingMs = deadlineAt - Date.now();
+
+    if (remainingMs <= 0) {
+      throw new Error("Relation scan exceeded its time budget");
+    }
+
+    const generated = await generateRelation({
+      ...input,
+      timeoutMs: Math.min(relationRequestTimeoutMs(input), remainingMs),
+    });
 
     if (isUnrelated(generated)) {
       return null;

@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 3,
+  formatVersion: 4,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -211,17 +211,33 @@ interface KnowledgeRelationSnapshotRow extends DomainRow {
 interface CoverageAnalysisSnapshotRow extends DomainRow {
   id: string;
   topic: string;
-  framework_summary: string;
-  caveat: string;
+  framework_summary: string | null;
+  caveat: string | null;
   input_count: number;
   model_configuration_version: number;
   text_model: string;
+  input_kind: "KNOWLEDGE_POINTS" | "RECORDS";
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  failure_code: string | null;
+  failure_message: string | null;
+  attempt_count: number;
+  started_at: Timestamp | null;
+  completed_at: Timestamp | null;
   created_at: Timestamp;
 }
 
 interface CoverageAnalysisPointSnapshotRow extends DomainRow {
   analysis_id: string;
   knowledge_point_id: string;
+  content_fingerprint: string;
+  position: number;
+}
+
+interface CoverageAnalysisRecordSnapshotRow extends DomainRow {
+  analysis_id: string;
+  record_id: string;
+  fragment_revision_id: string;
+  title: string;
   content_fingerprint: string;
   position: number;
 }
@@ -241,8 +257,13 @@ interface CoverageItemPointSnapshotRow extends DomainRow {
   knowledge_point_id: string;
 }
 
+interface CoverageItemRecordSnapshotRow extends DomainRow {
+  item_id: string;
+  record_id: string;
+}
+
 interface DomainSnapshot {
-  formatVersion: 3;
+  formatVersion: 4;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
@@ -261,13 +282,14 @@ interface DomainSnapshot {
   knowledgeRelations: KnowledgeRelationSnapshotRow[];
   coverageAnalyses: CoverageAnalysisSnapshotRow[];
   coverageAnalysisPoints: CoverageAnalysisPointSnapshotRow[];
+  coverageAnalysisRecords: CoverageAnalysisRecordSnapshotRow[];
   coverageAnalysisItems: CoverageAnalysisItemSnapshotRow[];
   coverageItemPoints: CoverageItemPointSnapshotRow[];
+  coverageItemRecords: CoverageItemRecordSnapshotRow[];
 }
 
 interface ParsedSnapshot {
   snapshot: DomainSnapshot;
-  sourceFormatVersion: 1 | 2 | 3;
 }
 
 interface ExportRow {
@@ -363,7 +385,8 @@ export function registerDataTransferRoutes(
 
       try {
         parsed = parseSnapshot(archive);
-      } catch {
+      } catch (error) {
+        request.log.warn({ err: error }, "restore package inspection failed");
         return reply.code(422).send({
           error: {
             code: "RESTORE_PACKAGE_INVALID",
@@ -382,7 +405,7 @@ export function registerDataTransferRoutes(
          VALUES ($1, 'VALID', $2, $3, $4, $5, $6)`,
         [
           inspectionId,
-          parsed.sourceFormatVersion,
+          manifest.formatVersion,
           parsed.snapshot.records.length,
           canRestore,
           canRestore ? null : "INSTANCE_NOT_EMPTY",
@@ -394,7 +417,7 @@ export function registerDataTransferRoutes(
         inspection: {
           id: inspectionId,
           status: "valid",
-          formatVersion: parsed.sourceFormatVersion,
+          formatVersion: manifest.formatVersion,
           recordCount: parsed.snapshot.records.length,
           canRestore,
           ...(canRestore ? {} : { blockingReason: "INSTANCE_NOT_EMPTY" }),
@@ -590,23 +613,55 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       "SELECT * FROM knowledge_relations ORDER BY confirmed_at, id",
     );
     const coverageAnalyses = await client.query(
-      "SELECT * FROM coverage_analyses ORDER BY created_at, id",
+      `SELECT *
+         FROM coverage_analyses
+        WHERE status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY created_at, id`,
     );
     const coverageAnalysisPoints = await client.query(
-      `SELECT *
-         FROM coverage_analysis_points
-        ORDER BY analysis_id, position`,
+      `SELECT input.*
+         FROM coverage_analysis_points AS input
+         INNER JOIN coverage_analyses AS analysis
+           ON analysis.id = input.analysis_id
+          AND analysis.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY input.analysis_id, input.position`,
+    );
+    const coverageAnalysisRecords = await client.query(
+      `SELECT input.*
+         FROM coverage_analysis_records AS input
+         INNER JOIN coverage_analyses AS analysis
+           ON analysis.id = input.analysis_id
+          AND analysis.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY input.analysis_id, input.position`,
     );
     const coverageAnalysisItems = await client.query(
-      `SELECT *
-         FROM coverage_analysis_items
-        ORDER BY analysis_id, position`,
+      `SELECT item.*
+         FROM coverage_analysis_items AS item
+         INNER JOIN coverage_analyses AS analysis
+           ON analysis.id = item.analysis_id
+          AND analysis.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY item.analysis_id, item.position`,
     );
     const coverageItemPoints = await client.query(
-      "SELECT * FROM coverage_item_points ORDER BY item_id, knowledge_point_id",
+      `SELECT link.*
+         FROM coverage_item_points AS link
+         INNER JOIN coverage_analysis_items AS item ON item.id = link.item_id
+         INNER JOIN coverage_analyses AS analysis
+           ON analysis.id = item.analysis_id
+          AND analysis.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY link.item_id, link.knowledge_point_id`,
+    );
+    const coverageItemRecords = await client.query(
+      `SELECT link.*
+         FROM coverage_item_records AS link
+         INNER JOIN coverage_analysis_items AS item ON item.id = link.item_id
+         INNER JOIN coverage_analyses AS analysis
+           ON analysis.id = item.analysis_id
+          AND analysis.status IN ('SUCCEEDED', 'FAILED')
+        ORDER BY link.item_id, link.record_id`,
     );
     const snapshot: DomainSnapshot = {
-      formatVersion: 3,
+      formatVersion: 4,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
@@ -625,8 +680,10 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       knowledgeRelations: knowledgeRelations.rows,
       coverageAnalyses: coverageAnalyses.rows,
       coverageAnalysisPoints: coverageAnalysisPoints.rows,
+      coverageAnalysisRecords: coverageAnalysisRecords.rows,
       coverageAnalysisItems: coverageAnalysisItems.rows,
       coverageItemPoints: coverageItemPoints.rows,
+      coverageItemRecords: coverageItemRecords.rows,
     };
 
     await client.query("COMMIT");
@@ -658,9 +715,7 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
 
   if (
     !isDomainRow(publicManifest) ||
-    (publicManifest.formatVersion !== 1 &&
-      publicManifest.formatVersion !== 2 &&
-      publicManifest.formatVersion !== 3) ||
+    publicManifest.formatVersion !== 4 ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -688,7 +743,6 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
     throw new Error("restore snapshot version does not match its manifest");
   }
 
-  const sourceFormatVersion = publicManifest.formatVersion;
   const snapshot = validateDomainSnapshot(snapshotValue);
 
   if (publicManifest.recordCount !== snapshot.records.length) {
@@ -701,7 +755,7 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
     }
   }
 
-  return { snapshot, sourceFormatVersion };
+  return { snapshot };
 }
 
 function validateDomainSnapshot(value: unknown): DomainSnapshot {
@@ -709,29 +763,23 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     throw new Error("domain snapshot must be an object");
   }
 
-  const commonKeys = [
+  if (value.formatVersion !== 4) {
+    throw new Error("domain snapshot version is unsupported");
+  }
+
+  requireExactKeys(value, [
     "formatVersion",
     "records",
     "fragmentRevisions",
     "tags",
     "tagAssignments",
+    "tagAliases",
+    "tagMerges",
     "analyses",
     "knowledgePoints",
     "evidenceSpans",
     "corrections",
     "overviewCorrections",
-  ];
-
-  if (
-    value.formatVersion !== 1 &&
-    value.formatVersion !== 2 &&
-    value.formatVersion !== 3
-  ) {
-    throw new Error("domain snapshot version is unsupported");
-  }
-
-  const tagGovernanceKeys = ["tagAliases", "tagMerges"];
-  const v3Keys = [
     "duplicateSuggestions",
     "duplicateConsolidations",
     "relationSuggestions",
@@ -741,16 +789,9 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     "coverageAnalysisPoints",
     "coverageAnalysisItems",
     "coverageItemPoints",
-  ];
-
-  requireExactKeys(
-    value,
-    value.formatVersion === 3
-      ? [...commonKeys, ...tagGovernanceKeys, ...v3Keys]
-      : value.formatVersion === 2
-        ? [...commonKeys, ...tagGovernanceKeys]
-        : commonKeys,
-  );
+    "coverageAnalysisRecords",
+    "coverageItemRecords",
+  ]);
 
   const records = requireRows(value.records, "records");
   const fragmentRevisions = requireRows(
@@ -759,10 +800,8 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
   );
   const tags = requireRows(value.tags, "tags");
   const tagAssignments = requireRows(value.tagAssignments, "tagAssignments");
-  const tagAliases =
-    value.formatVersion >= 2 ? requireRows(value.tagAliases, "tagAliases") : [];
-  const tagMerges =
-    value.formatVersion >= 2 ? requireRows(value.tagMerges, "tagMerges") : [];
+  const tagAliases = requireRows(value.tagAliases, "tagAliases");
+  const tagMerges = requireRows(value.tagMerges, "tagMerges");
   const analyses = requireRows(value.analyses, "analyses");
   const knowledgePoints = requireRows(value.knowledgePoints, "knowledgePoints");
   const evidenceSpans = requireRows(value.evidenceSpans, "evidenceSpans");
@@ -771,45 +810,50 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     value.overviewCorrections,
     "overviewCorrections",
   );
-  const duplicateSuggestions =
-    value.formatVersion === 3
-      ? requireRows(value.duplicateSuggestions, "duplicateSuggestions")
-      : [];
-  const duplicateConsolidations =
-    value.formatVersion === 3
-      ? requireRows(value.duplicateConsolidations, "duplicateConsolidations")
-      : [];
-  const relationSuggestions =
-    value.formatVersion === 3
-      ? requireRows(value.relationSuggestions, "relationSuggestions")
-      : [];
-  const relationSuggestionEvidence =
-    value.formatVersion === 3
-      ? requireRows(
-          value.relationSuggestionEvidence,
-          "relationSuggestionEvidence",
-        )
-      : [];
-  const knowledgeRelations =
-    value.formatVersion === 3
-      ? requireRows(value.knowledgeRelations, "knowledgeRelations")
-      : [];
-  const coverageAnalyses =
-    value.formatVersion === 3
-      ? requireRows(value.coverageAnalyses, "coverageAnalyses")
-      : [];
-  const coverageAnalysisPoints =
-    value.formatVersion === 3
-      ? requireRows(value.coverageAnalysisPoints, "coverageAnalysisPoints")
-      : [];
-  const coverageAnalysisItems =
-    value.formatVersion === 3
-      ? requireRows(value.coverageAnalysisItems, "coverageAnalysisItems")
-      : [];
-  const coverageItemPoints =
-    value.formatVersion === 3
-      ? requireRows(value.coverageItemPoints, "coverageItemPoints")
-      : [];
+  const duplicateSuggestions = requireRows(
+    value.duplicateSuggestions,
+    "duplicateSuggestions",
+  );
+  const duplicateConsolidations = requireRows(
+    value.duplicateConsolidations,
+    "duplicateConsolidations",
+  );
+  const relationSuggestions = requireRows(
+    value.relationSuggestions,
+    "relationSuggestions",
+  );
+  const relationSuggestionEvidence = requireRows(
+    value.relationSuggestionEvidence,
+    "relationSuggestionEvidence",
+  );
+  const knowledgeRelations = requireRows(
+    value.knowledgeRelations,
+    "knowledgeRelations",
+  );
+  const coverageAnalyses = requireRows(
+    value.coverageAnalyses,
+    "coverageAnalyses",
+  );
+  const coverageAnalysisPoints = requireRows(
+    value.coverageAnalysisPoints,
+    "coverageAnalysisPoints",
+  );
+  const coverageAnalysisRecords = requireRows(
+    value.coverageAnalysisRecords,
+    "coverageAnalysisRecords",
+  );
+  const coverageAnalysisItems = requireRows(
+    value.coverageAnalysisItems,
+    "coverageAnalysisItems",
+  );
+  const coverageItemPoints = requireRows(
+    value.coverageItemPoints,
+    "coverageItemPoints",
+  );
+  const coverageItemRecords = requireRows(
+    value.coverageItemRecords,
+    "coverageItemRecords",
+  );
 
   records.forEach(validateRecordRow);
   fragmentRevisions.forEach(validateFragmentRevisionRow);
@@ -829,24 +873,12 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
   knowledgeRelations.forEach(validateKnowledgeRelationRow);
   coverageAnalyses.forEach(validateCoverageAnalysisRow);
   coverageAnalysisPoints.forEach(validateCoverageAnalysisPointRow);
+  coverageAnalysisRecords.forEach(validateCoverageAnalysisRecordRow);
   coverageAnalysisItems.forEach(validateCoverageAnalysisItemRow);
   coverageItemPoints.forEach(validateCoverageItemPointRow);
+  coverageItemRecords.forEach(validateCoverageItemRecordRow);
 
-  const snapshot = {
-    ...value,
-    formatVersion: 3,
-    tagAliases,
-    tagMerges,
-    duplicateSuggestions,
-    duplicateConsolidations,
-    relationSuggestions,
-    relationSuggestionEvidence,
-    knowledgeRelations,
-    coverageAnalyses,
-    coverageAnalysisPoints,
-    coverageAnalysisItems,
-    coverageItemPoints,
-  } as unknown as DomainSnapshot;
+  const snapshot = value as unknown as DomainSnapshot;
 
   validateSnapshotReferences(snapshot);
 
@@ -1296,16 +1328,70 @@ function validateCoverageAnalysisRow(row: DomainRow): void {
     "input_count",
     "model_configuration_version",
     "text_model",
+    "input_kind",
+    "status",
+    "failure_code",
+    "failure_message",
+    "attempt_count",
+    "started_at",
+    "completed_at",
     "created_at",
   ]);
   requireUuid(row, "id");
   requireNonEmptyString(row, "topic");
-  requireNonEmptyString(row, "framework_summary");
-  requireNonEmptyString(row, "caveat");
+  if (row.framework_summary !== null) {
+    requireNonEmptyString(row, "framework_summary");
+  }
+  if (row.caveat !== null) {
+    requireNonEmptyString(row, "caveat");
+  }
   requireInteger(row, "input_count", 1, 50);
   requireInteger(row, "model_configuration_version", 1);
   requireNonEmptyString(row, "text_model");
+  requireEnum(row, "input_kind", ["KNOWLEDGE_POINTS", "RECORDS"]);
+  requireEnum(row, "status", ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]);
+  requireInteger(row, "attempt_count", 1);
+  requireNullableTimestamp(row, "started_at");
+  requireNullableTimestamp(row, "completed_at");
   requireTimestamp(row, "created_at");
+
+  const hasFailure =
+    typeof row.failure_code === "string" &&
+    row.failure_code.length > 0 &&
+    typeof row.failure_message === "string" &&
+    row.failure_message.length > 0;
+  const hasResult =
+    typeof row.framework_summary === "string" &&
+    row.framework_summary.length > 0 &&
+    typeof row.caveat === "string" &&
+    row.caveat.length > 0;
+  const validLifecycle =
+    (row.status === "QUEUED" &&
+      !hasResult &&
+      !hasFailure &&
+      row.started_at === null &&
+      row.completed_at === null) ||
+    (row.status === "RUNNING" &&
+      !hasResult &&
+      !hasFailure &&
+      row.started_at !== null &&
+      row.completed_at === null) ||
+    (row.status === "SUCCEEDED" &&
+      hasResult &&
+      !hasFailure &&
+      row.started_at !== null &&
+      row.completed_at !== null) ||
+    (row.status === "FAILED" &&
+      !hasResult &&
+      hasFailure &&
+      row.completed_at !== null);
+
+  if (
+    !validLifecycle ||
+    (row.failure_code === null) !== (row.failure_message === null)
+  ) {
+    throw new Error("coverage analysis lifecycle is invalid");
+  }
 }
 
 function validateCoverageAnalysisPointRow(row: DomainRow): void {
@@ -1317,6 +1403,23 @@ function validateCoverageAnalysisPointRow(row: DomainRow): void {
   ]);
   requireUuid(row, "analysis_id");
   requireUuid(row, "knowledge_point_id");
+  requireFingerprint(row, "content_fingerprint");
+  requireInteger(row, "position", 1, 50);
+}
+
+function validateCoverageAnalysisRecordRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "analysis_id",
+    "record_id",
+    "fragment_revision_id",
+    "title",
+    "content_fingerprint",
+    "position",
+  ]);
+  requireUuid(row, "analysis_id");
+  requireUuid(row, "record_id");
+  requireUuid(row, "fragment_revision_id");
+  requireNonEmptyString(row, "title");
   requireFingerprint(row, "content_fingerprint");
   requireInteger(row, "position", 1, 50);
 }
@@ -1352,6 +1455,12 @@ function validateCoverageItemPointRow(row: DomainRow): void {
   requireExactKeys(row, ["item_id", "knowledge_point_id"]);
   requireUuid(row, "item_id");
   requireUuid(row, "knowledge_point_id");
+}
+
+function validateCoverageItemRecordRow(row: DomainRow): void {
+  requireExactKeys(row, ["item_id", "record_id"]);
+  requireUuid(row, "item_id");
+  requireUuid(row, "record_id");
 }
 
 function requireRelationType(row: DomainRow, key: string): void {
@@ -1450,6 +1559,16 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     "coverage analysis point",
   );
   assertUnique(
+    snapshot.coverageAnalysisRecords,
+    (row) => `${row.analysis_id}:${row.record_id}`,
+    "coverage analysis record",
+  );
+  assertUnique(
+    snapshot.coverageAnalysisRecords,
+    (row) => `${row.analysis_id}:${row.position}`,
+    "coverage analysis record position",
+  );
+  assertUnique(
     snapshot.coverageAnalysisPoints,
     (row) => `${row.analysis_id}:${row.position}`,
     "coverage analysis point position",
@@ -1468,6 +1587,11 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     snapshot.coverageItemPoints,
     (row) => `${row.item_id}:${row.knowledge_point_id}`,
     "coverage item point",
+  );
+  assertUnique(
+    snapshot.coverageItemRecords,
+    (row) => `${row.item_id}:${row.record_id}`,
+    "coverage item record",
   );
   assertUnique(
     snapshot.fragmentRevisions,
@@ -1789,9 +1913,14 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   }
 
   for (const analysis of snapshot.coverageAnalyses) {
-    const inputs = snapshot.coverageAnalysisPoints.filter(
-      (point) => point.analysis_id === analysis.id,
-    );
+    const inputs =
+      analysis.input_kind === "RECORDS"
+        ? snapshot.coverageAnalysisRecords.filter(
+            (record) => record.analysis_id === analysis.id,
+          )
+        : snapshot.coverageAnalysisPoints.filter(
+            (point) => point.analysis_id === analysis.id,
+          );
 
     if (inputs.length !== analysis.input_count) {
       throw new Error("coverage analysis input count is invalid");
@@ -1799,11 +1928,27 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   }
 
   for (const input of snapshot.coverageAnalysisPoints) {
+    const analysis = coverageAnalyses.get(input.analysis_id);
+
     if (
-      !coverageAnalyses.has(input.analysis_id) ||
+      analysis?.input_kind !== "KNOWLEDGE_POINTS" ||
       !points.has(input.knowledge_point_id)
     ) {
       throw new Error("coverage analysis input reference is invalid");
+    }
+  }
+
+  for (const input of snapshot.coverageAnalysisRecords) {
+    const analysis = coverageAnalyses.get(input.analysis_id);
+    const revision = revisions.get(input.fragment_revision_id);
+
+    if (
+      analysis?.input_kind !== "RECORDS" ||
+      !records.has(input.record_id) ||
+      !revision ||
+      revision.record_id !== input.record_id
+    ) {
+      throw new Error("coverage analysis record input reference is invalid");
     }
   }
 
@@ -1815,21 +1960,50 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
 
   for (const link of snapshot.coverageItemPoints) {
     const item = coverageItems.get(link.item_id);
+    const analysis = item ? coverageAnalyses.get(item.analysis_id) : undefined;
     const belongsToInput = snapshot.coverageAnalysisPoints.some(
       (input) =>
         input.analysis_id === item?.analysis_id &&
         input.knowledge_point_id === link.knowledge_point_id,
     );
 
-    if (!item || item.kind !== "COVERED" || !belongsToInput) {
+    if (
+      !item ||
+      analysis?.input_kind !== "KNOWLEDGE_POINTS" ||
+      item.kind !== "COVERED" ||
+      !belongsToInput
+    ) {
       throw new Error("coverage item evidence reference is invalid");
     }
   }
 
+  for (const link of snapshot.coverageItemRecords) {
+    const item = coverageItems.get(link.item_id);
+    const analysis = item ? coverageAnalyses.get(item.analysis_id) : undefined;
+    const belongsToInput = snapshot.coverageAnalysisRecords.some(
+      (input) =>
+        input.analysis_id === item?.analysis_id &&
+        input.record_id === link.record_id,
+    );
+
+    if (
+      !item ||
+      analysis?.input_kind !== "RECORDS" ||
+      item.kind !== "COVERED" ||
+      !belongsToInput
+    ) {
+      throw new Error("coverage item record evidence reference is invalid");
+    }
+  }
+
   for (const item of snapshot.coverageAnalysisItems) {
-    const evidenceCount = snapshot.coverageItemPoints.filter(
+    const pointEvidenceCount = snapshot.coverageItemPoints.filter(
       (link) => link.item_id === item.id,
     ).length;
+    const recordEvidenceCount = snapshot.coverageItemRecords.filter(
+      (link) => link.item_id === item.id,
+    ).length;
+    const evidenceCount = pointEvidenceCount + recordEvidenceCount;
 
     if (
       (item.kind === "COVERED" && evidenceCount === 0) ||
@@ -2166,6 +2340,13 @@ async function restoreSnapshot(
     "input_count",
     "model_configuration_version",
     "text_model",
+    "input_kind",
+    "status",
+    "failure_code",
+    "failure_message",
+    "attempt_count",
+    "started_at",
+    "completed_at",
     "created_at",
   ], snapshot.coverageAnalyses);
   await insertRows(client, "coverage_analysis_points", [
@@ -2174,6 +2355,14 @@ async function restoreSnapshot(
     "content_fingerprint",
     "position",
   ], snapshot.coverageAnalysisPoints);
+  await insertRows(client, "coverage_analysis_records", [
+    "analysis_id",
+    "record_id",
+    "fragment_revision_id",
+    "title",
+    "content_fingerprint",
+    "position",
+  ], snapshot.coverageAnalysisRecords);
   await insertRows(client, "coverage_analysis_items", [
     "id",
     "analysis_id",
@@ -2187,6 +2376,10 @@ async function restoreSnapshot(
     "item_id",
     "knowledge_point_id",
   ], snapshot.coverageItemPoints);
+  await insertRows(client, "coverage_item_records", [
+    "item_id",
+    "record_id",
+  ], snapshot.coverageItemRecords);
 }
 
 async function insertRows(
