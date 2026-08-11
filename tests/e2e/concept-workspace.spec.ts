@@ -172,6 +172,92 @@ test.describe("Concept workspace", () => {
       2,
     );
   });
+
+  test("reviews, confirms, navigates, and removes a Concept Relation", async ({
+    page,
+    request,
+  }) => {
+    const marker = randomUUID().slice(0, 8);
+    const pointIds = await seedTwoKnowledgePoints(request, marker);
+    const sourceName = `事件发布 ${marker}`;
+    const targetName = `事件消费 ${marker}`;
+
+    for (const [name, description] of [
+      [sourceName, "生产者将领域变化发布为可订阅事件。"],
+      [targetName, "消费者订阅事件并以幂等方式处理变化。"],
+    ] as const) {
+      const created = await request.post(appUrl("/api/v1/concepts"), {
+        data: { name, description, knowledgePointIds: pointIds },
+      });
+
+      expect(created.status()).toBe(201);
+    }
+
+    await expect
+      .poll(async () => {
+        const response = await request.get(appUrl("/api/v1/search-health"));
+        const body = (await response.json()) as {
+          semantic: { status: string };
+        };
+
+        return body.semantic.status;
+      })
+      .toBe("ready");
+
+    await page.goto(appUrl("/concepts?view=relations"));
+    const main = page.getByRole("main", { name: "知识概念" });
+    const relationView = main.getByRole("region", {
+      name: "Concept Relation 审查",
+    });
+
+    await expect(
+      main.getByRole("button", {
+        name: /Concept 关系\s+扫描、确认与邻居历史/u,
+      }),
+    ).toHaveAttribute("aria-current", "page");
+
+    const scanResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          "/api/v1/concept-relation-suggestions/scan",
+    );
+
+    await relationView.getByRole("button", { name: "扫描 Concept 关系" }).click();
+    expect((await scanResponse).status()).toBe(200);
+    await expect(relationView.getByRole("heading", { name: sourceName })).toBeVisible();
+    await expect(relationView.getByRole("heading", { name: targetName })).toBeVisible();
+
+    await relationView.getByLabel("Concept 关系类型").selectOption("contrasts");
+    await relationView
+      .getByLabel("Concept 关系描述")
+      .fill("发布与消费从相反职责共同构成事件协作边界。");
+    await relationView.getByRole("button", { name: "确认正式关系" }).click();
+
+    await expect(
+      relationView.getByText("已确认", { exact: true }).first(),
+    ).toBeVisible();
+    await relationView
+      .getByRole("link", { name: `打开 Concept：${sourceName}` })
+      .click();
+
+    const detail = main.getByRole("region", { name: "Concept 详情" });
+
+    await expect(detail.getByRole("heading", { name: sourceName })).toBeVisible();
+    const relations = detail.getByRole("region", { name: "Concept 直接关系" });
+
+    await expect(relations.getByText("对照", { exact: true })).toBeVisible();
+    await relations
+      .getByRole("link", { name: `打开邻居 Concept：${targetName}` })
+      .click();
+    await expect(detail.getByRole("heading", { name: targetName })).toBeVisible();
+
+    await relations.getByRole("button", { name: "撤销正式关系" }).click();
+    await expect(relations.getByText("当前没有生效的直接关系。", { exact: true }))
+      .toBeVisible();
+    await relations.getByText(/已撤销关系/u).click();
+    await expect(relations.getByText("已撤销", { exact: true })).toBeVisible();
+  });
 });
 
 async function seedTwoKnowledgePoints(

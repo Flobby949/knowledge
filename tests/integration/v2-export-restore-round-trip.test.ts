@@ -81,7 +81,7 @@ describe("V2 governance export and restore", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
-      manifest: { formatVersion: 7, recordCount: 2 },
+      manifest: { formatVersion: 8, recordCount: 2 },
     });
 
     const downloaded = await sourceApp.inject({
@@ -103,7 +103,7 @@ describe("V2 governance export and restore", () => {
     >;
 
     expect(domain).toMatchObject({
-      formatVersion: 7,
+      formatVersion: 8,
       duplicateSuggestions: [expect.objectContaining({ id: ids.duplicateSuggestionId })],
       duplicateConsolidations: [
         expect.objectContaining({ id: ids.duplicateConsolidationId }),
@@ -142,7 +142,7 @@ describe("V2 governance export and restore", () => {
       }
     ).inspection;
 
-    expect(inspection).toMatchObject({ canRestore: true, formatVersion: 7 });
+    expect(inspection).toMatchObject({ canRestore: true, formatVersion: 8 });
 
     const restored = await targetApp.inject({
       method: "POST",

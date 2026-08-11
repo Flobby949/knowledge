@@ -574,7 +574,7 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-CAP-08` 用户可以独立修改记录级用户 Tag Assignment；客户端编辑期间可以暂时移除最后一个标签，但服务端必须按用户提交的最终标签集合原子更新，并在集合为空时拒绝保存。仅修改标签关联不创建 Fragment Revision，也不触发 AI 分析。
 - `FR-CAP-09` 首次保存或保存原文编辑时，系统默认选择“AI 整理 + Mode A”；用户可以在本次保存时改为“仅保存”或 Mode B。仅保存的 Fragment 可以没有知识点，并可在以后主动发起 AI 整理。
 - `FR-CAP-10` 未产生 AI 标题的 Fragment 使用原文第一条非空行作为展示标题；过长时只在界面截断，不持久化独立标题，也不修改原文。
-- `FR-CAP-11` 用户可以归档并恢复记录，也可以在二次确认后永久删除记录；永久删除不可恢复，并级联删除所有 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正和该记录的 Tag Assignment。
+- `FR-CAP-11` 用户可以归档并恢复记录，也可以在二次确认后永久删除记录；永久删除不可恢复，并级联删除所有 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正和该记录的 Tag Assignment。指向被删除 Knowledge Point 的 Concept Membership、对应 Membership 活动及候选确认引用必须随端点一同删除，但 Concept、其他 Revision、其他 Membership 与无关活动继续保留。
 - `FR-CAP-12` 永久删除开始后，系统必须取消该记录的未完成 AI 任务，或通过记录不存在/删除标记拒绝迟到结果回写。
 - `FR-CAP-13` V1 不在保存前后执行原文精确重复或语义重复检测，也不显示重复提示或阻止保存；重复识别与合并属于 V2。
 - `FR-CAP-14` 记录存在任何未结束 AI 任务时必须禁止归档；任务成功、失败、服务端超时或系统终止后才允许归档。永久删除不受该限制，仍按取消任务并拒绝迟到回写的规则执行。
@@ -697,12 +697,20 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-CON-18` 同一触发分析只能形成一次自动扫描；同一输入内容指纹下已经待处理、确认或拒绝的等价 Candidate 不得再次进入审查队列；Candidate、输入快照、触发来源和全部审查决定必须进入完整导出恢复。
 - `FR-CON-19` 用户可以主动发起全量概念发现；系统必须把所有尚无自动 Scan 且尚无发现待办的当前 `ACTIVE` Analysis Revision 幂等登记到持久化队列，并返回本次登记数量与已覆盖数量。“仅保存”记录没有生效分析，不得纳入；全量发现只生成待确认 Candidate，不得直接创建 Concept。
 - `FR-CON-20` 全量概念发现不得无界并发调用模型；发现队列消费与 Candidate 生成必须具有明确并发上限，并在重复点击时复用已有 Scan 或待办，不重复计算。
+- `FR-CON-21` V3.2 的 Concept Relation 首版只允许 AI Suggestion 经用户人工确认后形成，不提供用户直接创建；Suggestion 必须冻结两端 Concept、各自不可变 Concept Revision、当时有效 Membership 集合的 SHA-256 指纹、类型、描述、理由、置信度与模型信息，不保存成员快照。
+- `FR-CON-22` Concept Relation 完全复用 `SIMILAR`、`CONTRASTS`、`PREREQUISITE`、`EXTENDS`、`APPLIES`、`ANALOGY` 六型；其中 `SIMILAR`、`CONTRASTS`、`ANALOGY` 为对称关系，另外三型为有向关系。路径可以反向遍历任一关系，但返回结果必须同时保留规范 source、target 与本次遍历方向。
+- `FR-CON-23` 同一对 Concept 可以同时存在不同类型的有效关系，同一规范端点、方向与类型最多一个有效关系；Suggestion 的冻结输入以及正式关系的端点、类型、描述和确认时间不得原地改写，撤销只记录结束时间，新确认必须绑定新的 Suggestion。
+- `FR-CON-24` 任一端 Concept 归档、当前 Concept Revision 与 Suggestion 冻结版本不一致，或按当前有效 Knowledge Point 计算的有效 Membership 集合指纹变化时，Concept Relation 必须显示 `needsReview` 并退出默认网络与路径；恢复到相同有效输入时可重新满足有效性，历史行不得因复核状态变化被删除。
+- `FR-CON-25` 永久删除 Record 时，指向其 Knowledge Point 的 Concept Membership、对应 Membership 活动和 Candidate 决定成员引用必须在同一删除事务中级联移除；普通业务事务仍不得直接修改或删除 Concept Activity。
+- `FR-CON-26` V3.2 提供局部子图、单节点邻居和路径 API；所有节点引用统一使用 `concept:<uuid>` 或 `knowledge_point:<uuid>` typed key。节点必须携带当前展示内容及 Concept Revision 或 Knowledge Point 来源，边必须携带稳定 `edgeKey`、规范 source/target、关系类型、是否有向、描述和来源/确认记录。
+- `FR-CON-27` 网络只公开 `concept_membership`、`knowledge_relation`、`concept_relation` 三类真实边。Concept Membership 按无向边遍历；后两类关系保留确认时的规范方向，对称类型按无向边表达；路径步骤另行返回 `forward`、`reverse` 或 `undirected` 遍历方向，不得改写正式边。
+- `FR-CON-28` 局部子图固定限制为最多 300 个节点、600 条边和深度 2，并明确返回截断状态；路径固定限制为最大深度 6、最多访问 1000 个节点和 2 秒数据库查询预算，超过预算必须返回明确错误，不得无界扫描或静默降级。
 
 ### 10.7 完整导出与恢复
 
 - `FR-EXP-01` 用户可以生成一个 ZIP 完整导出包；只有导出成功后才向用户提供文件，不提供缺少部分数据的导出包。
 - `FR-EXP-02` 导出包为每条尚未永久删除的记录提供一份便于长期阅读的 Markdown，至少包含当前原文、有效标签、有效 AI 标题与摘要以及当前生效且未被排除的知识点；归档记录仍包含在完整导出中并明确标注归档状态。
-- `FR-EXP-03` 导出包同时提供带格式版本号的机器可读 JSON，保存无损重建产品领域数据所需的稳定身份、引用关系、状态和时间信息，包括全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment，以及当前已存在的知识关系和 Concept 数据。
+- `FR-EXP-03` 导出包同时提供带格式版本号的机器可读 JSON，保存无损重建产品领域数据所需的稳定身份、引用关系、状态和时间信息，包括全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment，以及当前已存在的 Knowledge Relation、Concept、Concept Candidate、Concept Relation Suggestion 和 Concept Relation 数据。
 - `FR-EXP-04` Markdown 是阅读视图，JSON 是完整事实来源；Markdown 无需重复呈现所有历史版本，不得被用来替代 JSON 的恢复语义。
 - `FR-EXP-05` Embedding、全文或向量索引、可重新生成的缓存与任务运行记录不进入导出包；模型密钥、部署凭据和应用日志也不得导出。恢复后由系统重新生成派生索引。
 - `FR-EXP-06` Markdown 阅读视图必须通过安全转义或等价隔离方式嵌入纯文本正文，避免正文中的 Markdown 或 HTML 字符改变导出文档结构；机器可读 JSON 保存完全原始的正文字符串。
@@ -710,6 +718,7 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-IMP-02` 恢复前必须校验包格式版本、必需内容、结构、全部对象引用的完整性，以及每个未永久删除 Record 至少具有一个有效记录级“我的标签”关联；校验或写入任一步失败时不得留下任何已导入领域数据。
 - `FR-IMP-03` 恢复以一次全有或全无的操作保留 JSON 中的稳定身份、历史版本、状态、时间和引用关系；V1 不支持导入到已有领域数据的实例，也不提供自动合并或冲突解决。
 - `FR-IMP-04` 恢复不得写入或覆盖模型密钥、部署凭据与实例运行配置；提交领域数据后，系统使用当前实例配置重新生成全文索引、Embedding 和其他派生数据。
+- `FR-IMP-05` 当前完整导出格式为 8，包含 Concept Relation Suggestion 与 Concept Relation；恢复器继续严格接受格式 4–7，并把旧格式没有的 Concept、Candidate 或 Concept Relation 集合适配为空集合，把格式 6 缺少的自动扫描触发 Analysis Revision 适配为 `null`。
 
 ### 10.8 模型配置
 
@@ -1282,7 +1291,7 @@ PC Web 全局采用横向顶部导航，不使用常驻或可折叠侧边栏。�
 
 ### 16.2 V2 完成标准
 
-- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；V2 以完整导出格式 4 完成无损往返，V3.0 格式 5 增加全部 Concept 事实，V3.1 格式 6 增加全部终态 Concept Candidate、冻结输入与审查决定，当前格式 7 再保存自动扫描的触发分析来源；恢复器支持格式 4、5、6，并把旧格式缺少的集合或字段严格适配为空集合或 `null`。格式 4 是首个承诺长期恢复兼容的导出格式，格式 1–3 不属于兼容范围；
+- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；V2 以完整导出格式 4 完成无损往返，V3.0 格式 5 增加全部 Concept 事实，V3.1 格式 6 增加全部终态 Concept Candidate 与冻结审查决定，格式 7 再保存自动扫描的触发分析来源，当前格式 8 增加 Concept Relation Suggestion 与用户确认后的 Concept Relation；恢复器支持格式 4–8，并把旧格式缺少的集合或字段严格适配为空集合或 `null`。格式 4 是首个承诺长期恢复兼容的导出格式，格式 1–3 不属于兼容范围；
 - 用户能为已认可标签维护别名，并能把一个或多个同义标签合并到主标签后撤销；合并前后的 Tag 身份、Assignment 来源和历史版本均不丢失，有效展示与检索按主标签聚合；
 - 系统能提示重复知识并提供不丢来源的合并建议；
 - 系统能生成带理由、证据和置信度的关系建议；

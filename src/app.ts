@@ -17,6 +17,11 @@ import {
   type ConceptCandidateGenerator,
 } from "./concept-candidate-generator.js";
 import { registerConceptCandidateRoutes } from "./concept-candidate-routes.js";
+import {
+  generateOpenAICompatibleConceptRelation,
+  type ConceptRelationGenerator,
+} from "./concept-relation-generator.js";
+import { registerConceptRelationRoutes } from "./concept-relation-routes.js";
 import { registerConceptRoutes } from "./concept-routes.js";
 import {
   embedOpenAICompatibleText,
@@ -37,6 +42,7 @@ import {
   registerModelConfigRoutes,
   type BootstrapModelDraft,
 } from "./model-config-routes.js";
+import { registerNetworkRoutes } from "./network-routes.js";
 import {
   testOpenAICompatibleEndpoint,
   type ModelEndpointTester,
@@ -60,6 +66,7 @@ export interface BuildAppOptions {
   embedText?: EmbedText;
   generateAnalysis?: AnalysisGenerator;
   generateConceptCandidate?: ConceptCandidateGenerator;
+  generateConceptRelation?: ConceptRelationGenerator;
   generateCoverage?: CoverageGenerator;
   generateRelation?: RelationGenerator;
   logger?: boolean;
@@ -388,6 +395,13 @@ export async function buildApp(
       options.testModelEndpoint ?? testOpenAICompatibleEndpoint,
   });
   registerConceptRoutes(app, { pool });
+  registerConceptRelationRoutes(app, {
+    pool,
+    credentialSecret,
+    generateConceptRelation:
+      options.generateConceptRelation ?? generateOpenAICompatibleConceptRelation,
+  });
+  registerNetworkRoutes(app, { pool });
   const conceptCandidateAutomation = registerConceptCandidateRoutes(app, {
     pool,
     credentialSecret,
@@ -786,6 +800,7 @@ export async function buildApp(
           return reply.code(404).send({ error: "Record not found" });
         }
 
+        await client.query("SET LOCAL knowledge.permanent_delete = 'on'");
         await client.query("DELETE FROM records WHERE id = $1", [
           request.params.id,
         ]);

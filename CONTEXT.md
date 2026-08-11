@@ -45,15 +45,15 @@ _Avoid_: 全量 Concept 构造、全库自动聚类、重新生成全部候选
 _Avoid_: 自动确认、覆盖候选、删除拒绝记录
 
 **概念归属（Concept Membership）**:
-用户确认的 Concept 与一个确切知识点之间具有稳定身份的可撤销关联；加入、移除和恢复都保留历史。知识点不再是当前生效且纳入的知识，或所属记录、Concept 已归档时，归属仍绑定原知识点并显示需要复核，不自动迁移到新知识点，也不进入默认有效网络。
+用户确认的 Concept 与一个确切知识点之间具有稳定身份的可撤销关联；加入、移除和恢复都保留历史。知识点不再是当前生效且纳入的知识，或所属记录、Concept 已归档时，归属仍绑定原知识点并退出默认有效网络；来源记录永久删除时，归属随已删除知识点一同消失，不迁移到其他知识点。
 _Avoid_: Tag Assignment、自动分类、知识点所有权
 
 **知识网络（Knowledge Network）**:
-由已确认的知识点、Concept、Concept Membership、Knowledge Relation 和 Concept Relation 组成的个人认知网络。
+由当前有效的 Knowledge Point 与 Concept 节点，以及真实有效的 Concept Membership、已确认 Knowledge Relation 和已确认 Concept Relation 三类边组成的个人认知网络。撤销、过期或需要复核的边保留为历史，但不属于默认网络。
 _Avoid_: 未经确认的 AI 关系图、自动知识图谱
 
 **知识网络路径（Knowledge Network Path）**:
-在有效知识网络中由真实节点和已确认关系构成的有序可核验路径；它是已有事实的遍历结果，不是 AI 推理补全。
+在有效知识网络中由真实节点和已确认关系构成的有序可核验路径；遍历可以反向经过关系，但每一步仍保留该关系被确认时的规范方向，它是已有事实的遍历结果而不是 AI 推理补全。
 _Avoid_: AI 推理链、推荐路线、语义相似解释
 
 ## AI 与用户修正
@@ -196,8 +196,12 @@ _Avoid_: 知识关系、图谱边
 用户确认（可先修改类型或描述）后的知识点之间语义联系，才可参与正式关联结果和后续分析；撤销只结束该关系，不删除两端知识点。重新分析不会静默删除已确认关系，但端点不再生效或内容已变化时需要提示复核。
 _Avoid_: 关系建议、相似度结果
 
+**概念关系建议（Concept Relation Suggestion）**:
+AI 基于两个确切 Concept Revision、各自当时的有效 Concept Membership 集合和模型依据提出的可审查关系；它冻结判断输入，未经用户确认不是 Concept Relation，也不能进入正式知识网络。
+_Avoid_: Concept Relation、自动建图、聚类邻接
+
 **概念关系（Concept Relation）**:
-用户确认后的两个 Concept 之间的可撤销语义联系；未经确认的 AI 建议不属于 Concept Relation，也不能进入正式知识网络。
+用户确认的两个 Concept 之间的稳定、可撤销语义联系；首版复用六种 Knowledge Relation 类型，其中 `SIMILAR`、`CONTRASTS`、`ANALOGY` 对称，`PREREQUISITE`、`EXTENDS`、`APPLIES` 有向，同一对 Concept 可以同时具有不同类型。任一端归档、当前 Revision 或有效 Membership 集合改变时，关系保留历史但需要复核并退出默认网络；撤销也只结束关系，不删除端点或旧事实。
 _Avoid_: Concept Membership、关系建议、聚类邻接
 
 ## 知识分析

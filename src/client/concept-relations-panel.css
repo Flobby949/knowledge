@@ -1,0 +1,878 @@
+.concept-relation-review {
+  margin-top: 10px;
+}
+
+.concept-relation-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  min-height: 64px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.concept-relation-toolbar > div:first-child strong,
+.concept-relation-toolbar > div:first-child span {
+  display: block;
+}
+
+.concept-relation-toolbar > div:first-child strong {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.concept-relation-toolbar > div:first-child span {
+  margin-top: 2px;
+  color: var(--workspace-muted);
+  font-size: 11px;
+}
+
+.concept-relation-toolbar-actions,
+.concept-relation-toolbar-actions > div,
+.concept-relation-actions,
+.concept-relation-actions > div {
+  display: flex;
+  align-items: center;
+}
+
+.concept-relation-toolbar-actions {
+  gap: 12px;
+}
+
+.concept-relation-toolbar-actions > div {
+  padding: 2px;
+  background: var(--workspace-panel);
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+}
+
+.concept-relation-section-button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  font-weight: 650;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.concept-relation-section-button[aria-pressed="true"] {
+  color: var(--workspace-ink);
+  background: var(--workspace-canvas);
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--workspace-ink) 8%, transparent);
+}
+
+.concept-relation-scan {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 13px;
+  color: var(--workspace-canvas);
+  font-size: 12px;
+  font-weight: 680;
+  background: var(--workspace-accent);
+  border: 1px solid var(--workspace-accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.concept-relation-scan:hover:not(:disabled) {
+  background: var(--workspace-accent-hover);
+  border-color: var(--workspace-accent-hover);
+}
+
+.concept-relation-scan:disabled {
+  cursor: wait;
+  opacity: .58;
+}
+
+.concept-relation-scan > span {
+  font-size: 15px;
+}
+
+.concept-relation-toolbar-actions button:focus-visible,
+.concept-relation-catalog-entry:focus-visible,
+.concept-relation-endpoint a:focus-visible,
+.concept-relation-actions button:focus-visible,
+.concept-direct-relations a:focus-visible,
+.concept-direct-relations button:focus-visible,
+.concept-removed-relations summary:focus-visible {
+  outline: 2px solid var(--workspace-accent);
+  outline-offset: 2px;
+}
+
+.concept-relation-feedback {
+  padding: 9px 12px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid;
+  border-radius: 7px;
+}
+
+.concept-relation-feedback.error,
+.concept-direct-relation-error {
+  color: var(--danger);
+}
+
+.concept-relation-feedback.error {
+  background: color-mix(in srgb, var(--danger) 6%, var(--workspace-canvas));
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--workspace-line));
+}
+
+.concept-relation-feedback.notice {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 6%, var(--workspace-canvas));
+  border-color: color-mix(in srgb, var(--success) 24%, var(--workspace-line));
+}
+
+.concept-relation-workbench {
+  display: grid;
+  grid-template-columns: 324px minmax(0, 1fr);
+  min-height: 624px;
+  margin-top: 10px;
+  overflow: hidden;
+  background: var(--workspace-canvas);
+  border: 1px solid var(--workspace-line-strong);
+  border-radius: 12px;
+}
+
+.concept-relation-catalog {
+  min-width: 0;
+  background: var(--workspace-panel);
+  border-right: 1px solid var(--workspace-line-strong);
+}
+
+.concept-relation-catalog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 47px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.concept-relation-catalog-heading strong {
+  font-size: 12px;
+}
+
+.concept-relation-catalog-heading span {
+  color: var(--workspace-muted);
+  font-size: 10px;
+}
+
+.concept-relation-catalog-list {
+  max-height: 700px;
+  overflow-y: auto;
+}
+
+.concept-relation-catalog-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  width: 100%;
+  min-height: 98px;
+  padding: 13px 14px;
+  color: var(--workspace-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--workspace-line);
+  cursor: pointer;
+}
+
+.concept-relation-catalog-entry:hover {
+  background: color-mix(in srgb, var(--workspace-accent-soft) 58%, transparent);
+}
+
+.concept-relation-catalog-entry[data-selected="true"] {
+  background: var(--workspace-canvas);
+}
+
+.concept-relation-catalog-entry[data-selected="true"]::after {
+  position: absolute;
+  top: 12px;
+  right: -1px;
+  bottom: 12px;
+  width: 2px;
+  background: var(--workspace-accent);
+  content: "";
+}
+
+.concept-relation-code {
+  grid-row: 1 / span 3;
+  padding-top: 2px;
+  color: var(--workspace-accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.concept-relation-catalog-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+}
+
+.concept-relation-catalog-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.concept-relation-catalog-copy i {
+  color: var(--workspace-accent);
+  font-size: 11px;
+  font-style: normal;
+  text-align: center;
+}
+
+.concept-relation-catalog-entry small {
+  grid-column: 2;
+  margin-top: 6px;
+  color: var(--workspace-muted);
+  font-size: 10px;
+}
+
+.concept-relation-catalog-entry em {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: end;
+  padding: 1px 5px;
+  color: var(--workspace-ink);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  background: var(--workspace-evidence);
+  border-radius: 4px;
+}
+
+.concept-relation-catalog-empty {
+  padding: 52px 20px;
+  color: var(--workspace-muted);
+  text-align: center;
+}
+
+.concept-relation-catalog-empty strong {
+  color: var(--workspace-ink);
+  font-size: 13px;
+}
+
+.concept-relation-catalog-empty p {
+  margin: 5px 0 0;
+  font-size: 11px;
+}
+
+.concept-relation-stage {
+  min-width: 0;
+  background: var(--workspace-canvas);
+}
+
+.concept-relation-loading,
+.concept-relation-empty {
+  min-height: 620px;
+  padding: 72px 24px;
+  margin: 0;
+  color: var(--workspace-muted);
+  text-align: center;
+}
+
+.concept-relation-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+}
+
+.concept-relation-empty > span {
+  margin-bottom: 12px;
+  color: var(--workspace-accent);
+  font-size: 36px;
+}
+
+.concept-relation-empty strong {
+  color: var(--workspace-ink);
+  font-size: 14px;
+}
+
+.concept-relation-empty p {
+  margin: 5px 0 0;
+  font-size: 11px;
+}
+
+.concept-relation-sheet {
+  min-width: 0;
+  animation: concept-relation-sheet-open 300ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.concept-relation-sheet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 58px;
+  padding: 10px 20px;
+  background: var(--workspace-panel);
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.concept-relation-sheet-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.concept-relation-sheet-heading > span {
+  color: var(--workspace-muted);
+  font-size: 10px;
+}
+
+.concept-relation-status,
+.concept-relation-stale {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 5px;
+}
+
+.concept-relation-status {
+  color: var(--workspace-accent);
+  background: var(--workspace-accent-soft);
+}
+
+.concept-relation-status.is-confirmed {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, var(--workspace-canvas));
+}
+
+.concept-relation-status.is-rejected,
+.concept-relation-status.is-removed {
+  color: var(--workspace-muted);
+  background: var(--workspace-panel-strong);
+}
+
+.concept-relation-stale {
+  color: var(--workspace-ink);
+  background: var(--workspace-evidence);
+}
+
+.concept-relation-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 124px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 15px;
+  min-height: 250px;
+  padding: 24px 22px;
+}
+
+.concept-relation-endpoint {
+  min-width: 0;
+  padding: 12px 4px 8px;
+}
+
+.concept-relation-endpoint > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.concept-relation-endpoint > div span {
+  color: var(--workspace-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.concept-relation-endpoint > div a {
+  color: var(--workspace-accent);
+  font-size: 10px;
+  text-decoration: none;
+}
+
+.concept-relation-endpoint > div a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.concept-relation-endpoint h3 {
+  max-width: 20ch;
+  margin: 19px 0 0;
+  font-size: 20px;
+  line-height: 1.35;
+  letter-spacing: -.018em;
+  text-wrap: balance;
+}
+
+.concept-relation-endpoint > p {
+  margin: 10px 0 0;
+  color: var(--workspace-muted);
+  font-size: 13px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.concept-relation-endpoint > footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 14px;
+  color: var(--workspace-muted);
+  font-size: 10px;
+}
+
+.concept-relation-endpoint > footer strong {
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.concept-relation-bridge {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.concept-relation-bridge > span {
+  position: absolute;
+  right: -18px;
+  left: -18px;
+  top: 50%;
+  height: 1px;
+  background: color-mix(in srgb, var(--workspace-accent) 34%, var(--workspace-line));
+}
+
+.concept-relation-bridge label,
+.concept-relation-bridge > strong {
+  position: relative;
+  z-index: 1;
+}
+
+.concept-relation-bridge select,
+.concept-relation-bridge > strong {
+  min-width: 104px;
+  min-height: 36px;
+  padding: 7px 28px 7px 11px;
+  color: var(--workspace-accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  background: var(--workspace-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--workspace-accent) 28%, var(--workspace-line));
+  border-radius: 999px;
+}
+
+.concept-relation-bridge > strong {
+  display: inline-grid;
+  place-items: center;
+  padding-right: 11px;
+}
+
+.concept-relation-bridge select:focus-visible,
+.concept-relation-description-editor textarea:focus-visible {
+  outline: 2px solid var(--workspace-accent);
+  outline-offset: 2px;
+}
+
+.concept-relation-bridge > i {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: -17px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--workspace-accent);
+  font-size: 16px;
+  font-style: normal;
+  background: var(--workspace-canvas);
+  transform: translateY(-50%);
+}
+
+.concept-relation-description-editor,
+.concept-relation-confirmed-copy {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  padding: 15px 22px;
+  border-top: 1px solid var(--workspace-line);
+}
+
+.concept-relation-description-editor > span,
+.concept-relation-confirmed-copy > span {
+  padding-top: 9px;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.concept-relation-description-editor textarea {
+  width: 100%;
+  min-height: 66px;
+  padding: 9px 11px;
+  color: var(--workspace-ink);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  background: var(--workspace-panel);
+  border: 1px solid var(--workspace-line-strong);
+  border-radius: 7px;
+}
+
+.concept-relation-description-editor textarea:disabled,
+.concept-relation-bridge select:disabled {
+  cursor: not-allowed;
+  opacity: .62;
+}
+
+.concept-relation-confirmed-copy > p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.concept-relation-reason {
+  border-top: 1px solid var(--workspace-line);
+}
+
+.concept-relation-reason summary {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 50px;
+  padding: 8px 22px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.concept-relation-reason summary::-webkit-details-marker {
+  display: none;
+}
+
+.concept-relation-reason summary:hover {
+  background: var(--workspace-panel);
+}
+
+.concept-relation-reason summary:focus-visible {
+  outline: 2px solid var(--workspace-accent);
+  outline-offset: -2px;
+}
+
+.concept-relation-reason summary > span {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.concept-relation-reason summary > span:last-of-type {
+  overflow: hidden;
+  margin: 0;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.concept-relation-reason summary > i {
+  color: var(--workspace-accent);
+  font-size: 15px;
+  font-style: normal;
+  transition: transform 160ms ease-out;
+}
+
+.concept-relation-reason[open] summary > i {
+  transform: rotate(180deg);
+}
+
+.concept-relation-reason > div {
+  padding: 0 22px 13px 152px;
+  color: var(--workspace-muted);
+  font-size: 10px;
+}
+
+.concept-relation-reason > div p {
+  margin: 3px 0;
+}
+
+.concept-relation-actions {
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 67px;
+  padding: 10px 22px;
+  background: var(--workspace-panel);
+  border-top: 1px solid var(--workspace-line-strong);
+}
+
+.concept-relation-actions > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--success);
+  font-size: 10px;
+}
+
+.concept-relation-actions > span.is-warning {
+  color: var(--danger);
+}
+
+.concept-relation-actions > span i {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  font-size: 9px;
+  font-style: normal;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.concept-relation-actions > div {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.concept-relation-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+
+.concept-relation-remove {
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--workspace-line));
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.concept-relation-remove:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 7%, var(--workspace-canvas));
+}
+
+.concept-direct-relations {
+  padding: 22px 0 2px;
+  border-top: 1px solid var(--workspace-line-strong);
+}
+
+.concept-direct-relations > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.concept-direct-relations h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.concept-direct-relations header p {
+  margin: 3px 0 0;
+  color: var(--workspace-muted);
+  font-size: 11px;
+}
+
+.concept-direct-relations > header > a {
+  color: var(--workspace-accent);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.concept-direct-relations > header > a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.concept-direct-relation-loading,
+.concept-direct-relation-empty,
+.concept-direct-relation-error,
+.concept-direct-relation-notice {
+  padding: 20px 0 4px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.concept-direct-relation-loading,
+.concept-direct-relation-empty {
+  color: var(--workspace-muted);
+}
+
+.concept-direct-relation-notice {
+  color: var(--success);
+}
+
+.concept-direct-relation-list {
+  margin-top: 12px;
+  border-top: 1px solid var(--workspace-line-strong);
+}
+
+.concept-direct-relation {
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(240px, 1.15fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 70px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.concept-direct-relation[data-review="true"] {
+  background: color-mix(in srgb, var(--workspace-evidence) 13%, transparent);
+}
+
+.concept-direct-relation-path {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+}
+
+.concept-direct-relation-path > span {
+  flex: 0 0 auto;
+  color: var(--workspace-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.concept-direct-relation-path > i {
+  color: var(--workspace-accent);
+  font-size: 13px;
+  font-style: normal;
+}
+
+.concept-direct-relation-path > a {
+  overflow: hidden;
+  color: var(--workspace-ink);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.concept-direct-relation-path > a:hover {
+  color: var(--workspace-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.concept-direct-relation-path > strong {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  font-size: 9px;
+  background: var(--workspace-evidence);
+  border-radius: 4px;
+}
+
+.concept-direct-relation > p {
+  margin: 0;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.concept-direct-relation > button {
+  min-height: 30px;
+  padding: 0 9px;
+  color: var(--danger);
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--workspace-line));
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.concept-direct-relation > button:disabled {
+  cursor: wait;
+  opacity: .58;
+}
+
+.concept-removed-relations {
+  margin-top: 10px;
+  border-top: 1px solid var(--workspace-line);
+}
+
+.concept-removed-relations summary {
+  padding: 11px 0;
+  color: var(--workspace-muted);
+  font-size: 10px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.concept-removed-relations > div {
+  display: grid;
+  grid-template-columns: 70px 70px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--workspace-line);
+}
+
+.concept-removed-relations span,
+.concept-removed-relations time {
+  color: var(--workspace-muted);
+  font-size: 10px;
+}
+
+.concept-removed-relations strong,
+.concept-removed-relations a {
+  font-size: 10px;
+}
+
+.concept-removed-relations a {
+  color: var(--workspace-accent);
+  text-decoration: none;
+}
+
+@media (max-width: 1380px) {
+  .concept-relation-workbench {
+    grid-template-columns: 292px minmax(0, 1fr);
+  }
+
+  .concept-relation-pair {
+    grid-template-columns: minmax(0, 1fr) 104px minmax(0, 1fr);
+    gap: 10px;
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .concept-relation-endpoint h3 {
+    font-size: 18px;
+  }
+
+  .concept-direct-relation {
+    grid-template-columns: minmax(0, .9fr) minmax(210px, 1.1fr) auto;
+    gap: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .concept-relation-sheet {
+    animation: none;
+  }
+}
+
+@keyframes concept-relation-sheet-open {
+  from {
+    clip-path: inset(0 0 8% 0);
+    filter: blur(1px);
+  }
+
+  to {
+    clip-path: inset(0);
+    filter: blur(0);
+  }
+}

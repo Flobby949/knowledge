@@ -536,6 +536,54 @@ export interface ConceptDetail {
   }>;
 }
 
+export type ConceptRelationType = KnowledgeRelationType;
+
+export interface ConceptRelationEndpoint {
+  archived: boolean;
+  changedSinceSuggestion: boolean;
+  current: boolean;
+  currentMembershipFingerprint: string | null;
+  currentRevisionId: string | null;
+  description: string;
+  id: string;
+  memberCount: number;
+  membershipFingerprint: string;
+  name: string;
+  revisionId: string;
+}
+
+export interface ConceptRelationSuggestion {
+  canDecide: boolean;
+  confidence: number;
+  createdAt: string;
+  decidedAt: string | null;
+  description: string;
+  id: string;
+  model: { configurationVersion: number; name: string };
+  needsReview: boolean;
+  reason: string;
+  relation: null | {
+    confirmationSource: {
+      id: string;
+      type: "concept_relation_suggestion";
+    };
+    confirmedAt: string | null;
+    description: string;
+    id: string;
+    removed: boolean;
+    removedAt: string | null;
+    sourceConceptId: string;
+    suggestionId: string;
+    targetConceptId: string;
+    type: ConceptRelationType;
+  };
+  source: ConceptRelationEndpoint;
+  status: "confirmed" | "pending_review" | "rejected" | "removed";
+  target: ConceptRelationEndpoint;
+  type: ConceptRelationType;
+  updatedAt: string;
+}
+
 export async function listConcepts(options: {
   archive?: "active" | "archived" | "all";
   q?: string;
@@ -752,6 +800,112 @@ export async function setConceptArchived(
   const body = await parseConceptResponse<{ detail: ConceptDetail }>(response);
 
   return body.detail;
+}
+
+export async function scanConceptRelationSuggestions(): Promise<{
+  alreadyReviewedPairs: number;
+  embeddingStatus: "building" | "ready";
+  failedPairs: number;
+  pendingSuggestions: number;
+  recalledPairs: number;
+  scannedConcepts: number;
+  skippedPairs: number;
+  suggestedRelations: number;
+}> {
+  const response = await fetch(
+    "/api/v1/concept-relation-suggestions/scan",
+    { method: "POST" },
+  );
+  const body = await parseConceptResponse<{
+    scan: {
+      alreadyReviewedPairs: number;
+      embeddingStatus: "building" | "ready";
+      failedPairs: number;
+      pendingSuggestions: number;
+      recalledPairs: number;
+      scannedConcepts: number;
+      skippedPairs: number;
+      suggestedRelations: number;
+    };
+  }>(response);
+
+  return body.scan;
+}
+
+export async function listConceptRelationSuggestions(
+  status: "pending" | "resolved",
+): Promise<ConceptRelationSuggestion[]> {
+  const response = await fetch(
+    `/api/v1/concept-relation-suggestions?status=${status}`,
+  );
+  const body = await parseConceptResponse<{
+    items: ConceptRelationSuggestion[];
+  }>(response);
+
+  return body.items;
+}
+
+export async function confirmConceptRelationSuggestion(
+  suggestionId: string,
+  input: { description: string; type: ConceptRelationType },
+): Promise<ConceptRelationSuggestion> {
+  const response = await fetch(
+    `/api/v1/concept-relation-suggestions/${encodeURIComponent(suggestionId)}/confirm`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await parseConceptResponse<{
+    suggestion: ConceptRelationSuggestion;
+  }>(response);
+
+  return body.suggestion;
+}
+
+export async function rejectConceptRelationSuggestion(
+  suggestionId: string,
+): Promise<ConceptRelationSuggestion> {
+  const response = await fetch(
+    `/api/v1/concept-relation-suggestions/${encodeURIComponent(suggestionId)}/reject`,
+    { method: "POST" },
+  );
+  const body = await parseConceptResponse<{
+    suggestion: ConceptRelationSuggestion;
+  }>(response);
+
+  return body.suggestion;
+}
+
+export async function removeConceptRelation(relationId: string): Promise<void> {
+  const response = await fetch(
+    `/api/v1/concept-relations/${encodeURIComponent(relationId)}`,
+    { method: "DELETE" },
+  );
+
+  if (!response.ok) {
+    throw new Error(await tagErrorMessage(response));
+  }
+}
+
+export async function listConceptRelations(
+  conceptId?: string,
+): Promise<ConceptRelationSuggestion[]> {
+  const search = new URLSearchParams();
+
+  if (conceptId) {
+    search.set("conceptId", conceptId);
+  }
+
+  const response = await fetch(
+    `/api/v1/concept-relations${search.size ? `?${search.toString()}` : ""}`,
+  );
+  const body = await parseConceptResponse<{
+    items: ConceptRelationSuggestion[];
+  }>(response);
+
+  return body.items;
 }
 
 export async function listRecords(options: {

@@ -19,33 +19,42 @@ const V3_TABLES = [
   "concept_candidates",
   "concept_candidate_members",
   "concept_candidate_decision_members",
+  "concept_relation_suggestions",
+  "concept_relations",
 ] as const;
 
 describe("V3 Concept and Candidate export and restore", () => {
   let sourceApp: FastifyInstance;
   let currentTargetApp: FastifyInstance;
+  let format7TargetApp: FastifyInstance;
   let format6TargetApp: FastifyInstance;
   let format5TargetApp: FastifyInstance;
   let format4TargetApp: FastifyInstance;
   let sourceDatabase: PreparedTestDatabase;
   let currentTargetDatabase: PreparedTestDatabase;
+  let format7TargetDatabase: PreparedTestDatabase;
   let format6TargetDatabase: PreparedTestDatabase;
   let format5TargetDatabase: PreparedTestDatabase;
   let format4TargetDatabase: PreparedTestDatabase;
   let sourcePool: Pool;
   let currentTargetPool: Pool;
+  let format7TargetPool: Pool;
   let format6TargetPool: Pool;
   let format5TargetPool: Pool;
 
   beforeAll(async () => {
     sourceDatabase = prepareTestDatabase();
     currentTargetDatabase = prepareTestDatabase();
+    format7TargetDatabase = prepareTestDatabase();
     format6TargetDatabase = prepareTestDatabase();
     format5TargetDatabase = prepareTestDatabase();
     format4TargetDatabase = prepareTestDatabase();
     sourcePool = new Pool({ connectionString: sourceDatabase.databaseUrl });
     currentTargetPool = new Pool({
       connectionString: currentTargetDatabase.databaseUrl,
+    });
+    format7TargetPool = new Pool({
+      connectionString: format7TargetDatabase.databaseUrl,
     });
     format6TargetPool = new Pool({
       connectionString: format6TargetDatabase.databaseUrl,
@@ -56,6 +65,9 @@ describe("V3 Concept and Candidate export and restore", () => {
     sourceApp = await buildApp({ databaseUrl: sourceDatabase.databaseUrl });
     currentTargetApp = await buildApp({
       databaseUrl: currentTargetDatabase.databaseUrl,
+    });
+    format7TargetApp = await buildApp({
+      databaseUrl: format7TargetDatabase.databaseUrl,
     });
     format6TargetApp = await buildApp({
       databaseUrl: format6TargetDatabase.databaseUrl,
@@ -69,6 +81,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     await Promise.all([
       sourceApp.ready(),
       currentTargetApp.ready(),
+      format7TargetApp.ready(),
       format6TargetApp.ready(),
       format5TargetApp.ready(),
       format4TargetApp.ready(),
@@ -79,6 +92,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     await Promise.all([
       sourceApp?.close(),
       currentTargetApp?.close(),
+      format7TargetApp?.close(),
       format6TargetApp?.close(),
       format5TargetApp?.close(),
       format4TargetApp?.close(),
@@ -86,17 +100,19 @@ describe("V3 Concept and Candidate export and restore", () => {
     await Promise.all([
       sourcePool?.end(),
       currentTargetPool?.end(),
+      format7TargetPool?.end(),
       format6TargetPool?.end(),
       format5TargetPool?.end(),
     ]);
     sourceDatabase?.dispose();
     currentTargetDatabase?.dispose();
+    format7TargetDatabase?.dispose();
     format6TargetDatabase?.dispose();
     format5TargetDatabase?.dispose();
     format4TargetDatabase?.dispose();
   }, 30_000);
 
-  it("round-trips automatic Candidate provenance in format 7 and restores formats 4–6", async () => {
+  it("round-trips Concept relations in format 8 and restores fixed formats 4–7", async () => {
     const ids = await seedConceptDomain(sourcePool);
     const before = await snapshotTables(sourcePool, [...V3_TABLES]);
     const requested = await sourceApp.inject({
@@ -110,7 +126,7 @@ describe("V3 Concept and Candidate export and restore", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
-      manifest: { formatVersion: 7, recordCount: 2 },
+      manifest: { formatVersion: 8, recordCount: 2 },
     });
 
     const downloaded = await sourceApp.inject({
@@ -119,8 +135,8 @@ describe("V3 Concept and Candidate export and restore", () => {
     });
 
     expect(downloaded.statusCode).toBe(200);
-    const format7Archive = downloaded.rawPayload;
-    const domainEntry = readStoredZip(format7Archive).get("domain.json");
+    const format8Archive = downloaded.rawPayload;
+    const domainEntry = readStoredZip(format8Archive).get("domain.json");
 
     if (!domainEntry) {
       throw new Error("domain.json is missing");
@@ -132,8 +148,11 @@ describe("V3 Concept and Candidate export and restore", () => {
     >;
 
     expect(domain).toMatchObject({
-      formatVersion: 7,
-      concepts: [expect.objectContaining({ id: ids.conceptId })],
+      formatVersion: 8,
+      concepts: expect.arrayContaining([
+        expect.objectContaining({ id: ids.conceptId }),
+        expect.objectContaining({ id: ids.secondConceptId }),
+      ]),
       conceptRevisions: expect.arrayContaining([
         expect.objectContaining({ id: ids.firstConceptRevisionId }),
         expect.objectContaining({ id: ids.secondConceptRevisionId }),
@@ -171,13 +190,80 @@ describe("V3 Concept and Candidate export and restore", () => {
         expect.objectContaining({ concept_membership_id: ids.firstMembershipId }),
         expect.objectContaining({ concept_membership_id: ids.secondMembershipId }),
       ]),
+      conceptRelationSuggestions: expect.arrayContaining([
+        expect.objectContaining({
+          id: ids.confirmedSuggestionId,
+          status: "CONFIRMED",
+        }),
+        expect.objectContaining({
+          id: ids.removedSuggestionId,
+          status: "REMOVED",
+        }),
+        expect.objectContaining({
+          id: ids.rejectedSuggestionId,
+          status: "REJECTED",
+        }),
+        expect.objectContaining({
+          id: ids.pendingSuggestionId,
+          status: "PENDING_REVIEW",
+          decided_at: null,
+        }),
+      ]),
+      conceptRelations: expect.arrayContaining([
+        expect.objectContaining({
+          id: ids.symmetricRelationId,
+          suggestion_id: ids.confirmedSuggestionId,
+          relation_type: "SIMILAR",
+          source_concept_id: ids.canonicalSourceConceptId,
+          target_concept_id: ids.canonicalTargetConceptId,
+          removed_at: null,
+        }),
+        expect.objectContaining({
+          id: ids.directedRelationId,
+          suggestion_id: ids.removedSuggestionId,
+          relation_type: "PREREQUISITE",
+          source_concept_id: ids.directedSourceConceptId,
+          target_concept_id: ids.directedTargetConceptId,
+          removed_at: expect.any(String),
+        }),
+      ]),
     });
 
-    const currentInspection = await inspect(currentTargetApp, format7Archive);
+    const invalidArchives = [
+      mutateDomainJson(format8Archive, (snapshot) => {
+        snapshot.conceptRelationSuggestions[0]!.source_concept_revision_id =
+          crypto.randomUUID();
+      }),
+      mutateDomainJson(format8Archive, (snapshot) => {
+        snapshot.conceptRelations[0]!.source_concept_id =
+          snapshot.conceptRelations[0]!.target_concept_id;
+      }),
+      mutateDomainJson(format8Archive, (snapshot) => {
+        snapshot.conceptRelationSuggestions.find(
+          (row) => row.status === "PENDING_REVIEW",
+        )!.decided_at = new Date().toISOString();
+      }),
+      mutateDomainJson(format8Archive, (snapshot) => {
+        const relation = snapshot.conceptRelations.find(
+          (row) => row.relation_type === "PREREQUISITE",
+        )!;
+
+        [relation.source_concept_id, relation.target_concept_id] = [
+          relation.target_concept_id,
+          relation.source_concept_id,
+        ];
+      }),
+    ];
+
+    for (const archive of invalidArchives) {
+      await expectInvalidRestorePackage(currentTargetApp, archive);
+    }
+
+    const currentInspection = await inspect(currentTargetApp, format8Archive);
 
     expect(currentInspection).toMatchObject({
       canRestore: true,
-      formatVersion: 7,
+      formatVersion: 8,
       recordCount: 2,
     });
     await restore(currentTargetApp, currentInspection.id);
@@ -207,7 +293,26 @@ describe("V3 Concept and Candidate export and restore", () => {
       },
     });
 
-    const legacyFormat6Archive = downgradeToFormat6(format7Archive);
+    const fixedFormat7Archive = downgradeToFormat7(format8Archive);
+    const format7Inspection = await inspect(
+      format7TargetApp,
+      fixedFormat7Archive,
+    );
+
+    expect(format7Inspection).toMatchObject({
+      canRestore: true,
+      formatVersion: 7,
+      recordCount: 2,
+    });
+    await restore(format7TargetApp, format7Inspection.id);
+    expect(
+      await format7TargetPool.query("SELECT * FROM concept_relation_suggestions"),
+    ).toMatchObject({ rows: [] });
+    expect(
+      await format7TargetPool.query("SELECT * FROM concept_relations"),
+    ).toMatchObject({ rows: [] });
+
+    const legacyFormat6Archive = downgradeToFormat6(fixedFormat7Archive);
     const format6Inspection = await inspect(
       format6TargetApp,
       legacyFormat6Archive,
@@ -225,7 +330,7 @@ describe("V3 Concept and Candidate export and restore", () => {
       ),
     ).toMatchObject({ rows: [{ trigger_analysis_revision_id: null }] });
 
-    const legacyFormat5Archive = downgradeToFormat5(format7Archive);
+    const legacyFormat5Archive = downgradeToFormat5(fixedFormat7Archive);
     const format5Inspection = await inspect(
       format5TargetApp,
       legacyFormat5Archive,
@@ -249,10 +354,10 @@ describe("V3 Concept and Candidate export and restore", () => {
 
     expect(
       (format5Concepts.json() as { items: unknown[] }).items,
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(format5Candidates.json()).toEqual({ items: [] });
 
-    const format4Archive = downgradeToFormat4(format7Archive);
+    const format4Archive = downgradeToFormat4(fixedFormat7Archive);
     const format4Inspection = await inspect(format4TargetApp, format4Archive);
 
     expect(format4Inspection).toMatchObject({
@@ -294,13 +399,34 @@ async function seedConceptDomain(pool: Pool) {
     conceptId: crypto.randomUUID(),
     firstConceptRevisionId: crypto.randomUUID(),
     secondConceptRevisionId: crypto.randomUUID(),
+    secondConceptId: crypto.randomUUID(),
+    thirdConceptRevisionId: crypto.randomUUID(),
     firstMembershipId: crypto.randomUUID(),
     secondMembershipId: crypto.randomUUID(),
+    thirdMembershipId: crypto.randomUUID(),
     candidateScanId: crypto.randomUUID(),
     firstCandidateInputId: crypto.randomUUID(),
     secondCandidateInputId: crypto.randomUUID(),
     candidateId: crypto.randomUUID(),
+    confirmedSuggestionId: crypto.randomUUID(),
+    removedSuggestionId: crypto.randomUUID(),
+    rejectedSuggestionId: crypto.randomUUID(),
+    pendingSuggestionId: crypto.randomUUID(),
+    symmetricRelationId: crypto.randomUUID(),
+    directedRelationId: crypto.randomUUID(),
+    canonicalSourceConceptId: "",
+    canonicalTargetConceptId: "",
+    directedSourceConceptId: "",
+    directedTargetConceptId: "",
   };
+  const canonicalConceptIds = [
+    ids.conceptId,
+    ids.secondConceptId,
+  ].sort();
+  ids.canonicalSourceConceptId = canonicalConceptIds[0]!;
+  ids.canonicalTargetConceptId = canonicalConceptIds[1]!;
+  ids.directedSourceConceptId = ids.secondConceptId;
+  ids.directedTargetConceptId = ids.conceptId;
   const client = await pool.connect();
 
   try {
@@ -376,8 +502,14 @@ async function seedConceptDomain(pool: Pool) {
     await client.query(
       `INSERT INTO concepts
          (id, current_revision_id, normalized_name, archived_at)
-       VALUES ($1, $2, '事件系统', now())`,
-      [ids.conceptId, ids.secondConceptRevisionId],
+       VALUES ($1, $2, '事件系统', now()),
+              ($3, $4, '消息队列', NULL)`,
+      [
+        ids.conceptId,
+        ids.secondConceptRevisionId,
+        ids.secondConceptId,
+        ids.thirdConceptRevisionId,
+      ],
     );
     await client.query(
       `INSERT INTO concept_revisions
@@ -385,19 +517,31 @@ async function seedConceptDomain(pool: Pool) {
           description)
        VALUES ($1, $3, 1, '事件机制', '事件机制', '事件传递机制。'),
               ($2, $3, 2, '事件系统', '事件系统',
-               '事件在生产者与消费者之间异步流动。')`,
-      [ids.firstConceptRevisionId, ids.secondConceptRevisionId, ids.conceptId],
+               '事件在生产者与消费者之间异步流动。'),
+              ($4, $5, 1, '消息队列', '消息队列',
+               '消息队列缓冲生产者与消费者之间的事件。')`,
+      [
+        ids.firstConceptRevisionId,
+        ids.secondConceptRevisionId,
+        ids.conceptId,
+        ids.thirdConceptRevisionId,
+        ids.secondConceptId,
+      ],
     );
     await client.query(
       `INSERT INTO concept_memberships
          (id, concept_id, knowledge_point_id, removed_at)
-       VALUES ($1, $3, $4, NULL), ($2, $3, $5, now())`,
+       VALUES ($1, $3, $4, NULL),
+              ($2, $3, $5, now()),
+              ($6, $7, $5, NULL)`,
       [
         ids.firstMembershipId,
         ids.secondMembershipId,
         ids.conceptId,
         ids.firstPointId,
         ids.secondPointId,
+        ids.thirdMembershipId,
+        ids.secondConceptId,
       ],
     );
     await client.query(
@@ -417,6 +561,13 @@ async function seedConceptDomain(pool: Pool) {
         ids.secondMembershipId,
         ids.secondConceptRevisionId,
       ],
+    );
+    await client.query(
+      `INSERT INTO concept_activity
+         (concept_id, sequence_number, kind, revision_id, membership_id)
+       VALUES ($1, 1, 'CREATED', $2, NULL),
+              ($1, 2, 'MEMBER_ADDED', NULL, $3)`,
+      [ids.secondConceptId, ids.thirdConceptRevisionId, ids.thirdMembershipId],
     );
     await client.query(
       `INSERT INTO concept_candidate_scans
@@ -501,6 +652,81 @@ async function seedConceptDomain(pool: Pool) {
         ids.secondMembershipId,
       ],
     );
+    await client.query(
+      `INSERT INTO concept_relation_suggestions
+         (id, pair_key, input_fingerprint, source_concept_id,
+          target_concept_id, source_concept_revision_id,
+          target_concept_revision_id, source_membership_fingerprint,
+          target_membership_fingerprint, relation_type, description, reason,
+          confidence, model_configuration_version, text_model, status,
+          decided_at)
+       VALUES
+         ($1, 'confirmed-pair', $2, $3, $4, $5, $6, $7, $8,
+          'PREREQUISITE', '事件系统依赖消息队列。', '两个概念形成稳定协作。',
+          0.91, 8, 'v3-relation-model', 'CONFIRMED', now()),
+         ($9, 'removed-pair', $10, $11, $12, $13, $14, $15, $16,
+          'PREREQUISITE', '消息队列曾依赖事件系统。', '历史建议已由用户移除。',
+          0.72, 8, 'v3-relation-model', 'REMOVED', now()),
+         ($17, 'rejected-pair', $18, $3, $4, $5, $6, $19, $20,
+          'EXTENDS', '事件系统扩展消息队列。', '用户认为语义不准确。',
+          0.51, 8, 'v3-relation-model', 'REJECTED', now()),
+         ($21, 'pending-pair', $22, $3, $4, $5, $6, $23, $24,
+          'APPLIES', '事件系统应用于消息队列。', '等待用户确认。',
+          0.63, 8, 'v3-relation-model', 'PENDING_REVIEW', NULL)`,
+      [
+        ids.confirmedSuggestionId,
+        "1".repeat(64),
+        ids.directedSourceConceptId,
+        ids.directedTargetConceptId,
+        ids.directedSourceConceptId === ids.conceptId
+          ? ids.secondConceptRevisionId
+          : ids.thirdConceptRevisionId,
+        ids.directedTargetConceptId === ids.conceptId
+          ? ids.secondConceptRevisionId
+          : ids.thirdConceptRevisionId,
+        "2".repeat(64),
+        "3".repeat(64),
+        ids.removedSuggestionId,
+        "4".repeat(64),
+        ids.directedSourceConceptId,
+        ids.directedTargetConceptId,
+        ids.directedSourceConceptId === ids.conceptId
+          ? ids.secondConceptRevisionId
+          : ids.thirdConceptRevisionId,
+        ids.directedTargetConceptId === ids.conceptId
+          ? ids.secondConceptRevisionId
+          : ids.thirdConceptRevisionId,
+        "5".repeat(64),
+        "6".repeat(64),
+        ids.rejectedSuggestionId,
+        "7".repeat(64),
+        "8".repeat(64),
+        "9".repeat(64),
+        ids.pendingSuggestionId,
+        "a".repeat(64),
+        "b".repeat(64),
+        "c".repeat(64),
+      ],
+    );
+    await client.query(
+      `INSERT INTO concept_relations
+         (id, suggestion_id, source_concept_id, target_concept_id,
+          relation_type, description, confirmed_at, removed_at)
+       VALUES
+         ($1, $2, $3, $4, 'SIMILAR', '两个概念表达同一协作机制。', now(), NULL),
+         ($5, $6, $7, $8, 'PREREQUISITE', '消息队列曾依赖事件系统。',
+          now() - interval '1 second', now())`,
+      [
+        ids.symmetricRelationId,
+        ids.confirmedSuggestionId,
+        ids.canonicalSourceConceptId,
+        ids.canonicalTargetConceptId,
+        ids.directedRelationId,
+        ids.removedSuggestionId,
+        ids.directedSourceConceptId,
+        ids.directedTargetConceptId,
+      ],
+    );
     await client.query("COMMIT");
     return ids;
   } catch (error) {
@@ -509,6 +735,34 @@ async function seedConceptDomain(pool: Pool) {
   } finally {
     client.release();
   }
+}
+
+function downgradeToFormat7(archive: Buffer): Buffer {
+  const entries = readStoredZip(archive);
+  const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8")) as {
+    formatVersion: number;
+  };
+  const domain = JSON.parse(entries.get("domain.json")!.toString("utf8")) as Record<
+    string,
+    unknown
+  >;
+
+  manifest.formatVersion = 7;
+  domain.formatVersion = 7;
+  delete domain.conceptRelationSuggestions;
+  delete domain.conceptRelations;
+
+  return createZip(
+    [...entries].map(([name, data]) => ({
+      name,
+      data:
+        name === "manifest.json"
+          ? Buffer.from(JSON.stringify(manifest), "utf8")
+          : name === "domain.json"
+            ? Buffer.from(JSON.stringify(domain), "utf8")
+            : data,
+    })),
+  );
 }
 
 function downgradeToFormat6(archive: Buffer): Buffer {
@@ -539,6 +793,53 @@ function downgradeToFormat6(archive: Buffer): Buffer {
             : data,
     })),
   );
+}
+
+type RelationDomainJson = {
+  conceptRelationSuggestions: Array<Record<string, unknown>>;
+  conceptRelations: Array<Record<string, unknown>>;
+};
+
+function mutateDomainJson(
+  archive: Buffer,
+  mutate: (snapshot: RelationDomainJson) => void,
+): Buffer {
+  const entries = readStoredZip(archive);
+  const domain = JSON.parse(
+    entries.get("domain.json")!.toString("utf8"),
+  ) as RelationDomainJson;
+
+  mutate(domain);
+
+  return createZip(
+    [...entries].map(([name, data]) => ({
+      name,
+      data:
+        name === "domain.json"
+          ? Buffer.from(JSON.stringify(domain), "utf8")
+          : data,
+    })),
+  );
+}
+
+async function expectInvalidRestorePackage(
+  app: FastifyInstance,
+  archive: Buffer,
+) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/restores/inspect",
+    headers: { "content-type": "application/zip" },
+    payload: archive,
+  });
+
+  expect(response.statusCode).toBe(422);
+  expect(response.json()).toEqual({
+    error: {
+      code: "RESTORE_PACKAGE_INVALID",
+      message: expect.any(String),
+    },
+  });
 }
 
 function downgradeToFormat5(archive: Buffer): Buffer {

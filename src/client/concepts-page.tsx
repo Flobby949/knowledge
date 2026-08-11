@@ -23,6 +23,10 @@ import {
   type ConceptSummary,
 } from "./api.js";
 import { ConceptCandidatesPanel } from "./concept-candidates-panel.js";
+import {
+  ConceptRelationsForConcept,
+  ConceptRelationsPanel,
+} from "./concept-relations-panel.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
 import "./concepts-page.css";
@@ -32,9 +36,12 @@ type WorkspaceMode = "add" | "create" | "edit" | "view";
 
 export function ConceptsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const candidateView = searchParams.get("view") === "candidates";
+  const requestedView = searchParams.get("view");
+  const candidateView = requestedView === "candidates";
+  const relationView = requestedView === "relations";
   const requestedConceptId = searchParams.get("concept") ?? "";
   const requestedScanId = searchParams.get("scan") ?? "";
+  const requestedRelationId = searchParams.get("relation") ?? "";
   const [concepts, setConcepts] = useState<ConceptSummary[]>([]);
   const [archive, setArchive] = useState<ArchiveScope>("active");
   const [query, setQuery] = useState("");
@@ -223,7 +230,7 @@ export function ConceptsPage() {
 
         <nav aria-label="Concept 工作区视图" className="concept-view-tabs">
           <button
-            aria-current={!candidateView ? "page" : undefined}
+            aria-current={!candidateView && !relationView ? "page" : undefined}
             onClick={() => setSearchParams(selectedId ? { concept: selectedId } : {})}
             type="button"
           >
@@ -238,9 +245,24 @@ export function ConceptsPage() {
             AI 候选
             <span>扫描、审查与晋级记录</span>
           </button>
+          <button
+            aria-current={relationView ? "page" : undefined}
+            onClick={() => setSearchParams({ view: "relations" })}
+            type="button"
+          >
+            Concept 关系
+            <span>扫描、确认与邻居历史</span>
+          </button>
         </nav>
 
-        {candidateView ? (
+        {relationView ? (
+          <ConceptRelationsPanel
+            initialSuggestionId={requestedRelationId}
+            onSelectSuggestion={(id) =>
+              setSearchParams({ relation: id, view: "relations" })
+            }
+          />
+        ) : candidateView ? (
           <ConceptCandidatesPanel
             initialScanId={requestedScanId}
             onAccepted={() => setReload((value) => value + 1)}
@@ -579,6 +601,8 @@ function ConceptDetailWorkspace({
           setError={setError}
         />
       ) : null}
+
+      <ConceptRelationsForConcept conceptId={concept.id} />
 
       <section aria-label="Concept Membership" className="concept-membership-section">
         <header>

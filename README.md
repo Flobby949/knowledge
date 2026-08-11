@@ -15,6 +15,7 @@
 - **统一标签体系**：手动标签与 AI 候选标签共享词表，并保留创建来源和认可状态。
 - **可维护 Concept**：可以把多个当前知识点组织成稳定定义，保留定义版本、成员变更、来源状态和归档历史。
 - **AI Concept 候选**：新知识生效后自动从全局知识点召回关联内容，也可一键为尚未覆盖的历史知识补做全量发现；“仅保存”不进入 Concept 关联，候选只有人工编辑并确认后才会晋级为正式 Concept。
+- **知识网络语义与审查**：已具备 Concept Relation 的 AI 建议、人工确认/拒绝/撤销 API，以及只读取真实有效事实的局部子图、邻居和可核验路径 API；独立图形工作区仍属于 V3.3。
 - **关键词与语义检索**：同时搜索原文、AI 概览、知识点和标签，并按同一记录聚合结果。
 - **完整数据管理**：支持版本历史、归档、永久删除，以及 Markdown + JSON 完整导出和恢复。
 
@@ -82,6 +83,12 @@ pnpm run dev
 
 文本推理端点与 Embedding 端点相互独立，均使用 OpenAI-compatible 接口，可以分别连接不同服务商。
 
+## 知识网络 API（V3.2）
+
+网络节点统一使用 `concept:<uuid>` 或 `knowledge_point:<uuid>` typed key。公开读取接口为 `GET /api/v1/network/subgraph`、`GET /api/v1/network/nodes/:typedKey/neighbors` 和 `GET /api/v1/network/path`；只返回 `concept_membership`、`knowledge_relation`、`concept_relation` 三类真实边，并保留来源、确认记录、规范端点和路径遍历方向。
+
+局部子图最多返回 300 个节点、600 条边并展开到深度 2；路径最多搜索深度 6、访问 1000 个节点，并受 2 秒数据库查询预算保护。Concept Relation Suggestion 可通过 API 扫描和列出，用户可以修改后确认、拒绝，或撤销已确认关系。V3.2 不提供图谱渲染，独立 2D 知识网络工作区从 V3.3 开始。
+
 ## 常用命令
 
 | 命令 | 用途 |
@@ -108,4 +115,5 @@ pnpm run dev
 - [领域上下文](CONTEXT.md)
 - [设计规范](DESIGN.md)
 - [架构决策记录](docs/adr)
+- [Concept Relation 的确认、方向与复核边界](docs/adr/0034-concept-relations-require-confirmation.md)
 - [本地开发环境](docs/DEVELOPMENT.md)

@@ -573,6 +573,104 @@ test("Concept Candidates / AI 候选 · 1600×1000 审查台与 1280×800 几何
   }
 });
 
+test("Concept Relations / 概念关系 · 1600×1000 双定义审查台与 1280×800 几何", async ({
+  page,
+}) => {
+  const suggestion = {
+    canDecide: true,
+    confidence: 0.87,
+    createdAt: "2099-08-09T08:00:00.000Z",
+    decidedAt: null,
+    description: "变更数据捕获为事件协作提供可靠的增量事实来源。",
+    id: "30000000-0000-4000-8000-000000000001",
+    model: { configurationVersion: 1, name: "deepseek-v4-flash" },
+    needsReview: false,
+    reason: "两个 Concept 都围绕增量变化的发布与消费，但各自保留独立职责。",
+    relation: null,
+    source: {
+      archived: false,
+      changedSinceSuggestion: false,
+      current: true,
+      currentMembershipFingerprint: "a".repeat(64),
+      currentRevisionId: "31000000-0000-4000-8000-000000000001",
+      description:
+        "通过读取事务日志识别增量变化，并以有序事件向下游传播，避免周期轮询造成的负载与延迟。",
+      id: "32000000-0000-4000-8000-000000000001",
+      memberCount: 3,
+      membershipFingerprint: "a".repeat(64),
+      name: "变更数据捕获",
+      revisionId: "31000000-0000-4000-8000-000000000001",
+    },
+    status: "pending_review",
+    target: {
+      archived: false,
+      changedSinceSuggestion: false,
+      current: true,
+      currentMembershipFingerprint: "b".repeat(64),
+      currentRevisionId: "31000000-0000-4000-8000-000000000002",
+      description:
+        "生产者发布领域事件，消费者按稳定契约订阅并幂等处理，形成松耦合的异步协作边界。",
+      id: "32000000-0000-4000-8000-000000000002",
+      memberCount: 4,
+      membershipFingerprint: "b".repeat(64),
+      name: "事件驱动协作",
+      revisionId: "31000000-0000-4000-8000-000000000002",
+    },
+    type: "extends",
+    updatedAt: "2099-08-09T08:00:00.000Z",
+  };
+
+  await page.route(
+    "**/api/v1/concept-relation-suggestions?*",
+    async (route) => {
+      const status = new URL(route.request().url()).searchParams.get("status");
+
+      await route.fulfill({
+        json: { items: status === "pending" ? [suggestion] : [] },
+      });
+    },
+  );
+  await page.goto(
+    `${appBaseUrl}/concepts?view=relations&relation=${encodeURIComponent(suggestion.id)}`,
+  );
+
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+  const main = page.getByRole("main", { name: "知识概念" });
+  const review = main.getByRole("region", { name: "Concept Relation 审查" });
+  const workbench = review.locator(".concept-relation-workbench");
+  const catalog = review.getByRole("complementary", {
+    name: "Concept Relation 台账",
+  });
+  const stage = review.locator(".concept-relation-stage");
+
+  await expect(review.getByRole("heading", { name: "变更数据捕获" }))
+    .toBeVisible();
+  await expect(review.getByRole("heading", { name: "事件驱动协作" }))
+    .toBeVisible();
+  await expect(review.getByLabel("Concept 关系类型")).toHaveValue("extends");
+  await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
+  await expectBox(main, { x: 116, y: 72, width: 1_444 });
+  await expectBox(workbench, { x: 116, width: 1_444 });
+  await expectBox(catalog, { x: 117, width: 324 });
+  await expectBox(stage, { x: 441, width: 1_118 });
+  await expect(page).toHaveScreenshot(snapshotName(theme, "concept-relations"), {
+    animations: "disabled",
+    caret: "hide",
+    fullPage: false,
+    maxDiffPixels: 500,
+  });
+
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
+  await expectBox(main, { x: 116, y: 72, width: 1_124 });
+  await expectBox(workbench, { x: 116, width: 1_124 });
+  await expectBox(catalog, { x: 117, width: 292 });
+  await expectBox(stage, { x: 409, width: 830 });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBe(1_280);
+});
+
 test("Settings / 设置 · 1600×1000 基线与 1280×800 的单页双端控制台", async ({
   page,
 }) => {

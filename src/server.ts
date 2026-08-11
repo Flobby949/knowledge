@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import type { AnalysisGenerator } from "./analysis-generator.js";
 import type { ConceptCandidateGenerator } from "./concept-candidate-generator.js";
+import type { ConceptRelationGenerator } from "./concept-relation-generator.js";
 import type { EmbedText } from "./embedding-provider.js";
 import type { ModelEndpointTester } from "./model-endpoint-tester.js";
 
@@ -39,6 +40,7 @@ const app = await buildApp({
     ? {
         generateAnalysis: generateE2eAnalysis,
         generateConceptCandidate: generateE2eConceptCandidate,
+        generateConceptRelation: generateE2eConceptRelation,
         embedText: embedE2eText,
         onAiTaskSettled: (taskId: string) => {
           settledE2eAiTaskIds.add(taskId);
@@ -115,6 +117,22 @@ async function generateE2eConceptCandidate({
         .slice(0, Math.max(2, Math.min(3, points.length)))
         .map((point) => point.id),
     },
+  };
+}
+
+async function generateE2eConceptRelation({
+  conceptA,
+  conceptB,
+}: Parameters<ConceptRelationGenerator>[0]): ReturnType<ConceptRelationGenerator> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 80));
+
+  return {
+    related: true,
+    type: "extends",
+    direction: "a_to_b",
+    description: `${conceptA.name} 的机制延伸到 ${conceptB.name}。`,
+    reason: "两个 Concept 的定义与成员语义接近，适合交由用户判断。",
+    confidence: 0.86,
   };
 }
 

@@ -90,6 +90,8 @@ type DomainJson = {
   conceptRevisions: Array<Record<string, unknown>>;
   conceptMemberships: Array<Record<string, unknown>>;
   conceptActivity: Array<Record<string, unknown>>;
+  conceptRelationSuggestions: Array<Record<string, unknown>>;
+  conceptRelations: Array<Record<string, unknown>>;
 };
 
 describe("complete export and empty-instance restore", () => {
@@ -289,7 +291,7 @@ describe("complete export and empty-instance restore", () => {
       completedAt: expect.any(String),
       downloadUrl: expect.any(String),
       manifest: {
-        formatVersion: 7,
+        formatVersion: 8,
         recordCount: 1,
         included: expect.arrayContaining(["markdown", "domain_json"]),
         excluded: expect.arrayContaining([
@@ -415,6 +417,8 @@ describe("complete export and empty-instance restore", () => {
         "conceptCandidates",
         "conceptCandidateMembers",
         "conceptCandidateDecisionMembers",
+        "conceptRelationSuggestions",
+        "conceptRelations",
         "records",
         "tagAssignments",
         "tagAliases",
@@ -562,7 +566,7 @@ describe("complete export and empty-instance restore", () => {
     expect(inspection).toMatchObject({
       id: expect.any(String),
       status: "valid",
-      formatVersion: 7,
+      formatVersion: 8,
       recordCount: 1,
       canRestore: true,
     });

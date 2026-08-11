@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 7,
+  formatVersion: 8,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -378,8 +378,41 @@ interface ConceptCandidateDecisionMemberSnapshotRow extends DomainRow {
   position: number;
 }
 
+interface ConceptRelationSuggestionSnapshotRow extends DomainRow {
+  id: string;
+  pair_key: string;
+  input_fingerprint: string;
+  source_concept_id: string;
+  target_concept_id: string;
+  source_concept_revision_id: string;
+  target_concept_revision_id: string;
+  source_membership_fingerprint: string;
+  target_membership_fingerprint: string;
+  relation_type: KnowledgeRelationSnapshotType;
+  description: string;
+  reason: string;
+  confidence: number;
+  model_configuration_version: number;
+  text_model: string;
+  status: "CONFIRMED" | "PENDING_REVIEW" | "REJECTED" | "REMOVED";
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  decided_at: Timestamp | null;
+}
+
+interface ConceptRelationSnapshotRow extends DomainRow {
+  id: string;
+  suggestion_id: string;
+  source_concept_id: string;
+  target_concept_id: string;
+  relation_type: KnowledgeRelationSnapshotType;
+  description: string;
+  confirmed_at: Timestamp;
+  removed_at: Timestamp | null;
+}
+
 interface DomainSnapshot {
-  formatVersion: 7;
+  formatVersion: 8;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
@@ -411,11 +444,13 @@ interface DomainSnapshot {
   conceptCandidates: ConceptCandidateSnapshotRow[];
   conceptCandidateMembers: ConceptCandidateMemberSnapshotRow[];
   conceptCandidateDecisionMembers: ConceptCandidateDecisionMemberSnapshotRow[];
+  conceptRelationSuggestions: ConceptRelationSuggestionSnapshotRow[];
+  conceptRelations: ConceptRelationSnapshotRow[];
 }
 
 interface ParsedSnapshot {
   snapshot: DomainSnapshot;
-  sourceFormatVersion: 4 | 5 | 6 | 7;
+  sourceFormatVersion: 4 | 5 | 6 | 7 | 8;
 }
 
 interface ExportRow {
@@ -834,8 +869,14 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
         WHERE scan.status IN ('SUCCEEDED', 'FAILED')
         ORDER BY member.candidate_id, member.position`,
     );
+    const conceptRelationSuggestions = await client.query(
+      "SELECT * FROM concept_relation_suggestions ORDER BY created_at, id",
+    );
+    const conceptRelations = await client.query(
+      "SELECT * FROM concept_relations ORDER BY confirmed_at, id",
+    );
     const snapshot: DomainSnapshot = {
-      formatVersion: 7,
+      formatVersion: 8,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
@@ -867,6 +908,8 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       conceptCandidates: conceptCandidates.rows,
       conceptCandidateMembers: conceptCandidateMembers.rows,
       conceptCandidateDecisionMembers: conceptCandidateDecisionMembers.rows,
+      conceptRelationSuggestions: conceptRelationSuggestions.rows,
+      conceptRelations: conceptRelations.rows,
     };
 
     await client.query("COMMIT");
@@ -901,7 +944,8 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
     (publicManifest.formatVersion !== 4 &&
       publicManifest.formatVersion !== 5 &&
       publicManifest.formatVersion !== 6 &&
-      publicManifest.formatVersion !== 7) ||
+      publicManifest.formatVersion !== 7 &&
+      publicManifest.formatVersion !== 8) ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -956,7 +1000,8 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     value.formatVersion !== 4 &&
     value.formatVersion !== 5 &&
     value.formatVersion !== 6 &&
-    value.formatVersion !== 7
+    value.formatVersion !== 7 &&
+    value.formatVersion !== 8
   ) {
     throw new Error("domain snapshot version is unsupported");
   }
@@ -999,6 +1044,10 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     "conceptCandidateMembers",
     "conceptCandidateDecisionMembers",
   ];
+  const conceptRelationKeys = [
+    "conceptRelationSuggestions",
+    "conceptRelations",
+  ];
 
   requireExactKeys(
     value,
@@ -1006,14 +1055,21 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
       ? baseKeys
       : value.formatVersion === 5
         ? [...baseKeys, ...conceptKeys]
-        : [...baseKeys, ...conceptKeys, ...candidateKeys],
+        : value.formatVersion <= 7
+          ? [...baseKeys, ...conceptKeys, ...candidateKeys]
+          : [
+              ...baseKeys,
+              ...conceptKeys,
+              ...candidateKeys,
+              ...conceptRelationKeys,
+            ],
   );
 
   const normalizedValue: DomainRow =
     value.formatVersion === 4
       ? {
           ...value,
-          formatVersion: 7,
+          formatVersion: 8,
           concepts: [],
           conceptRevisions: [],
           conceptMemberships: [],
@@ -1023,21 +1079,25 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
           conceptCandidates: [],
           conceptCandidateMembers: [],
           conceptCandidateDecisionMembers: [],
+          conceptRelationSuggestions: [],
+          conceptRelations: [],
         }
       : value.formatVersion === 5
         ? {
             ...value,
-            formatVersion: 7,
+            formatVersion: 8,
             conceptCandidateScans: [],
             conceptCandidateInputs: [],
             conceptCandidates: [],
             conceptCandidateMembers: [],
             conceptCandidateDecisionMembers: [],
+            conceptRelationSuggestions: [],
+            conceptRelations: [],
           }
         : value.formatVersion === 6
           ? {
               ...value,
-              formatVersion: 7,
+              formatVersion: 8,
               conceptCandidateScans: requireRows(
                 value.conceptCandidateScans,
                 "conceptCandidateScans",
@@ -1045,8 +1105,17 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
                 ...row,
                 trigger_analysis_revision_id: null,
               })),
+              conceptRelationSuggestions: [],
+              conceptRelations: [],
             }
-          : value;
+          : value.formatVersion === 7
+            ? {
+                ...value,
+                formatVersion: 8,
+                conceptRelationSuggestions: [],
+                conceptRelations: [],
+              }
+            : value;
 
   const records = requireRows(normalizedValue.records, "records");
   const fragmentRevisions = requireRows(
@@ -1151,6 +1220,14 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     normalizedValue.conceptCandidateDecisionMembers,
     "conceptCandidateDecisionMembers",
   );
+  const conceptRelationSuggestions = requireRows(
+    normalizedValue.conceptRelationSuggestions,
+    "conceptRelationSuggestions",
+  );
+  const conceptRelations = requireRows(
+    normalizedValue.conceptRelations,
+    "conceptRelations",
+  );
 
   records.forEach(validateRecordRow);
   fragmentRevisions.forEach(validateFragmentRevisionRow);
@@ -1185,6 +1262,8 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
   conceptCandidateDecisionMembers.forEach(
     validateConceptCandidateDecisionMemberRow,
   );
+  conceptRelationSuggestions.forEach(validateConceptRelationSuggestionRow);
+  conceptRelations.forEach(validateConceptRelationRow);
 
   const snapshot = normalizedValue as unknown as DomainSnapshot;
 
@@ -2111,6 +2190,95 @@ function validateConceptCandidateDecisionMemberRow(row: DomainRow): void {
   requireInteger(row, "position", 1, 12);
 }
 
+function validateConceptRelationSuggestionRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "pair_key",
+    "input_fingerprint",
+    "source_concept_id",
+    "target_concept_id",
+    "source_concept_revision_id",
+    "target_concept_revision_id",
+    "source_membership_fingerprint",
+    "target_membership_fingerprint",
+    "relation_type",
+    "description",
+    "reason",
+    "confidence",
+    "model_configuration_version",
+    "text_model",
+    "status",
+    "created_at",
+    "updated_at",
+    "decided_at",
+  ]);
+  requireUuid(row, "id");
+  requireNonEmptyString(row, "pair_key");
+  requireFingerprint(row, "input_fingerprint");
+  requireUuid(row, "source_concept_id");
+  requireUuid(row, "target_concept_id");
+  requireUuid(row, "source_concept_revision_id");
+  requireUuid(row, "target_concept_revision_id");
+  requireFingerprint(row, "source_membership_fingerprint");
+  requireFingerprint(row, "target_membership_fingerprint");
+  requireRelationType(row, "relation_type");
+  requireNonEmptyString(row, "description");
+  requireNonEmptyString(row, "reason");
+  requireNumberInRange(row, "confidence", 0, 1);
+  requireInteger(row, "model_configuration_version", 1);
+  requireNonEmptyString(row, "text_model");
+  requireEnum(row, "status", [
+    "PENDING_REVIEW",
+    "CONFIRMED",
+    "REJECTED",
+    "REMOVED",
+  ]);
+  requireTimestamp(row, "created_at");
+  requireTimestamp(row, "updated_at");
+  requireNullableTimestamp(row, "decided_at");
+
+  if (
+    row.source_concept_id === row.target_concept_id ||
+    (isSymmetricRelationType(row.relation_type) &&
+      (row.source_concept_id as string) >= (row.target_concept_id as string)) ||
+    (row.status === "PENDING_REVIEW") !== (row.decided_at === null) ||
+    timestampValue(row.updated_at) < timestampValue(row.created_at)
+  ) {
+    throw new Error("concept relation suggestion lifecycle is invalid");
+  }
+}
+
+function validateConceptRelationRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "id",
+    "suggestion_id",
+    "source_concept_id",
+    "target_concept_id",
+    "relation_type",
+    "description",
+    "confirmed_at",
+    "removed_at",
+  ]);
+  requireUuid(row, "id");
+  requireUuid(row, "suggestion_id");
+  requireUuid(row, "source_concept_id");
+  requireUuid(row, "target_concept_id");
+  requireRelationType(row, "relation_type");
+  requireNonEmptyString(row, "description");
+  requireTimestamp(row, "confirmed_at");
+  requireNullableTimestamp(row, "removed_at");
+
+  if (
+    row.source_concept_id === row.target_concept_id ||
+    (isSymmetricRelationType(row.relation_type) &&
+      (row.source_concept_id as string) >= (row.target_concept_id as string)) ||
+    (row.removed_at !== null &&
+      timestampValue(row.removed_at) < timestampValue(row.confirmed_at))
+  ) {
+    throw new Error("concept relation lifecycle is invalid");
+  }
+}
+
 function requireRelationType(row: DomainRow, key: string): void {
   requireEnum(row, key, [
     "SIMILAR",
@@ -2120,6 +2288,12 @@ function requireRelationType(row: DomainRow, key: string): void {
     "APPLIES",
     "ANALOGY",
   ]);
+}
+
+function isSymmetricRelationType(value: unknown): boolean {
+  return (
+    value === "SIMILAR" || value === "CONTRASTS" || value === "ANALOGY"
+  );
 }
 
 function validateSnapshotReferences(snapshot: DomainSnapshot): void {
@@ -2352,6 +2526,32 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     (row) => row.concept_membership_id,
     "concept candidate decision membership",
   );
+  assertUnique(
+    snapshot.conceptRelationSuggestions,
+    (row) => row.id,
+    "concept relation suggestion id",
+  );
+  assertUnique(
+    snapshot.conceptRelationSuggestions,
+    (row) => `${row.pair_key}:${row.input_fingerprint}`,
+    "concept relation suggestion input",
+  );
+  assertUnique(
+    snapshot.conceptRelations,
+    (row) => row.id,
+    "concept relation id",
+  );
+  assertUnique(
+    snapshot.conceptRelations,
+    (row) => row.suggestion_id,
+    "concept relation suggestion",
+  );
+  assertUnique(
+    snapshot.conceptRelations.filter((row) => row.removed_at === null),
+    (row) =>
+      `${row.source_concept_id}:${row.target_concept_id}:${row.relation_type}`,
+    "active concept relation identity",
+  );
 
   const records = new Map(snapshot.records.map((row) => [row.id, row]));
   const revisions = new Map(
@@ -2390,6 +2590,9 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   );
   const conceptCandidates = new Map(
     snapshot.conceptCandidates.map((row) => [row.id, row]),
+  );
+  const conceptRelationSuggestions = new Map(
+    snapshot.conceptRelationSuggestions.map((row) => [row.id, row]),
   );
 
   for (const revision of snapshot.conceptRevisions) {
@@ -2631,6 +2834,54 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   for (const member of snapshot.conceptCandidateDecisionMembers) {
     if (!conceptCandidates.has(member.candidate_id)) {
       throw new Error("concept candidate decision candidate is invalid");
+    }
+  }
+
+  for (const suggestion of snapshot.conceptRelationSuggestions) {
+    const sourceRevision = conceptRevisions.get(
+      suggestion.source_concept_revision_id,
+    );
+    const targetRevision = conceptRevisions.get(
+      suggestion.target_concept_revision_id,
+    );
+    const relations = snapshot.conceptRelations.filter(
+      (relation) => relation.suggestion_id === suggestion.id,
+    );
+    const requiresRelation =
+      suggestion.status === "CONFIRMED" || suggestion.status === "REMOVED";
+
+    if (
+      !concepts.has(suggestion.source_concept_id) ||
+      !concepts.has(suggestion.target_concept_id) ||
+      sourceRevision?.concept_id !== suggestion.source_concept_id ||
+      targetRevision?.concept_id !== suggestion.target_concept_id ||
+      (requiresRelation && relations.length !== 1) ||
+      (!requiresRelation && relations.length !== 0)
+    ) {
+      throw new Error("concept relation suggestion reference is invalid");
+    }
+  }
+
+  for (const relation of snapshot.conceptRelations) {
+    const suggestion = conceptRelationSuggestions.get(relation.suggestion_id);
+    const endpointsMatch = isSymmetricRelationType(relation.relation_type)
+      ? (relation.source_concept_id === suggestion?.source_concept_id &&
+          relation.target_concept_id === suggestion?.target_concept_id) ||
+        (relation.source_concept_id === suggestion?.target_concept_id &&
+          relation.target_concept_id === suggestion?.source_concept_id)
+      : relation.source_concept_id === suggestion?.source_concept_id &&
+        relation.target_concept_id === suggestion?.target_concept_id;
+
+    if (
+      !suggestion ||
+      !endpointsMatch ||
+      !concepts.has(relation.source_concept_id) ||
+      !concepts.has(relation.target_concept_id) ||
+      (suggestion.status === "CONFIRMED" && relation.removed_at !== null) ||
+      (suggestion.status === "REMOVED" && relation.removed_at === null) ||
+      (suggestion.status !== "CONFIRMED" && suggestion.status !== "REMOVED")
+    ) {
+      throw new Error("concept relation reference is invalid");
     }
   }
 
@@ -3363,6 +3614,37 @@ async function restoreSnapshot(
     "concept_membership_id",
     "position",
   ], snapshot.conceptCandidateDecisionMembers);
+  await insertRows(client, "concept_relation_suggestions", [
+    "id",
+    "pair_key",
+    "input_fingerprint",
+    "source_concept_id",
+    "target_concept_id",
+    "source_concept_revision_id",
+    "target_concept_revision_id",
+    "source_membership_fingerprint",
+    "target_membership_fingerprint",
+    "relation_type",
+    "description",
+    "reason",
+    "confidence",
+    "model_configuration_version",
+    "text_model",
+    "status",
+    "created_at",
+    "updated_at",
+    "decided_at",
+  ], snapshot.conceptRelationSuggestions);
+  await insertRows(client, "concept_relations", [
+    "id",
+    "suggestion_id",
+    "source_concept_id",
+    "target_concept_id",
+    "relation_type",
+    "description",
+    "confirmed_at",
+    "removed_at",
+  ], snapshot.conceptRelations);
   await insertRows(client, "duplicate_suggestions", [
     "id",
     "source_a_type",
