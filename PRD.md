@@ -1254,7 +1254,7 @@ PC Web 全局采用横向顶部导航，不使用常驻或可折叠侧边栏。�
 
 ### 16.2 V2 完成标准
 
-- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行，V1/V2 旧版完整导出包仍可恢复到 V2 空实例；
+- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；当前完整导出格式 4 可以把全部 V2 领域事实无损恢复到 V2 空实例。格式 4 是首个承诺长期恢复兼容的导出格式，后续已发布格式必须继续支持格式 4 及之后的备份，格式 1–3 不属于兼容范围；
 - 用户能为已认可标签维护别名，并能把一个或多个同义标签合并到主标签后撤销；合并前后的 Tag 身份、Assignment 来源和历史版本均不丢失，有效展示与检索按主标签聚合；
 - 系统能提示重复知识并提供不丢来源的合并建议；
 - 系统能生成带理由、证据和置信度的关系建议；
