@@ -37,6 +37,7 @@ describe("full Concept discovery", () => {
   let database: PreparedTestDatabase;
   let pool: Pool;
   let measureCandidateConcurrency = false;
+  let failCandidateGeneration = false;
   let activeCandidateCalls = 0;
   let peakCandidateCalls = 0;
   const generateAnalysis = vi.fn<AnalysisGenerator>(async ({ sourceText }) => ({
@@ -55,6 +56,10 @@ describe("full Concept discovery", () => {
   }));
   const generateConceptCandidate = vi.fn<ConceptCandidateGenerator>(
     async ({ points }) => {
+      if (failCandidateGeneration) {
+        throw new Error("historical candidate configuration unavailable");
+      }
+
       if (measureCandidateConcurrency) {
         activeCandidateCalls += 1;
         peakCandidateCalls = Math.max(peakCandidateCalls, activeCandidateCalls);
@@ -85,7 +90,7 @@ describe("full Concept discovery", () => {
       testModelEndpoint: vi.fn(async () => ({ status: "passed" as const })),
     });
     await app.ready();
-    await activateConfiguration(app);
+    await activateConfiguration(app, "initial");
   }, 30_000);
 
   afterAll(async () => {
@@ -165,6 +170,43 @@ describe("full Concept discovery", () => {
     await waitForAutomaticScanCount(app, 2);
     measureCandidateConcurrency = false;
     expect(peakCandidateCalls).toBe(1);
+  });
+
+  it("requeues a failed automatic scan with the current active configuration", async () => {
+    failCandidateGeneration = true;
+    const record = await createSaveOnlyRecord(
+      app,
+      "历史失败任务应由当前模型配置恢复",
+    );
+    const taskId = await organizeRecord(app, record.id);
+
+    await waitForAiTask(app, taskId);
+    const failed = await waitForLatestAutomaticScan(app, "failed");
+    const latestConfiguration = await activateConfiguration(app, "recovery");
+
+    failCandidateGeneration = false;
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/v1/concept-candidate-discovery/full",
+    });
+
+    expect(started.statusCode).toBe(202);
+    expect(started.json()).toEqual({
+      coveredCount: 3,
+      enqueuedCount: 1,
+    });
+
+    const recovered = await waitForAutomaticScan(app, failed.id, "succeeded");
+
+    expect(recovered.model).toEqual({
+      configurationVersion: latestConfiguration.version,
+      name: latestConfiguration.textModel,
+    });
+    expect(generateConceptCandidate.mock.calls.at(-1)?.[0]).toMatchObject({
+      baseUrl: latestConfiguration.textBaseUrl,
+      configurationVersion: latestConfiguration.version,
+      model: latestConfiguration.textModel,
+    });
   });
 });
 
@@ -248,7 +290,62 @@ async function waitForAutomaticScanCount(
   throw new Error(`Expected ${expectedCount} completed automatic scans`);
 }
 
-async function activateConfiguration(app: FastifyInstance): Promise<void> {
+type AutomaticScan = {
+  id: string;
+  model: { configurationVersion: number; name: string };
+  origin: string;
+  status: string;
+};
+
+async function waitForLatestAutomaticScan(
+  app: FastifyInstance,
+  expectedStatus: string,
+): Promise<AutomaticScan> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/concept-candidate-scans?scope=all",
+    });
+    const scan = (response.json() as { items: AutomaticScan[] }).items.find(
+      ({ origin, status }) =>
+        origin === "automatic" && status === expectedStatus,
+    );
+
+    if (scan) {
+      return scan;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error(`Expected a ${expectedStatus} automatic scan`);
+}
+
+async function waitForAutomaticScan(
+  app: FastifyInstance,
+  scanId: string,
+  expectedStatus: string,
+): Promise<AutomaticScan> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/concept-candidate-scans/${scanId}`,
+    });
+    const scan = (response.json() as { scan: AutomaticScan }).scan;
+
+    if (scan.status === expectedStatus) {
+      return scan;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error(`Expected automatic scan ${scanId} to become ${expectedStatus}`);
+}
+
+async function activateConfiguration(app: FastifyInstance, marker: string) {
+  const textBaseUrl = `http://127.0.0.1:9/full-concept-${marker}-text/v1`;
+  const textModel = `full-concept-${marker}-text`;
   expect(
     (
       await app.inject({
@@ -256,14 +353,14 @@ async function activateConfiguration(app: FastifyInstance): Promise<void> {
         url: "/api/v1/model-config/draft",
         payload: {
           text: {
-            baseUrl: "http://127.0.0.1:9/full-concept-text/v1",
-            model: "full-concept-text",
-            apiKey: "full-concept-text-key",
+            baseUrl: textBaseUrl,
+            model: textModel,
+            apiKey: `full-concept-${marker}-text-key`,
           },
           embedding: {
-            baseUrl: "http://127.0.0.1:9/full-concept-embedding/v1",
-            model: "full-concept-embedding",
-            apiKey: "full-concept-embedding-key",
+            baseUrl: `http://127.0.0.1:9/full-concept-${marker}-embedding/v1`,
+            model: `full-concept-${marker}-embedding`,
+            apiKey: `full-concept-${marker}-embedding-key`,
           },
         },
       })
@@ -281,12 +378,15 @@ async function activateConfiguration(app: FastifyInstance): Promise<void> {
     ).toBe(200);
   }
 
-  expect(
-    (
-      await app.inject({
-        method: "POST",
-        url: "/api/v1/model-config/draft/activate",
-      })
-    ).statusCode,
-  ).toBe(200);
+  const activated = await app.inject({
+    method: "POST",
+    url: "/api/v1/model-config/draft/activate",
+  });
+
+  expect(activated.statusCode).toBe(200);
+  return {
+    version: (activated.json() as { active: { version: number } }).active.version,
+    textBaseUrl,
+    textModel,
+  };
 }

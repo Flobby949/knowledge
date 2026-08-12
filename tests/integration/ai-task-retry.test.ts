@@ -196,7 +196,7 @@ describe("failed AI task public retry", () => {
         recordId: firstRecord.id,
         handling: "automatic",
         sourceTextVersion: 1,
-        modelConfigurationVersion: firstConfiguration.version,
+        modelConfigurationVersion: secondConfiguration.version,
         retryOfTaskId: failedTask.id,
       });
     }
@@ -205,9 +205,9 @@ describe("failed AI task public retry", () => {
 
     expect(retryInput).toMatchObject({
       sourceText: sourceA,
-      baseUrl: firstConfiguration.textBaseUrl,
+      baseUrl: secondConfiguration.textBaseUrl,
       model: "deepseek-v4-flash",
-      configurationVersion: firstConfiguration.version,
+      configurationVersion: secondConfiguration.version,
     });
 
     const repeatedRetry = await retryTask(app, failedTask.id);
@@ -224,7 +224,7 @@ describe("failed AI task public retry", () => {
       recordId: firstRecord.id,
       status: "succeeded",
       sourceTextVersion: 1,
-      modelConfigurationVersion: firstConfiguration.version,
+      modelConfigurationVersion: secondConfiguration.version,
       retryOfTaskId: failedTask.id,
     });
     expect(succeededTask).not.toHaveProperty("failure");

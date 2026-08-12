@@ -462,6 +462,21 @@ export function registerAiOrganizationRoutes(
           });
         }
 
+        const activeConfigurationResult = await client.query<{ version: number }>(
+          "SELECT version FROM model_configurations WHERE state = 'ACTIVE'",
+        );
+        const activeConfiguration = activeConfigurationResult.rows[0];
+
+        if (!activeConfiguration) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({
+            error: {
+              code: "MODEL_CONFIG_REQUIRED",
+              message: "请先启用完整的模型配置。",
+            },
+          });
+        }
+
         const existingResult = await client.query<ObservableAiTaskRow>(
           `SELECT task.*,
                   revision.revision_number AS source_text_version
@@ -475,8 +490,27 @@ export function registerAiOrganizationRoutes(
         const existingTask = existingResult.rows[0];
 
         if (existingTask) {
+          const refreshedResult = await client.query<AiTaskRow>(
+            `UPDATE ai_tasks
+                SET model_config_version = $2
+              WHERE id = $1
+                AND status = 'QUEUED'
+            RETURNING *`,
+            [existingTask.id, activeConfiguration.version],
+          );
+          const refreshedTask = refreshedResult.rows[0];
+
           await client.query("COMMIT");
-          return reply.code(202).send({ task: publicTask(existingTask) });
+          return reply.code(202).send({
+            task: publicTask(
+              refreshedTask
+                ? {
+                    ...refreshedTask,
+                    source_text_version: existingTask.source_text_version,
+                  }
+                : existingTask,
+            ),
+          });
         }
 
         const retryResult = await client.query<AiTaskRow>(
@@ -492,7 +526,7 @@ export function registerAiOrganizationRoutes(
           [
             failedTask.record_id,
             failedTask.fragment_revision_id,
-            failedTask.model_config_version,
+            activeConfiguration.version,
             failedTask.handling,
             failedTask.analysis_prompt,
             failedTask.id,
@@ -1311,13 +1345,14 @@ async function processTask(options: {
     const started = await pool.query<TaskSourceRow>(
       `UPDATE ai_tasks AS task
           SET status = 'RUNNING',
+              model_config_version = config.version,
               started_at = clock_timestamp()
          FROM fragment_revisions AS revision,
               model_configurations AS config
         WHERE task.id = $1
           AND task.status = 'QUEUED'
           AND revision.id = task.fragment_revision_id
-          AND config.version = task.model_config_version
+          AND config.state = 'ACTIVE'
         RETURNING task.*,
                   revision.content AS source_text,
                   config.text_base_url,

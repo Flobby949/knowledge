@@ -239,6 +239,7 @@ export function registerConceptCandidateRoutes(
     const result = await pool.query<{
       covered_count: number;
       enqueued_count: number;
+      recovered_scan_ids: string[];
     }>(
       `WITH eligible AS MATERIALIZED (
          SELECT DISTINCT analysis.id
@@ -247,6 +248,22 @@ export function registerConceptCandidateRoutes(
              ON record.current_analysis_revision_id = analysis.id
             AND record.archived_at IS NULL
           WHERE analysis.status = 'ACTIVE'
+       ), recovered AS (
+         UPDATE concept_candidate_scans AS scan
+            SET status = 'QUEUED',
+                model_configuration_version = $1,
+                text_model = $2,
+                outcome = NULL,
+                outcome_reason = NULL,
+                attempt_count = LEAST(scan.attempt_count + 1, 2)::smallint,
+                failure_code = NULL,
+                failure_message = NULL,
+                started_at = NULL,
+                completed_at = NULL
+           FROM eligible
+          WHERE scan.trigger_analysis_revision_id = eligible.id
+            AND scan.status = 'FAILED'
+         RETURNING scan.id
        ), inserted AS (
          INSERT INTO concept_candidate_discovery_queue (analysis_revision_id)
          SELECT eligible.id
@@ -259,15 +276,24 @@ export function registerConceptCandidateRoutes(
          ON CONFLICT (analysis_revision_id) DO NOTHING
          RETURNING analysis_revision_id
        )
-       SELECT (SELECT count(*)::integer FROM inserted) AS enqueued_count,
+       SELECT ((SELECT count(*) FROM inserted) +
+               (SELECT count(*) FROM recovered))::integer AS enqueued_count,
               ((SELECT count(*) FROM eligible) -
-               (SELECT count(*) FROM inserted))::integer AS covered_count`,
+               (SELECT count(*) FROM inserted) -
+               (SELECT count(*) FROM recovered))::integer AS covered_count,
+              COALESCE(
+                (SELECT array_agg(id ORDER BY id) FROM recovered),
+                ARRAY[]::uuid[]
+              ) AS recovered_scan_ids`,
+      [configuration.version, configuration.text_model],
     );
     const counts = result.rows[0] ?? {
       covered_count: 0,
       enqueued_count: 0,
+      recovered_scan_ids: [],
     };
 
+    counts.recovered_scan_ids.forEach(schedule);
     await schedulePending();
     return reply.code(202).send({
       coveredCount: counts.covered_count,
@@ -405,9 +431,22 @@ export function registerConceptCandidateRoutes(
         });
       }
 
+      const configuration = await readActiveTextConfiguration(pool);
+
+      if (!configuration) {
+        return reply.code(409).send({
+          error: {
+            code: "MODEL_CONFIG_REQUIRED",
+            message: "请先启用完整模型配置，再重试 Concept Candidate。",
+          },
+        });
+      }
+
       const retried = await pool.query<{ id: string }>(
         `UPDATE concept_candidate_scans
             SET status = 'QUEUED',
+                model_configuration_version = $2,
+                text_model = $3,
                 outcome = NULL,
                 outcome_reason = NULL,
                 attempt_count = attempt_count + 1,
@@ -419,7 +458,7 @@ export function registerConceptCandidateRoutes(
             AND status = 'FAILED'
             AND attempt_count < 2
         RETURNING id`,
-        [request.params.id],
+        [request.params.id, configuration.version, configuration.text_model],
       );
 
       if (!retried.rows[0]) {
@@ -727,29 +766,32 @@ async function processConceptCandidateScan(options: {
 }): Promise<void> {
   const { credentialSecret, generateConceptCandidate, log, pool, scanId } =
     options;
-  const claimed = await pool.query<{
-    model_configuration_version: number;
-  }>(
-    `UPDATE concept_candidate_scans
+  const claimed = await pool.query<TextConfiguration>(
+    `UPDATE concept_candidate_scans AS scan
         SET status = 'RUNNING',
+            model_configuration_version = config.version,
+            text_model = config.text_model,
             started_at = clock_timestamp()
-      WHERE id = $1 AND status = 'QUEUED'
-    RETURNING model_configuration_version`,
+       FROM model_configurations AS config
+      WHERE scan.id = $1
+        AND scan.status = 'QUEUED'
+        AND config.state = 'ACTIVE'
+    RETURNING config.version,
+              config.text_base_url,
+              config.text_model,
+              config.text_credential_ciphertext`,
     [scanId],
   );
-  const task = claimed.rows[0];
+  const configuration = claimed.rows[0];
 
-  if (!task) {
+  if (!configuration) {
     return;
   }
 
   try {
-    const [configuration, points] = await Promise.all([
-      readTextConfiguration(pool, task.model_configuration_version),
-      readCandidatePointSnapshots(pool, scanId),
-    ]);
+    const points = await readCandidatePointSnapshots(pool, scanId);
 
-    if (!configuration || points.length < 2) {
+    if (points.length < 2) {
       throw new Error("Candidate task input or model configuration is missing");
     }
 
@@ -1620,20 +1662,6 @@ async function readActiveTextConfiguration(
     `SELECT version, text_base_url, text_model, text_credential_ciphertext
        FROM model_configurations
       WHERE state = 'ACTIVE'`,
-  );
-
-  return result.rows[0] ?? null;
-}
-
-async function readTextConfiguration(
-  pool: Pool,
-  version: number,
-): Promise<TextConfiguration | null> {
-  const result = await pool.query<TextConfiguration>(
-    `SELECT version, text_base_url, text_model, text_credential_ciphertext
-       FROM model_configurations
-      WHERE version = $1`,
-    [version],
   );
 
   return result.rows[0] ?? null;

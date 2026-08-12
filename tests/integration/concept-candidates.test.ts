@@ -22,6 +22,7 @@ interface CandidateScan {
   };
   canRetry: boolean;
   id: string;
+  model: { configurationVersion: number; name: string };
   inputs: Array<{
     body: string;
     evidence: Array<{ id: string; quote: string }>;
@@ -60,6 +61,9 @@ describe("V3.1 Concept Candidates", () => {
     ],
   }));
   const generateConceptCandidate = vi.fn(async (input: {
+    baseUrl: string;
+    configurationVersion: number;
+    model: string;
     points: Array<{ id: string }>;
   }) => {
     generationStarted.resolve();
@@ -101,7 +105,7 @@ describe("V3.1 Concept Candidates", () => {
       testModelEndpoint,
     });
     await app.ready();
-    await activateConfiguration(app);
+    await activateConfiguration(app, "initial");
     firstPointId = await createCurrentKnowledgePoint(app, "事件发布");
     secondPointId = await createCurrentKnowledgePoint(app, "事件订阅");
     thirdPointId = await createCurrentKnowledgePoint(app, "事件消费");
@@ -302,6 +306,7 @@ describe("V3.1 Concept Candidates", () => {
       failure: { code: "CONCEPT_CANDIDATE_GENERATION_FAILED" },
     });
 
+    const latestConfiguration = await activateConfiguration(app, "retry");
     resetGeneration({ name: "重试后的事件协作" });
     const retried = await app.inject({
       method: "POST",
@@ -320,7 +325,16 @@ describe("V3.1 Concept Candidates", () => {
       status: "succeeded",
       attemptCount: 2,
       canRetry: false,
+      model: {
+        configurationVersion: latestConfiguration.version,
+        name: latestConfiguration.textModel,
+      },
       candidate: { name: "重试后的事件协作", reviewStatus: "pending" },
+    });
+    expect(generateConceptCandidate.mock.calls.at(-1)?.[0]).toMatchObject({
+      baseUrl: latestConfiguration.textBaseUrl,
+      configurationVersion: latestConfiguration.version,
+      model: latestConfiguration.textModel,
     });
   });
 
@@ -460,7 +474,9 @@ async function createCurrentKnowledgePoint(
   return pointId;
 }
 
-async function activateConfiguration(app: FastifyInstance): Promise<void> {
+async function activateConfiguration(app: FastifyInstance, marker: string) {
+  const textBaseUrl = `http://127.0.0.1:9/candidate-${marker}-text/v1`;
+  const textModel = `candidate-${marker}-text`;
   expect(
     (
       await app.inject({
@@ -468,14 +484,14 @@ async function activateConfiguration(app: FastifyInstance): Promise<void> {
         url: "/api/v1/model-config/draft",
         payload: {
           text: {
-            baseUrl: "http://127.0.0.1:9/candidate-text/v1",
-            model: "candidate-text",
-            apiKey: "candidate-text-key",
+            baseUrl: textBaseUrl,
+            model: textModel,
+            apiKey: `candidate-${marker}-text-key`,
           },
           embedding: {
-            baseUrl: "http://127.0.0.1:9/candidate-embedding/v1",
-            model: "candidate-embedding",
-            apiKey: "candidate-embedding-key",
+            baseUrl: `http://127.0.0.1:9/candidate-${marker}-embedding/v1`,
+            model: `candidate-${marker}-embedding`,
+            apiKey: `candidate-${marker}-embedding-key`,
           },
         },
       })
@@ -493,14 +509,17 @@ async function activateConfiguration(app: FastifyInstance): Promise<void> {
     ).toBe(200);
   }
 
-  expect(
-    (
-      await app.inject({
-        method: "POST",
-        url: "/api/v1/model-config/draft/activate",
-      })
-    ).statusCode,
-  ).toBe(200);
+  const activated = await app.inject({
+    method: "POST",
+    url: "/api/v1/model-config/draft/activate",
+  });
+
+  expect(activated.statusCode).toBe(200);
+  return {
+    version: (activated.json() as { active: { version: number } }).active.version,
+    textBaseUrl,
+    textModel,
+  };
 }
 
 async function waitForAiTask(app: FastifyInstance, taskId: string) {

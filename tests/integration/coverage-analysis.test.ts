@@ -38,6 +38,7 @@ type CoverageAnalysis = {
   id: string;
   inputChanged: boolean;
   inputKind: "knowledge_points" | "records";
+  model: { configurationVersion: number; name: string };
   possibleGaps: Array<{
     assessment: string;
     kind: "possible_gap";
@@ -119,7 +120,7 @@ describe("V2 experimental record coverage analysis", () => {
       testModelEndpoint,
     });
     await app.ready();
-    await activateConfiguration(app);
+    await activateConfiguration(app, "initial");
   }, 30_000);
 
   afterAll(async () => {
@@ -269,6 +270,7 @@ describe("V2 experimental record coverage analysis", () => {
     });
 
     await updateRecord(app, record, "COVER_RETRY_CHANGED 已经修改的当前记录");
+    const latestConfiguration = await activateConfiguration(app, "retry");
     retryShouldSucceed = true;
     const retried = await app.inject({
       method: "POST",
@@ -281,6 +283,10 @@ describe("V2 experimental record coverage analysis", () => {
         id: task.id,
         status: "queued",
         attemptCount: 2,
+        model: {
+          configurationVersion: latestConfiguration.version,
+          name: latestConfiguration.textModel,
+        },
         sources: [expect.objectContaining({ id: record.id })],
       },
     });
@@ -291,11 +297,20 @@ describe("V2 experimental record coverage analysis", () => {
       id: task.id,
       attemptCount: 2,
       inputChanged: true,
+      model: {
+        configurationVersion: latestConfiguration.version,
+        name: latestConfiguration.textModel,
+      },
       status: "succeeded",
     });
     expect(generateCoverage.mock.calls.at(-1)?.[0].records[0]?.body).toContain(
       "COVER_RETRY 校验输入",
     );
+    expect(generateCoverage.mock.calls.at(-1)?.[0]).toMatchObject({
+      baseUrl: latestConfiguration.textBaseUrl,
+      configurationVersion: latestConfiguration.version,
+      model: latestConfiguration.textModel,
+    });
   });
 
   it("does not retry a rejected model request inside one task attempt", async () => {
@@ -494,20 +509,22 @@ async function sourceSnapshot(pool: Pool, recordIds: string[]) {
   };
 }
 
-async function activateConfiguration(app: FastifyInstance): Promise<void> {
+async function activateConfiguration(app: FastifyInstance, marker: string) {
+  const textBaseUrl = `http://127.0.0.1:9/coverage-${marker}-text/v1`;
+  const textModel = `coverage-${marker}-text`;
   const draft = await app.inject({
     method: "PUT",
     url: "/api/v1/model-config/draft",
     payload: {
       text: {
-        baseUrl: "http://127.0.0.1:9/coverage-text/v1",
-        model: "coverage-text",
-        apiKey: "coverage-text-key",
+        baseUrl: textBaseUrl,
+        model: textModel,
+        apiKey: `coverage-${marker}-text-key`,
       },
       embedding: {
-        baseUrl: "http://127.0.0.1:9/coverage-embedding/v1",
-        model: "coverage-embedding",
-        apiKey: "coverage-embedding-key",
+        baseUrl: `http://127.0.0.1:9/coverage-${marker}-embedding/v1`,
+        model: `coverage-${marker}-embedding`,
+        apiKey: `coverage-${marker}-embedding-key`,
       },
     },
   });
@@ -529,6 +546,11 @@ async function activateConfiguration(app: FastifyInstance): Promise<void> {
   });
 
   expect(activated.statusCode).toBe(200);
+  return {
+    version: (activated.json() as { active: { version: number } }).active.version,
+    textBaseUrl,
+    textModel,
+  };
 }
 
 async function waitForOrganization(app: FastifyInstance, taskId: string) {

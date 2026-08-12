@@ -139,7 +139,7 @@ export function ConceptCandidatesPanel({
       } else {
         setFollowingFullDiscovery(true);
         setNotice(
-          `已登记 ${result.enqueuedCount} 份生效分析，另有 ` +
+          `已排队或恢复 ${result.enqueuedCount} 份生效分析，另有 ` +
             `${result.coveredCount} 份已覆盖；系统会按顺序生成待确认候选。`,
         );
       }

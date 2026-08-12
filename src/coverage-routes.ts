@@ -199,9 +199,22 @@ export function registerCoverageRoutes(
   app.post<{ Params: { id: string } }>(
     "/api/v1/coverage-analyses/:id/retry",
     async (request, reply) => {
+      const configuration = await readActiveTextConfiguration(pool);
+
+      if (!configuration) {
+        return reply.code(409).send({
+          error: {
+            code: "MODEL_CONFIG_REQUIRED",
+            message: "请先启用完整模型配置，再重试覆盖分析。",
+          },
+        });
+      }
+
       const result = await pool.query<{ id: string }>(
         `UPDATE coverage_analyses
             SET status = 'QUEUED',
+                model_configuration_version = $2,
+                text_model = $3,
                 framework_summary = NULL,
                 caveat = NULL,
                 failure_code = NULL,
@@ -213,7 +226,7 @@ export function registerCoverageRoutes(
             AND input_kind = 'RECORDS'
             AND status = 'FAILED'
         RETURNING id`,
-        [request.params.id],
+        [request.params.id, configuration.version, configuration.text_model],
       );
 
       if (!result.rows[0]) {
@@ -290,32 +303,34 @@ async function processCoverageAnalysis(options: {
   pool: Pool;
 }): Promise<void> {
   const { analysisId, credentialSecret, generateCoverage, log, pool } = options;
-  const claimed = await pool.query<{
-    model_configuration_version: number;
-    topic: string;
-  }>(
-    `UPDATE coverage_analyses
+  const claimed = await pool.query<TextConfiguration & { topic: string }>(
+    `UPDATE coverage_analyses AS analysis
         SET status = 'RUNNING',
+            model_configuration_version = config.version,
+            text_model = config.text_model,
             started_at = clock_timestamp()
-      WHERE id = $1
-        AND input_kind = 'RECORDS'
-        AND status = 'QUEUED'
-    RETURNING model_configuration_version, topic`,
+       FROM model_configurations AS config
+      WHERE analysis.id = $1
+        AND analysis.input_kind = 'RECORDS'
+        AND analysis.status = 'QUEUED'
+        AND config.state = 'ACTIVE'
+    RETURNING config.version,
+              config.text_base_url,
+              config.text_model,
+              config.text_credential_ciphertext,
+              analysis.topic`,
     [analysisId],
   );
-  const task = claimed.rows[0];
+  const configuration = claimed.rows[0];
 
-  if (!task) {
+  if (!configuration) {
     return;
   }
 
   try {
-    const [configuration, records] = await Promise.all([
-      readTextConfiguration(pool, task.model_configuration_version),
-      readCoverageRecordSnapshots(pool, analysisId),
-    ]);
+    const records = await readCoverageRecordSnapshots(pool, analysisId);
 
-    if (!configuration || records.length === 0) {
+    if (records.length === 0) {
       throw new Error("Coverage task input or model configuration is missing");
     }
 
@@ -335,7 +350,7 @@ async function processCoverageAnalysis(options: {
           id: record.id,
           title: record.title,
         })),
-        topic: task.topic,
+        topic: configuration.topic,
       },
       Date.now() + timeoutMs,
     );
@@ -934,20 +949,6 @@ async function readActiveTextConfiguration(
     `SELECT version, text_base_url, text_model, text_credential_ciphertext
        FROM model_configurations
       WHERE state = 'ACTIVE'`,
-  );
-
-  return result.rows[0] ?? null;
-}
-
-async function readTextConfiguration(
-  pool: Pool,
-  version: number,
-): Promise<TextConfiguration | null> {
-  const result = await pool.query<TextConfiguration>(
-    `SELECT version, text_base_url, text_model, text_credential_ciphertext
-       FROM model_configurations
-      WHERE version = $1`,
-    [version],
   );
 
   return result.rows[0] ?? null;
