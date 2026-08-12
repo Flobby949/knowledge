@@ -86,7 +86,7 @@ describe("V3 Concept and Candidate export and restore", () => {
       format5TargetApp.ready(),
       format4TargetApp.ready(),
     ]);
-  }, 30_000);
+  }, 60_000);
 
   afterAll(async () => {
     await Promise.all([

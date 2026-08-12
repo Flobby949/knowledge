@@ -247,6 +247,60 @@ describe("V3.2 knowledge network", () => {
     );
   }, 30_000);
 
+  it("includes a user-created Concept relation and excludes it after its snapshot changes", async () => {
+    const sourcePoint = await seedCurrentKnowledgePoint(pool, "用户建边起点");
+    const targetPoint = await seedCurrentKnowledgePoint(pool, "用户建边终点");
+    const source = await seedConcept(pool, "用户建边 Concept 甲", sourcePoint.id);
+    const target = await seedConcept(pool, "用户建边 Concept 乙", targetPoint.id);
+    const relation = await seedUserConceptRelation(pool, source, target);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/network/nodes/concept:${source.id}/neighbors`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const edge = (
+      response.json() as { edges: Array<{ edgeKey: string }> }
+    ).edges.find(({ edgeKey }) => edgeKey === `concept_relation:${relation.id}`);
+
+    expect(edge).toMatchObject({
+      edgeKey: `concept_relation:${relation.id}`,
+      source: `concept:${source.id}`,
+      target: `concept:${target.id}`,
+      directed: true,
+      confirmation: {
+        id: relation.id,
+        relationId: relation.id,
+      },
+      sourceRecord: expect.objectContaining({
+        id: relation.id,
+        kind: "concept_relation_confirmation",
+        origin: "user",
+        relationId: relation.id,
+      }),
+    });
+
+    const addedPoint = await seedCurrentKnowledgePoint(pool, "用户建边新增成员");
+
+    await pool.query(
+      `INSERT INTO concept_memberships
+         (concept_id, knowledge_point_id)
+       VALUES ($1, $2)`,
+      [source.id, addedPoint.id],
+    );
+    const changed = await app.inject({
+      method: "GET",
+      url: `/api/v1/network/nodes/concept:${source.id}/neighbors`,
+    });
+
+    expect(
+      (changed.json() as { edges: Array<{ edgeKey: string }> }).edges,
+    ).not.toContainEqual(
+      expect.objectContaining({ edgeKey: `concept_relation:${relation.id}` }),
+    );
+  }, 30_000);
+
   it("searches both current node types and excludes nodes outside the effective network", async () => {
     const marker = `network-search-${randomUUID().slice(0, 8)}`;
     const conceptPoint = await seedCurrentKnowledgePoint(
@@ -697,6 +751,39 @@ async function seedConceptRelation(
   }
 
   return { id: relationId, suggestionId };
+}
+
+async function seedUserConceptRelation(
+  pool: Pool,
+  source: SeededConcept,
+  target: SeededConcept,
+) {
+  const relationId = randomUUID();
+
+  await pool.query(
+    `INSERT INTO concept_relations
+       (id, confirmation_source, source_concept_id, target_concept_id,
+        source_concept_revision_id, target_concept_revision_id,
+        source_membership_fingerprint, target_membership_fingerprint,
+        relation_type, description)
+     VALUES ($1, 'USER', $2, $3, $4, $5, $6, $7,
+             'EXTENDS', '用户直接建立的扩展关系。')`,
+    [
+      relationId,
+      source.id,
+      target.id,
+      source.revisionId,
+      target.revisionId,
+      conceptMembershipFingerprint([
+        { id: source.membershipId, knowledgePointId: source.pointId },
+      ]),
+      conceptMembershipFingerprint([
+        { id: target.membershipId, knowledgePointId: target.pointId },
+      ]),
+    ],
+  );
+
+  return { id: relationId };
 }
 
 interface SeededConcept {

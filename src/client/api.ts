@@ -584,6 +584,24 @@ export interface ConceptRelationSuggestion {
   updatedAt: string;
 }
 
+export interface ConceptRelation {
+  confirmationSource:
+    | { id: string; type: "concept_relation_suggestion" }
+    | { type: "user" };
+  confirmedAt: string;
+  description: string;
+  id: string;
+  needsReview: boolean;
+  removed: boolean;
+  removedAt: string | null;
+  source: ConceptRelationEndpoint;
+  sourceConceptId: string;
+  suggestionId: string | null;
+  target: ConceptRelationEndpoint;
+  targetConceptId: string;
+  type: ConceptRelationType;
+}
+
 export type NetworkNodeType = "concept" | "knowledge_point";
 export type NetworkEdgeKind =
   | "concept_membership"
@@ -632,12 +650,13 @@ export interface NetworkEdge {
         origin: string;
       }
     | {
-        confidence: number;
+        confidence: number | null;
         confirmedAt: string;
         id: string;
         kind:
           | "concept_relation_confirmation"
           | "knowledge_relation_confirmation";
+        origin?: "ai_suggestion" | "user";
         reason: string;
         relationId: string;
       };
@@ -971,9 +990,25 @@ export async function removeConceptRelation(relationId: string): Promise<void> {
   }
 }
 
+export async function createConceptRelation(input: {
+  description: string;
+  sourceConceptId: string;
+  targetConceptId: string;
+  type: ConceptRelationType;
+}): Promise<ConceptRelation> {
+  const response = await fetch("/api/v1/concept-relations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await parseConceptResponse<{ relation: ConceptRelation }>(response);
+
+  return body.relation;
+}
+
 export async function listConceptRelations(
   conceptId?: string,
-): Promise<ConceptRelationSuggestion[]> {
+): Promise<ConceptRelation[]> {
   const search = new URLSearchParams();
 
   if (conceptId) {
@@ -984,7 +1019,7 @@ export async function listConceptRelations(
     `/api/v1/concept-relations${search.size ? `?${search.toString()}` : ""}`,
   );
   const body = await parseConceptResponse<{
-    items: ConceptRelationSuggestion[];
+    items: ConceptRelation[];
   }>(response);
 
   return body.items;

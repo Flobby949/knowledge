@@ -311,6 +311,105 @@ it("adds Concept Relations without rewriting V3.1 history", async () => {
   }
 }, 30_000);
 
+it("backfills AI confirmation snapshots and permits immutable user-authored relations", async () => {
+  const database = prepareTestDatabase({
+    migrationsThrough: "0022_concept_relations.sql",
+  });
+  const pool = new Pool({ connectionString: database.databaseUrl });
+  const client = await pool.connect();
+
+  try {
+    const seeded = await seedConceptHistory(client);
+    const suggestionId = randomUUID();
+
+    await insertSuggestion(client, seeded, {
+      id: suggestionId,
+      inputFingerprint: "9".repeat(64),
+      relationType: "EXTENDS",
+      status: "CONFIRMED",
+    });
+    await client.query(
+      `INSERT INTO concept_relations
+         (suggestion_id, source_concept_id, target_concept_id,
+          relation_type, description)
+       VALUES ($1, $2, $3, 'EXTENDS', '迁移前确认的关系。')`,
+      [suggestionId, seeded.sourceConceptId, seeded.targetConceptId],
+    );
+    const migration = await readFile(
+      new URL("../../migrations/0023_user_concept_relations.sql", import.meta.url),
+      "utf8",
+    );
+
+    await client.query(migration);
+
+    expect(
+      await client.query(
+        `SELECT confirmation_source, source_concept_revision_id,
+                target_concept_revision_id, source_membership_fingerprint,
+                target_membership_fingerprint
+           FROM concept_relations
+          WHERE suggestion_id = $1`,
+        [suggestionId],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          confirmation_source: "AI_SUGGESTION",
+          source_concept_revision_id: seeded.sourceRevisionId,
+          target_concept_revision_id: seeded.targetRevisionId,
+          source_membership_fingerprint: seeded.sourceMembershipFingerprint,
+          target_membership_fingerprint: seeded.targetMembershipFingerprint,
+        },
+      ],
+    });
+
+    const userRelationId = randomUUID();
+
+    await client.query(
+      `INSERT INTO concept_relations
+         (id, confirmation_source, source_concept_id, target_concept_id,
+          source_concept_revision_id, target_concept_revision_id,
+          source_membership_fingerprint, target_membership_fingerprint,
+          relation_type, description)
+       VALUES ($1, 'USER', $2, $3, $4, $5, $6, $7,
+               'APPLIES', '用户直接建立的关系。')`,
+      [
+        userRelationId,
+        seeded.sourceConceptId,
+        seeded.targetConceptId,
+        seeded.sourceRevisionId,
+        seeded.targetRevisionId,
+        seeded.sourceMembershipFingerprint,
+        seeded.targetMembershipFingerprint,
+      ],
+    );
+    expect(
+      await client.query(
+        `SELECT suggestion_id, confirmation_source
+           FROM concept_relations
+          WHERE id = $1`,
+        [userRelationId],
+      ),
+    ).toMatchObject({
+      rows: [{ confirmation_source: "USER", suggestion_id: null }],
+    });
+    await expect(
+      client.query(
+        `UPDATE concept_relations
+            SET source_membership_fingerprint = $2
+          WHERE id = $1`,
+        [userRelationId, "0".repeat(64)],
+      ),
+    ).rejects.toMatchObject({
+      constraint: "concept_relations_identity_immutable",
+    });
+  } finally {
+    client.release();
+    await pool.end();
+    database.dispose();
+  }
+}, 30_000);
+
 interface SeededConceptHistory {
   activityId: string;
   sourceConceptId: string;

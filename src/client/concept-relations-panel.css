@@ -685,15 +685,119 @@
   font-size: 11px;
 }
 
-.concept-direct-relations > header > a {
+.concept-direct-relation-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.concept-direct-relation-header-actions .secondary-button {
+  min-height: 34px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.concept-direct-relation-header-actions > a {
   color: var(--workspace-accent);
-  font-size: 11px;
+  font-size: 12px;
   text-decoration: none;
 }
 
-.concept-direct-relations > header > a:hover {
+.concept-direct-relation-header-actions > a:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.concept-direct-relation-builder {
+  margin-top: 14px;
+  background: color-mix(in srgb, var(--workspace-panel) 72%, transparent);
+  border: 1px solid var(--workspace-line-strong);
+  border-radius: 9px;
+}
+
+.concept-direct-relation-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  padding: 16px 16px 12px;
+}
+
+.concept-direct-relation-fields label,
+.concept-direct-relation-description,
+.concept-direct-relation-symmetric-note {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.concept-direct-relation-fields label > span,
+.concept-direct-relation-description > span,
+.concept-direct-relation-symmetric-note > span {
+  color: var(--workspace-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.concept-direct-relation-fields select,
+.concept-direct-relation-description textarea {
+  width: 100%;
+  color: var(--workspace-ink);
+  font: inherit;
+  font-size: 13px;
+  background: var(--workspace-canvas);
+  border: 1px solid var(--workspace-line-strong);
+  border-radius: 7px;
+}
+
+.concept-direct-relation-fields select {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.concept-direct-relation-symmetric-note strong {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  color: var(--workspace-accent);
+  font-size: 13px;
+}
+
+.concept-direct-relation-description {
+  padding: 0 16px 14px;
+}
+
+.concept-direct-relation-description textarea {
+  min-height: 76px;
+  padding: 9px 10px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.concept-direct-relation-builder > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 56px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--workspace-line);
+}
+
+.concept-direct-relation-builder > footer > span {
+  color: var(--workspace-muted);
+  font-size: 12px;
+}
+
+.concept-direct-relation-builder > footer > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.concept-direct-relation-builder > footer button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .concept-direct-relation-loading,
@@ -784,6 +888,14 @@
   line-height: 1.55;
 }
 
+.concept-direct-relation > p small {
+  display: block;
+  margin-top: 3px;
+  color: var(--workspace-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .concept-direct-relation > button {
   min-height: 30px;
   padding: 0 9px;
@@ -856,6 +968,12 @@
   .concept-direct-relation {
     grid-template-columns: minmax(0, .9fr) minmax(210px, 1.1fr) auto;
     gap: 12px;
+  }
+
+  .concept-direct-relations > header,
+  .concept-direct-relation-builder > footer {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

@@ -860,9 +860,15 @@ function nodeSourceLabel(node: NetworkNode): string {
 }
 
 function edgeSourceLabel(edge: NetworkEdge): string {
-  return edge.sourceRecord.kind === "concept_membership"
-    ? `Membership · ${edge.sourceRecord.origin}`
-    : `用户确认 · ${formatDate(edge.sourceRecord.confirmedAt)}`;
+  if (edge.sourceRecord.kind === "concept_membership") {
+    return `Membership · ${edge.sourceRecord.origin}`;
+  }
+
+  if (edge.sourceRecord.kind === "concept_relation_confirmation") {
+    return `${edge.sourceRecord.origin === "user" ? "用户直接建立" : "AI 建议后确认"} · ${formatDate(edge.sourceRecord.confirmedAt)}`;
+  }
+
+  return `用户确认 · ${formatDate(edge.sourceRecord.confirmedAt)}`;
 }
 
 function edgeClass(edge: NetworkEdge): "directed" | "membership" | "symmetric" {

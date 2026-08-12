@@ -47,6 +47,22 @@ interface ConceptRelationSuggestion {
   type: string;
 }
 
+interface FormalConceptRelation {
+  confirmationSource:
+    | { id: string; type: "concept_relation_suggestion" }
+    | { type: "user" };
+  description: string;
+  id: string;
+  needsReview: boolean;
+  removed: boolean;
+  source: { id: string; name: string };
+  sourceConceptId: string;
+  suggestionId: string | null;
+  target: { id: string; name: string };
+  targetConceptId: string;
+  type: string;
+}
+
 const CREDENTIAL_SECRET = "concept-relation-test-secret";
 
 describe("V3.2 Concept relation suggestions and formal relations", () => {
@@ -223,13 +239,16 @@ describe("V3.2 Concept relation suggestions and formal relations", () => {
       method: "GET",
       url: `/api/v1/concept-relations?conceptId=${first.conceptId}`,
     });
-    const historical = filtered.json<{ items: ConceptRelationSuggestion[] }>();
+    const historical = filtered.json<{ items: FormalConceptRelation[] }>();
 
     expect(filtered.statusCode).toBe(200);
     expect(historical.items).toHaveLength(1);
     expect(historical.items[0]).toMatchObject({
-      status: "removed",
-      relation: { removed: true },
+      confirmationSource: {
+        id: pending?.id,
+        type: "concept_relation_suggestion",
+      },
+      removed: true,
     });
 
     await resetDatabase(pool).then((version) => {
@@ -254,6 +273,141 @@ describe("V3.2 Concept relation suggestions and formal relations", () => {
     expect(rejected.json()).toMatchObject({
       suggestion: { status: "rejected", canDecide: false },
     });
+  });
+
+  it("lets a user create, list, and remove a formal Concept relation directly", async () => {
+    const first = await seedConcept(pool, configurationVersion, {
+      embedding: [1, 0],
+      id: "00000000-0000-4000-8000-000000000091",
+      name: "手动甲",
+    });
+    const second = await seedConcept(pool, configurationVersion, {
+      embedding: [0, 1],
+      id: "00000000-0000-4000-8000-000000000019",
+      name: "手动乙",
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/concept-relations",
+      payload: {
+        sourceConceptId: first.conceptId,
+        targetConceptId: second.conceptId,
+        type: "similar",
+        description: "用户确认两者处理的是同一类一致性问题。",
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const relation = created.json<{ relation: FormalConceptRelation }>().relation;
+
+    expect(relation).toMatchObject({
+      confirmationSource: { type: "user" },
+      description: "用户确认两者处理的是同一类一致性问题。",
+      needsReview: false,
+      removed: false,
+      sourceConceptId: second.conceptId,
+      suggestionId: null,
+      targetConceptId: first.conceptId,
+      type: "similar",
+    });
+
+    const directed = await app.inject({
+      method: "POST",
+      url: "/api/v1/concept-relations",
+      payload: {
+        sourceConceptId: first.conceptId,
+        targetConceptId: second.conceptId,
+        type: "extends",
+        description: "手动甲扩展手动乙。",
+      },
+    });
+
+    expect(directed.statusCode).toBe(201);
+    expect(directed.json()).toMatchObject({
+      relation: {
+        sourceConceptId: first.conceptId,
+        targetConceptId: second.conceptId,
+        type: "extends",
+      },
+    });
+
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/api/v1/concept-relations",
+      payload: {
+        sourceConceptId: second.conceptId,
+        targetConceptId: first.conceptId,
+        type: "similar",
+        description: "重复关系。",
+      },
+    });
+
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json()).toMatchObject({
+      error: { code: "CONCEPT_RELATION_CONFLICT" },
+    });
+
+    const filtered = await app.inject({
+      method: "GET",
+      url: `/api/v1/concept-relations?conceptId=${first.conceptId}`,
+    });
+
+    expect(filtered.statusCode).toBe(200);
+    expect(filtered.json<{ items: FormalConceptRelation[] }>().items).toHaveLength(2);
+
+    const removed = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/concept-relations/${relation.id}`,
+    });
+
+    expect(removed.statusCode).toBe(204);
+    const history = await app.inject({
+      method: "GET",
+      url: `/api/v1/concept-relations?conceptId=${first.conceptId}`,
+    });
+    const removedRelation = history
+      .json<{ items: FormalConceptRelation[] }>()
+      .items.find(({ id }) => id === relation.id);
+
+    expect(removedRelation).toMatchObject({
+      confirmationSource: { type: "user" },
+      removed: true,
+    });
+
+    await pool.query(
+      `UPDATE concepts
+          SET archived_at = clock_timestamp(),
+              updated_at = clock_timestamp()
+        WHERE id = $1`,
+      [second.conceptId],
+    );
+    const inactive = await app.inject({
+      method: "POST",
+      url: "/api/v1/concept-relations",
+      payload: {
+        sourceConceptId: first.conceptId,
+        targetConceptId: second.conceptId,
+        type: "applies",
+        description: "归档端点不能建立关系。",
+      },
+    });
+    const selfRelation = await app.inject({
+      method: "POST",
+      url: "/api/v1/concept-relations",
+      payload: {
+        sourceConceptId: first.conceptId,
+        targetConceptId: first.conceptId,
+        type: "similar",
+        description: "不能连接自身。",
+      },
+    });
+
+    expect(inactive.statusCode).toBe(409);
+    expect(inactive.json()).toMatchObject({
+      error: { code: "CONCEPT_RELATION_ENDPOINT_INACTIVE" },
+    });
+    expect(selfRelation.statusCode).toBe(422);
   });
 
   it("marks revision, effective Membership, and archive changes stale", async () => {

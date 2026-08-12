@@ -402,9 +402,14 @@ interface ConceptRelationSuggestionSnapshotRow extends DomainRow {
 
 interface ConceptRelationSnapshotRow extends DomainRow {
   id: string;
-  suggestion_id: string;
+  suggestion_id: string | null;
+  confirmation_source: "AI_SUGGESTION" | "USER";
   source_concept_id: string;
   target_concept_id: string;
+  source_concept_revision_id: string;
+  target_concept_revision_id: string;
+  source_membership_fingerprint: string;
+  target_membership_fingerprint: string;
   relation_type: KnowledgeRelationSnapshotType;
   description: string;
   confirmed_at: Timestamp;
@@ -2252,17 +2257,27 @@ function validateConceptRelationRow(row: DomainRow): void {
   requireExactKeys(row, [
     "id",
     "suggestion_id",
+    "confirmation_source",
     "source_concept_id",
     "target_concept_id",
+    "source_concept_revision_id",
+    "target_concept_revision_id",
+    "source_membership_fingerprint",
+    "target_membership_fingerprint",
     "relation_type",
     "description",
     "confirmed_at",
     "removed_at",
   ]);
   requireUuid(row, "id");
-  requireUuid(row, "suggestion_id");
+  requireNullableUuid(row, "suggestion_id");
+  requireEnum(row, "confirmation_source", ["AI_SUGGESTION", "USER"]);
   requireUuid(row, "source_concept_id");
   requireUuid(row, "target_concept_id");
+  requireUuid(row, "source_concept_revision_id");
+  requireUuid(row, "target_concept_revision_id");
+  requireFingerprint(row, "source_membership_fingerprint");
+  requireFingerprint(row, "target_membership_fingerprint");
   requireRelationType(row, "relation_type");
   requireNonEmptyString(row, "description");
   requireTimestamp(row, "confirmed_at");
@@ -2270,6 +2285,8 @@ function validateConceptRelationRow(row: DomainRow): void {
 
   if (
     row.source_concept_id === row.target_concept_id ||
+    (row.confirmation_source === "AI_SUGGESTION") !==
+      (row.suggestion_id !== null) ||
     (isSymmetricRelationType(row.relation_type) &&
       (row.source_concept_id as string) >= (row.target_concept_id as string)) ||
     (row.removed_at !== null &&
@@ -2542,8 +2559,8 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     "concept relation id",
   );
   assertUnique(
-    snapshot.conceptRelations,
-    (row) => row.suggestion_id,
+    snapshot.conceptRelations.filter((row) => row.suggestion_id !== null),
+    (row) => row.suggestion_id ?? row.id,
     "concept relation suggestion",
   );
   assertUnique(
@@ -2863,7 +2880,15 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   }
 
   for (const relation of snapshot.conceptRelations) {
-    const suggestion = conceptRelationSuggestions.get(relation.suggestion_id);
+    const suggestion = relation.suggestion_id
+      ? conceptRelationSuggestions.get(relation.suggestion_id)
+      : undefined;
+    const sourceRevision = conceptRevisions.get(
+      relation.source_concept_revision_id,
+    );
+    const targetRevision = conceptRevisions.get(
+      relation.target_concept_revision_id,
+    );
     const endpointsMatch = isSymmetricRelationType(relation.relation_type)
       ? (relation.source_concept_id === suggestion?.source_concept_id &&
           relation.target_concept_id === suggestion?.target_concept_id) ||
@@ -2872,14 +2897,24 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
       : relation.source_concept_id === suggestion?.source_concept_id &&
         relation.target_concept_id === suggestion?.target_concept_id;
 
+    const suggestionValid =
+      relation.confirmation_source === "USER"
+        ? !suggestion && relation.suggestion_id === null
+        : Boolean(
+            suggestion &&
+              endpointsMatch &&
+              (suggestion.status === "CONFIRMED" ||
+                suggestion.status === "REMOVED") &&
+              (suggestion.status === "CONFIRMED") ===
+                (relation.removed_at === null),
+          );
+
     if (
-      !suggestion ||
-      !endpointsMatch ||
+      !suggestionValid ||
       !concepts.has(relation.source_concept_id) ||
       !concepts.has(relation.target_concept_id) ||
-      (suggestion.status === "CONFIRMED" && relation.removed_at !== null) ||
-      (suggestion.status === "REMOVED" && relation.removed_at === null) ||
-      (suggestion.status !== "CONFIRMED" && suggestion.status !== "REMOVED")
+      sourceRevision?.concept_id !== relation.source_concept_id ||
+      targetRevision?.concept_id !== relation.target_concept_id
     ) {
       throw new Error("concept relation reference is invalid");
     }
@@ -3638,8 +3673,13 @@ async function restoreSnapshot(
   await insertRows(client, "concept_relations", [
     "id",
     "suggestion_id",
+    "confirmation_source",
     "source_concept_id",
     "target_concept_id",
+    "source_concept_revision_id",
+    "target_concept_revision_id",
+    "source_membership_fingerprint",
+    "target_membership_fingerprint",
     "relation_type",
     "description",
     "confirmed_at",

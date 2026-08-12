@@ -93,6 +93,26 @@ interface ConceptRelationSuggestionRow {
   updated_at: Timestamp;
 }
 
+interface ConceptRelationRow {
+  confirmation_source: "AI_SUGGESTION" | "USER";
+  confirmed_at: Timestamp;
+  description: string;
+  id: string;
+  relation_type: ConceptRelationType;
+  removed_at: Timestamp | null;
+  source_concept_id: string;
+  source_concept_revision_id: string;
+  source_description: string;
+  source_membership_fingerprint: string;
+  source_name: string;
+  suggestion_id: string | null;
+  target_concept_id: string;
+  target_concept_revision_id: string;
+  target_description: string;
+  target_membership_fingerprint: string;
+  target_name: string;
+}
+
 const CONCEPT_RELATION_RECALL_THRESHOLD = 0.65;
 const MAX_CONCEPT_RELATION_CANDIDATES = 12;
 const MAX_SCANNED_CONCEPTS = 100;
@@ -289,6 +309,80 @@ export function registerConceptRelationRoutes(
     },
   );
 
+  app.post<{
+    Body: {
+      description?: unknown;
+      sourceConceptId?: unknown;
+      targetConceptId?: unknown;
+      type?: unknown;
+    };
+  }>("/api/v1/concept-relations", async (request, reply) => {
+    const sourceConceptId = request.body?.sourceConceptId;
+    const targetConceptId = request.body?.targetConceptId;
+    const type = request.body?.type;
+    const description = request.body?.description;
+
+    if (
+      !isUuid(sourceConceptId) ||
+      !isUuid(targetConceptId) ||
+      sourceConceptId === targetConceptId ||
+      typeof type !== "string" ||
+      !PUBLIC_CONCEPT_RELATION_TYPES.has(
+        type as GeneratedConceptRelationType,
+      ) ||
+      typeof description !== "string" ||
+      !description.trim() ||
+      description.trim().length > 2_000
+    ) {
+      return reply.code(422).send({
+        error: {
+          code: "CONCEPT_RELATION_CREATION_INVALID",
+          message: "请选择两个不同的 Concept、关系类型，并填写关系描述。",
+        },
+      });
+    }
+
+    const outcome = await createUserConceptRelation(pool, {
+      description: description.trim(),
+      sourceConceptId,
+      targetConceptId,
+      type: databaseConceptRelationType(type as GeneratedConceptRelationType),
+    });
+
+    if (outcome.kind !== "created") {
+      const responses = {
+        conflict: {
+          status: 409,
+          code: "CONCEPT_RELATION_CONFLICT",
+          message: "相同类型的有效 Concept 关系已经存在。",
+        },
+        inactive: {
+          status: 409,
+          code: "CONCEPT_RELATION_ENDPOINT_INACTIVE",
+          message: "已归档的 Concept 不能建立新关系。",
+        },
+        not_found: {
+          status: 404,
+          code: "CONCEPT_RELATION_ENDPOINT_NOT_FOUND",
+          message: "要关联的 Concept 不存在。",
+        },
+      } as const;
+      const response = responses[outcome.kind];
+
+      return reply.code(response.status).send({
+        error: { code: response.code, message: response.message },
+      });
+    }
+
+    const relation = await readConceptRelation(pool, outcome.id);
+
+    if (!relation) {
+      throw new Error("Created Concept relation could not be read");
+    }
+
+    return reply.code(201).send({ relation });
+  });
+
   app.delete<{ Params: { id: string } }>(
     "/api/v1/concept-relations/:id",
     async (request, reply) => {
@@ -300,7 +394,7 @@ export function registerConceptRelationRoutes(
 
       try {
         await client.query("BEGIN");
-        const result = await client.query<{ suggestion_id: string }>(
+        const result = await client.query<{ suggestion_id: string | null }>(
           `SELECT suggestion_id
              FROM concept_relations
             WHERE id = $1
@@ -315,13 +409,15 @@ export function registerConceptRelationRoutes(
           return conceptRelationNotFound(reply);
         }
 
-        await client.query(
-          `UPDATE concept_relation_suggestions
-              SET status = 'REMOVED',
-                  updated_at = clock_timestamp()
-            WHERE id = $1`,
-          [relation.suggestion_id],
-        );
+        if (relation.suggestion_id) {
+          await client.query(
+            `UPDATE concept_relation_suggestions
+                SET status = 'REMOVED',
+                    updated_at = clock_timestamp()
+              WHERE id = $1`,
+            [relation.suggestion_id],
+          );
+        }
         await client.query(
           `UPDATE concept_relations
               SET removed_at = clock_timestamp()
@@ -727,6 +823,111 @@ async function confirmConceptRelationSuggestion(
   }
 }
 
+async function createUserConceptRelation(
+  pool: Pool,
+  input: {
+    description: string;
+    sourceConceptId: string;
+    targetConceptId: string;
+    type: ConceptRelationType;
+  },
+): Promise<
+  | { id: string; kind: "created" }
+  | { kind: "conflict" | "inactive" | "not_found" }
+> {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const endpointIds = [input.sourceConceptId, input.targetConceptId].sort();
+    const locked = await client.query<{ id: string }>(
+      `SELECT id
+         FROM concepts
+        WHERE id = ANY($1::uuid[])
+        ORDER BY id
+        FOR UPDATE`,
+      [endpointIds],
+    );
+
+    if (locked.rows.length !== 2) {
+      await client.query("ROLLBACK");
+      return { kind: "not_found" };
+    }
+
+    await client.query(
+      `SELECT revision.id
+         FROM concepts AS concept
+         INNER JOIN concept_revisions AS revision
+           ON revision.id = concept.current_revision_id
+          AND revision.concept_id = concept.id
+        WHERE concept.id = ANY($1::uuid[])
+        ORDER BY concept.id
+        FOR SHARE OF revision`,
+      [endpointIds],
+    );
+    const concepts = conceptStateMap(
+      await readConceptStates(client, {
+        ids: endpointIds,
+        lockMembershipDependencies: true,
+      }),
+    );
+    let source = concepts.get(input.sourceConceptId);
+    let target = concepts.get(input.targetConceptId);
+
+    if (!source || !target) {
+      await client.query("ROLLBACK");
+      return { kind: "not_found" };
+    }
+
+    if (source.archived || target.archived) {
+      await client.query("ROLLBACK");
+      return { kind: "inactive" };
+    }
+
+    if (
+      SYMMETRIC_CONCEPT_RELATION_TYPES.has(input.type) &&
+      source.id.localeCompare(target.id) > 0
+    ) {
+      [source, target] = [target, source];
+    }
+
+    const id = randomUUID();
+
+    await client.query(
+      `INSERT INTO concept_relations
+         (id, confirmation_source, source_concept_id, target_concept_id,
+          source_concept_revision_id, target_concept_revision_id,
+          source_membership_fingerprint, target_membership_fingerprint,
+          relation_type, description)
+       VALUES ($1, 'USER', $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        id,
+        source.id,
+        target.id,
+        source.revisionId,
+        target.revisionId,
+        source.membershipFingerprint,
+        target.membershipFingerprint,
+        input.type,
+        input.description,
+      ],
+    );
+    await client.query("COMMIT");
+
+    return { id, kind: "created" };
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    if (isConceptRelationConflict(error)) {
+      return { kind: "conflict" };
+    }
+
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function readConceptRelationSuggestions(
   pool: Pool | PoolClient,
   section: "pending" | "resolved",
@@ -772,15 +973,99 @@ async function readConceptRelations(pool: Pool, conceptId?: string) {
     ? `AND (relation.source_concept_id = $1
             OR relation.target_concept_id = $1)`
     : "";
-  const result = await pool.query<ConceptRelationSuggestionRow>(
-    `${CONCEPT_RELATION_SUGGESTION_SELECT}
-      WHERE relation.id IS NOT NULL
+  const result = await pool.query<ConceptRelationRow>(
+    `${CONCEPT_RELATION_SELECT}
+      WHERE true
       ${filter}
       ORDER BY relation.confirmed_at DESC, relation.id DESC`,
     parameters,
   );
 
-  return publicConceptRelationSuggestions(pool, result.rows);
+  return publicConceptRelations(pool, result.rows);
+}
+
+async function readConceptRelation(pool: Pool, relationId: string) {
+  const result = await pool.query<ConceptRelationRow>(
+    `${CONCEPT_RELATION_SELECT}
+      WHERE relation.id = $1`,
+    [relationId],
+  );
+  const relations = await publicConceptRelations(pool, result.rows);
+
+  return relations[0] ?? null;
+}
+
+async function publicConceptRelations(
+  pool: Pool | PoolClient,
+  rows: ConceptRelationRow[],
+) {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const conceptIds = [
+    ...new Set(
+      rows.flatMap((row) => [
+        row.source_concept_id,
+        row.target_concept_id,
+      ]),
+    ),
+  ];
+  const concepts = conceptStateMap(
+    await readConceptStates(pool, { ids: conceptIds }),
+  );
+
+  return rows.map((row) => {
+    const source = concepts.get(row.source_concept_id);
+    const target = concepts.get(row.target_concept_id);
+    const needsReview =
+      conceptChangedSinceSuggestion(
+        source,
+        row.source_concept_revision_id,
+        row.source_membership_fingerprint,
+      ) ||
+      conceptChangedSinceSuggestion(
+        target,
+        row.target_concept_revision_id,
+        row.target_membership_fingerprint,
+      );
+
+    return {
+      id: row.id,
+      suggestionId: row.suggestion_id,
+      confirmationSource:
+        row.confirmation_source === "USER"
+          ? ({ type: "user" } as const)
+          : ({
+              type: "concept_relation_suggestion" as const,
+              id: row.suggestion_id ?? row.id,
+            } as const),
+      type: publicConceptRelationType(row.relation_type),
+      description: row.description,
+      sourceConceptId: row.source_concept_id,
+      targetConceptId: row.target_concept_id,
+      source: publicConceptEndpoint(
+        row.source_concept_id,
+        row.source_concept_revision_id,
+        row.source_name,
+        row.source_description,
+        row.source_membership_fingerprint,
+        source,
+      ),
+      target: publicConceptEndpoint(
+        row.target_concept_id,
+        row.target_concept_revision_id,
+        row.target_name,
+        row.target_description,
+        row.target_membership_fingerprint,
+        target,
+      ),
+      confirmedAt: asIsoString(row.confirmed_at),
+      removedAt: nullableIsoString(row.removed_at),
+      removed: row.removed_at !== null,
+      needsReview,
+    };
+  });
 }
 
 async function publicConceptRelationSuggestions(
@@ -1414,6 +1699,31 @@ function conceptRelationNotFound(reply: {
     },
   });
 }
+
+const CONCEPT_RELATION_SELECT = `SELECT relation.id,
+       relation.suggestion_id,
+       relation.confirmation_source,
+       relation.source_concept_id,
+       relation.target_concept_id,
+       relation.source_concept_revision_id,
+       relation.target_concept_revision_id,
+       relation.source_membership_fingerprint,
+       relation.target_membership_fingerprint,
+       relation.relation_type,
+       relation.description,
+       relation.confirmed_at,
+       relation.removed_at,
+       source_revision.display_name AS source_name,
+       source_revision.description AS source_description,
+       target_revision.display_name AS target_name,
+       target_revision.description AS target_description
+  FROM concept_relations AS relation
+  INNER JOIN concept_revisions AS source_revision
+    ON source_revision.id = relation.source_concept_revision_id
+   AND source_revision.concept_id = relation.source_concept_id
+  INNER JOIN concept_revisions AS target_revision
+    ON target_revision.id = relation.target_concept_revision_id
+   AND target_revision.concept_id = relation.target_concept_id`;
 
 const CONCEPT_RELATION_SUGGESTION_SELECT = `SELECT suggestion.id,
        suggestion.pair_key,

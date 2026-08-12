@@ -173,6 +173,72 @@ test.describe("Concept workspace", () => {
     );
   });
 
+  test("directly connects two Concepts and exposes the edge in the knowledge network", async ({
+    page,
+    request,
+  }) => {
+    const marker = randomUUID().slice(0, 8);
+    const pointIds = await seedTwoKnowledgePoints(request, marker);
+    const sourceName = `一致性原则 ${marker}`;
+    const targetName = `事务边界 ${marker}`;
+    const conceptIds: string[] = [];
+
+    for (const [name, description] of [
+      [sourceName, "定义跨组件观察到一致结果的约束。"],
+      [targetName, "定义一组写入共同提交或回滚的边界。"],
+    ] as const) {
+      const created = await request.post(appUrl("/api/v1/concepts"), {
+        data: { name, description, knowledgePointIds: pointIds },
+      });
+
+      expect(created.status()).toBe(201);
+      conceptIds.push(
+        ((await created.json()) as { detail: { concept: { id: string } } }).detail
+          .concept.id,
+      );
+    }
+
+    await page.goto(appUrl(`/concepts?concept=${encodeURIComponent(conceptIds[0]!)}`));
+    const main = page.getByRole("main", { name: "知识概念" });
+    const detail = main.getByRole("region", { name: "Concept 详情" });
+    const relations = detail.getByRole("region", { name: "Concept 直接关系" });
+
+    await expect(detail.getByRole("heading", { name: sourceName })).toBeVisible();
+    await relations.getByRole("button", { name: "关联 Concept" }).click();
+    const builder = relations.getByRole("form", { name: "建立 Concept 关系" });
+
+    await builder.getByLabel("关联的 Concept").selectOption({ label: targetName });
+    await builder.getByLabel("新 Concept 关系类型").selectOption("extends");
+    await expect(builder.getByLabel("新 Concept 关系方向")).toHaveValue("outward");
+    await builder
+      .getByLabel("新 Concept 关系描述")
+      .fill("事务边界扩展了一致性原则在写入阶段的具体约束。");
+    const createdRelation = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/v1/concept-relations",
+    );
+
+    await builder.getByRole("button", { name: "建立正式关系" }).click();
+    expect((await createdRelation).status()).toBe(201);
+    await expect(
+      relations.getByText("正式 Concept 关系已建立，并已进入知识网络。"),
+    ).toBeVisible();
+    await expect(relations.getByText("用户直接建立", { exact: true })).toBeVisible();
+    await expect(
+      relations.getByRole("link", { name: `打开邻居 Concept：${targetName}` }),
+    ).toBeVisible();
+
+    await page.goto(appUrl("/network?view=list"));
+    const network = page.getByRole("main", { name: "知识网络" });
+    const edge = network
+      .getByRole("region", { name: "真实关系列表" })
+      .getByRole("listitem")
+      .filter({ hasText: `${sourceName} → ${targetName}` });
+
+    await expect(edge).toContainText("扩展 · 用户直接建立");
+  });
+
   test("reviews, confirms, navigates, and removes a Concept Relation", async ({
     page,
     request,

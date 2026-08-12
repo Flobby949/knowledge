@@ -602,7 +602,11 @@ function ConceptDetailWorkspace({
         />
       ) : null}
 
-      <ConceptRelationsForConcept conceptId={concept.id} />
+      <ConceptRelationsForConcept
+        canCreate={concept.lifecycle === "active"}
+        conceptId={concept.id}
+        conceptName={concept.name}
+      />
 
       <section aria-label="Concept Membership" className="concept-membership-section">
         <header>

@@ -85,10 +85,11 @@ interface NetworkEdge {
         origin: string;
       }
     | {
-        confidence: number;
+        confidence: number | null;
         confirmedAt: string;
         id: string;
         kind: "concept_relation_confirmation";
+        origin: "ai_suggestion" | "user";
         relationId: string;
         reason: string;
       }
@@ -1222,18 +1223,19 @@ async function readConceptRelationEdges(
   }
 
   const result = await database.query<{
-    confidence: number;
+    confidence: number | null;
+    confirmation_source: "AI_SUGGESTION" | "USER";
     confirmed_at: Date | string;
     description: string;
     id: string;
-    reason: string;
+    reason: string | null;
     relation_type: ConceptRelationType;
     source_id: string;
     source_revision_id: string;
     source_snapshot_concept_id: string;
     source_snapshot_membership_fingerprint: string;
     source_snapshot_revision_id: string;
-    suggestion_id: string;
+    suggestion_id: string | null;
     target_id: string;
     target_revision_id: string;
     target_snapshot_concept_id: string;
@@ -1247,22 +1249,23 @@ async function readConceptRelationEdges(
             relation.relation_type,
             relation.description,
             relation.confirmed_at,
+            relation.confirmation_source,
             suggestion.reason,
             suggestion.confidence,
-            suggestion.source_concept_id AS source_snapshot_concept_id,
-            suggestion.target_concept_id AS target_snapshot_concept_id,
-            suggestion.source_concept_revision_id
+            relation.source_concept_id AS source_snapshot_concept_id,
+            relation.target_concept_id AS target_snapshot_concept_id,
+            relation.source_concept_revision_id
               AS source_snapshot_revision_id,
-            suggestion.target_concept_revision_id
+            relation.target_concept_revision_id
               AS target_snapshot_revision_id,
-            suggestion.source_membership_fingerprint
+            relation.source_membership_fingerprint
               AS source_snapshot_membership_fingerprint,
-            suggestion.target_membership_fingerprint
+            relation.target_membership_fingerprint
               AS target_snapshot_membership_fingerprint,
             source_concept.current_revision_id AS source_revision_id,
             target_concept.current_revision_id AS target_revision_id
        FROM concept_relations AS relation
-       INNER JOIN concept_relation_suggestions AS suggestion
+       LEFT JOIN concept_relation_suggestions AS suggestion
          ON suggestion.id = relation.suggestion_id
         AND suggestion.status = 'CONFIRMED'
        INNER JOIN concepts AS source_concept
@@ -1272,6 +1275,7 @@ async function readConceptRelationEdges(
          ON target_concept.id = relation.target_concept_id
         AND target_concept.archived_at IS NULL
       WHERE relation.removed_at IS NULL
+        AND (relation.confirmation_source = 'USER' OR suggestion.id IS NOT NULL)
         AND (($3::boolean
               AND relation.source_concept_id = ANY($1::uuid[])
               AND relation.target_concept_id = ANY($1::uuid[]))
@@ -1412,19 +1416,44 @@ async function readMembershipFingerprints(
 function relationEdge(
   kind: "concept_relation" | "knowledge_relation",
   row: {
-    confidence: number;
+    confidence: number | null;
+    confirmation_source?: "AI_SUGGESTION" | "USER";
     confirmed_at: Date | string;
     description: string;
     id: string;
-    reason: string;
+    reason: string | null;
     relation_type: ConceptRelationType;
     source_id: string;
-    suggestion_id: string;
+    suggestion_id: string | null;
     target_id: string;
   },
 ): NetworkEdge {
   const confirmedAt = isoDate(row.confirmed_at);
   const nodeType = kind === "concept_relation" ? "concept" : "knowledge_point";
+  const confirmationId = row.suggestion_id ?? row.id;
+  const origin =
+    kind === "concept_relation" && row.confirmation_source === "USER"
+      ? "user"
+      : "ai_suggestion";
+  const sourceRecord: NetworkEdge["sourceRecord"] =
+    kind === "concept_relation"
+      ? {
+          kind: "concept_relation_confirmation",
+          id: confirmationId,
+          relationId: row.id,
+          confirmedAt,
+          reason: row.reason ?? "由用户直接建立正式关系。",
+          confidence: row.confidence,
+          origin,
+        }
+      : {
+          kind: "knowledge_relation_confirmation",
+          id: confirmationId,
+          relationId: row.id,
+          confirmedAt,
+          reason: row.reason ?? "用户确认的知识关系。",
+          confidence: row.confidence ?? 0,
+        };
 
   return {
     edgeKey: `${kind}:${row.id}`,
@@ -1435,21 +1464,11 @@ function relationEdge(
     directed: !SYMMETRIC_CONCEPT_RELATION_TYPES.has(row.relation_type),
     description: row.description,
     confirmation: {
-      id: row.suggestion_id,
+      id: confirmationId,
       relationId: row.id,
       confirmedAt,
     },
-    sourceRecord: {
-      kind:
-        kind === "concept_relation"
-          ? "concept_relation_confirmation"
-          : "knowledge_relation_confirmation",
-      id: row.suggestion_id,
-      relationId: row.id,
-      confirmedAt,
-      reason: row.reason,
-      confidence: row.confidence,
-    },
+    sourceRecord,
   };
 }
 

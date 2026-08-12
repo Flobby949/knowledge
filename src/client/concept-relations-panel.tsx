@@ -10,14 +10,18 @@ import { Link } from "react-router-dom";
 
 import {
   confirmConceptRelationSuggestion,
+  createConceptRelation,
   listConceptRelations,
   listConceptRelationSuggestions,
+  listConcepts,
   rejectConceptRelationSuggestion,
   removeConceptRelation,
   scanConceptRelationSuggestions,
+  type ConceptRelation,
   type ConceptRelationEndpoint,
   type ConceptRelationSuggestion,
   type ConceptRelationType,
+  type ConceptSummary,
 } from "./api.js";
 import "./concept-relations-panel.css";
 
@@ -503,16 +507,44 @@ function ConceptEndpoint({
   );
 }
 
-export function ConceptRelationsForConcept({ conceptId }: { conceptId: string }) {
-  const [items, setItems] = useState<ConceptRelationSuggestion[]>([]);
+export function ConceptRelationsForConcept({
+  canCreate,
+  conceptId,
+  conceptName,
+}: {
+  canCreate: boolean;
+  conceptId: string;
+  conceptName: string;
+}) {
+  const [items, setItems] = useState<ConceptRelation[]>([]);
+  const [availableConcepts, setAvailableConcepts] = useState<ConceptSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
+  const [draft, setDraft] = useState<{
+    description: string;
+    direction: "inward" | "outward";
+    targetConceptId: string;
+    type: ConceptRelationType;
+  }>({
+    description: "",
+    direction: "outward",
+    targetConceptId: "",
+    type: "similar",
+  });
 
   useEffect(() => {
     setNotice("");
+    setCreating(false);
+    setDraft({
+      description: "",
+      direction: "outward",
+      targetConceptId: "",
+      type: "similar",
+    });
   }, [conceptId]);
 
   useEffect(() => {
@@ -542,26 +574,100 @@ export function ConceptRelationsForConcept({ conceptId }: { conceptId: string })
     };
   }, [conceptId, reload]);
 
-  const activeItems = items.filter(
-    ({ relation }) => relation && !relation.removed,
-  );
-  const removedItems = items.filter(({ relation }) => relation?.removed);
-
-  async function remove(suggestion: ConceptRelationSuggestion) {
-    if (!suggestion.relation) {
+  useEffect(() => {
+    if (!creating) {
       return;
     }
 
-    setBusy(suggestion.relation.id);
+    let active = true;
+
+    setBusy("targets");
+    setError("");
+    void listConcepts({ archive: "active" })
+      .then((concepts) => {
+        if (!active) {
+          return;
+        }
+
+        const available = concepts.filter(({ id }) => id !== conceptId);
+
+        setAvailableConcepts(available);
+        setDraft((current) => ({
+          ...current,
+          targetConceptId:
+            available.some(({ id }) => id === current.targetConceptId)
+              ? current.targetConceptId
+              : available[0]?.id ?? "",
+        }));
+      })
+      .catch((caught: unknown) => {
+        if (active) {
+          setError(messageFrom(caught, "可关联的 Concept 暂时无法载入。"));
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setBusy("");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [conceptId, creating]);
+
+  const activeItems = items.filter(({ removed }) => !removed);
+  const removedItems = items.filter(({ removed }) => removed);
+  const selectedTarget = availableConcepts.find(
+    ({ id }) => id === draft.targetConceptId,
+  );
+  const symmetric = SYMMETRIC_TYPES.has(draft.type);
+
+  async function remove(relation: ConceptRelation) {
+    setBusy(relation.id);
     setError("");
     setNotice("");
 
     try {
-      await removeConceptRelation(suggestion.relation.id);
-      setNotice("正式关系已撤销，确认历史仍可回看。");
+      await removeConceptRelation(relation.id);
+      setNotice("正式关系已撤销，建立与撤销历史仍可回看。");
       setReload((value) => value + 1);
     } catch (caught) {
       setError(messageFrom(caught, "正式关系撤销失败，请重试。"));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function create() {
+    if (!draft.targetConceptId || !draft.description.trim()) {
+      return;
+    }
+
+    const outward = symmetric || draft.direction === "outward";
+
+    setBusy("create");
+    setError("");
+    setNotice("");
+
+    try {
+      await createConceptRelation({
+        description: draft.description.trim(),
+        sourceConceptId: outward ? conceptId : draft.targetConceptId,
+        targetConceptId: outward ? draft.targetConceptId : conceptId,
+        type: draft.type,
+      });
+      setCreating(false);
+      setDraft({
+        description: "",
+        direction: "outward",
+        targetConceptId: "",
+        type: "similar",
+      });
+      setNotice("正式 Concept 关系已建立，并已进入知识网络。");
+      setReload((value) => value + 1);
+    } catch (caught) {
+      setError(messageFrom(caught, "Concept 关系建立失败，请重试。"));
     } finally {
       setBusy("");
     }
@@ -576,10 +682,143 @@ export function ConceptRelationsForConcept({ conceptId }: { conceptId: string })
       <header>
         <div>
           <h3>直接关系与邻居</h3>
-          <p>只显示人工确认的关系；待复核关系保留，但不会进入默认知识网络。</p>
+          <p>可直接建立，也可确认 AI 建议；待复核关系保留，但不会进入默认知识网络。</p>
         </div>
-        <Link to="/concepts?view=relations">打开关系审查</Link>
+        <div className="concept-direct-relation-header-actions">
+          {canCreate ? (
+            <button
+              aria-controls="concept-direct-relation-builder"
+              aria-expanded={creating}
+              className="secondary-button"
+              onClick={() => {
+                setCreating((current) => !current);
+                setError("");
+                setNotice("");
+              }}
+              type="button"
+            >
+              {creating ? "收起建立表单" : "关联 Concept"}
+            </button>
+          ) : null}
+          <Link to="/concepts?view=relations">打开 AI 关系审查</Link>
+        </div>
       </header>
+
+      {creating ? (
+        <form
+          aria-label="建立 Concept 关系"
+          className="concept-direct-relation-builder"
+          id="concept-direct-relation-builder"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+        >
+          <div className="concept-direct-relation-fields">
+            <label>
+              <span>关联对象</span>
+              <select
+                aria-label="关联的 Concept"
+                disabled={busy === "targets" || availableConcepts.length === 0}
+                onChange={(event) =>
+                  setDraft({ ...draft, targetConceptId: event.currentTarget.value })
+                }
+                value={draft.targetConceptId}
+              >
+                {availableConcepts.map((concept) => (
+                  <option key={concept.id} value={concept.id}>{concept.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>关系类型</span>
+              <select
+                aria-label="新 Concept 关系类型"
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    type: event.currentTarget.value as ConceptRelationType,
+                  })
+                }
+                value={draft.type}
+              >
+                {Object.entries(CONCEPT_RELATION_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            {!symmetric ? (
+              <label>
+                <span>关系方向</span>
+                <select
+                  aria-label="新 Concept 关系方向"
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      direction: event.currentTarget.value as "inward" | "outward",
+                    })
+                  }
+                  value={draft.direction}
+                >
+                  <option value="outward">
+                    {conceptName} → {selectedTarget?.name ?? "关联对象"}
+                  </option>
+                  <option value="inward">
+                    {selectedTarget?.name ?? "关联对象"} → {conceptName}
+                  </option>
+                </select>
+              </label>
+            ) : (
+              <div className="concept-direct-relation-symmetric-note">
+                <span>关系方向</span>
+                <strong>对称关系 · 两端等价可见</strong>
+              </div>
+            )}
+          </div>
+          <label className="concept-direct-relation-description">
+            <span>关系描述</span>
+            <textarea
+              aria-label="新 Concept 关系描述"
+              maxLength={2_000}
+              onChange={(event) =>
+                setDraft({ ...draft, description: event.currentTarget.value })
+              }
+              placeholder="说明两个 Concept 为什么相关，以及这条边表达什么。"
+              rows={3}
+              value={draft.description}
+            />
+          </label>
+          <footer>
+            <span>
+              {busy === "targets"
+                ? "正在读取可关联的 Concept…"
+                : availableConcepts.length === 0
+                  ? "至少还需要一个生效中的 Concept。"
+                  : "保存后立即进入默认知识网络；后续端点变化会标记待复核。"}
+            </span>
+            <div>
+              <button
+                className="secondary-button"
+                onClick={() => setCreating(false)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="primary-button"
+                disabled={
+                  busy === "create" ||
+                  !draft.targetConceptId ||
+                  !draft.description.trim()
+                }
+                type="submit"
+              >
+                {busy === "create" ? "正在建立…" : "建立正式关系"}
+              </button>
+            </div>
+          </footer>
+        </form>
+      ) : null}
 
       {error ? <p className="concept-direct-relation-error" role="alert">{error}</p> : null}
       {notice ? (
@@ -595,13 +834,13 @@ export function ConceptRelationsForConcept({ conceptId }: { conceptId: string })
       ) : null}
       {activeItems.length > 0 ? (
         <div className="concept-direct-relation-list">
-          {activeItems.map((suggestion) => (
+          {activeItems.map((relation) => (
             <DirectRelationRow
-              busy={busy === suggestion.relation?.id}
+              busy={busy === relation.id}
               conceptId={conceptId}
-              key={suggestion.id}
-              onRemove={() => void remove(suggestion)}
-              suggestion={suggestion}
+              key={relation.id}
+              onRemove={() => void remove(relation)}
+              relation={relation}
             />
           ))}
         </div>
@@ -610,17 +849,17 @@ export function ConceptRelationsForConcept({ conceptId }: { conceptId: string })
       {removedItems.length > 0 ? (
         <details className="concept-removed-relations">
           <summary>已撤销关系（{removedItems.length}）</summary>
-          {removedItems.map((suggestion) => {
-            const neighbor = relationNeighbor(suggestion, conceptId);
+          {removedItems.map((relation) => {
+            const neighbor = relationNeighbor(relation, conceptId);
 
             return (
-              <div key={suggestion.id}>
+              <div key={relation.id}>
                 <span>已撤销</span>
-                <strong>{CONCEPT_RELATION_LABELS[suggestion.relation?.type ?? suggestion.type]}</strong>
+                <strong>{CONCEPT_RELATION_LABELS[relation.type]}</strong>
                 <Link to={`/concepts?concept=${encodeURIComponent(neighbor.id)}`}>
                   {neighbor.name}
                 </Link>
-                <time>{formatDate(suggestion.relation?.removedAt ?? suggestion.updatedAt)}</time>
+                <time>{formatDate(relation.removedAt ?? relation.confirmedAt)}</time>
               </div>
             );
           })}
@@ -634,25 +873,19 @@ function DirectRelationRow({
   busy,
   conceptId,
   onRemove,
-  suggestion,
+  relation,
 }: {
   busy: boolean;
   conceptId: string;
   onRemove: () => void;
-  suggestion: ConceptRelationSuggestion;
+  relation: ConceptRelation;
 }) {
-  const relation = suggestion.relation;
-
-  if (!relation) {
-    return null;
-  }
-
-  const neighbor = relationNeighbor(suggestion, conceptId);
+  const neighbor = relationNeighbor(relation, conceptId);
   const relationType = relation.type;
   const outward = relation.sourceConceptId === conceptId;
 
   return (
-    <article className="concept-direct-relation" data-review={suggestion.needsReview}>
+    <article className="concept-direct-relation" data-review={relation.needsReview}>
       <div className="concept-direct-relation-path">
         <span>{CONCEPT_RELATION_LABELS[relationType]}</span>
         <i aria-hidden="true">
@@ -664,9 +897,16 @@ function DirectRelationRow({
         >
           {neighbor.name}
         </Link>
-        {suggestion.needsReview ? <strong>待复核</strong> : null}
+        {relation.needsReview ? <strong>待复核</strong> : null}
       </div>
-      <p>{relation.description}</p>
+      <p>
+        {relation.description}
+        <small>
+          {relation.confirmationSource.type === "user"
+            ? "用户直接建立"
+            : "AI 建议后确认"}
+        </small>
+      </p>
       <button disabled={busy} onClick={onRemove} type="button">
         {busy ? "正在撤销…" : "撤销正式关系"}
       </button>
@@ -675,12 +915,10 @@ function DirectRelationRow({
 }
 
 function relationNeighbor(
-  suggestion: ConceptRelationSuggestion,
+  relation: ConceptRelation,
   conceptId: string,
 ): ConceptRelationEndpoint {
-  return suggestion.source.id === conceptId
-    ? suggestion.target
-    : suggestion.source;
+  return relation.source.id === conceptId ? relation.target : relation.source;
 }
 
 function relationStatusLabel(suggestion: ConceptRelationSuggestion): string {

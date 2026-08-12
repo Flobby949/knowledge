@@ -201,7 +201,7 @@ AI 基于两个确切 Concept Revision、各自当时的有效 Concept Membershi
 _Avoid_: Concept Relation、自动建图、聚类邻接
 
 **概念关系（Concept Relation）**:
-用户确认的两个 Concept 之间的稳定、可撤销语义联系；首版复用六种 Knowledge Relation 类型，其中 `SIMILAR`、`CONTRASTS`、`ANALOGY` 对称，`PREREQUISITE`、`EXTENDS`、`APPLIES` 有向，同一对 Concept 可以同时具有不同类型。任一端归档、当前 Revision 或有效 Membership 集合改变时，关系保留历史但需要复核并退出默认网络；撤销也只结束关系，不删除端点或旧事实。
+用户确认的两个 Concept 之间的稳定、可撤销语义联系；既可以由用户确认 AI Suggestion，也可以由用户直接选择另一端、类型、方向和描述建立，后者不调用或绑定模型配置。正式关系自身冻结两端当时的 Concept Revision 与有效 Membership 指纹，并复用六种 Knowledge Relation 类型，其中 `SIMILAR`、`CONTRASTS`、`ANALOGY` 对称，`PREREQUISITE`、`EXTENDS`、`APPLIES` 有向，同一对 Concept 可以同时具有不同类型。任一端归档、当前 Revision 或有效 Membership 集合改变时，关系保留历史但需要复核并退出默认网络；撤销也只结束关系，不删除端点或旧事实。
 _Avoid_: Concept Membership、关系建议、聚类邻接
 
 ## 知识分析

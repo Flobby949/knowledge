@@ -673,6 +673,33 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
 test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", async ({
   page,
 }) => {
+  await page.route("**/api/v1/concepts?*", async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      items: Array<Record<string, unknown>>;
+    };
+
+    await route.fulfill({
+      response,
+      json: {
+        items: [
+          ...body.items,
+          {
+            id: "41000000-0000-4000-8000-000000000099",
+            name: "事件驱动架构",
+            description: "通过事件在边界之间传递变化，并维持生产与消费职责分离。",
+            lifecycle: "active",
+            revisionNumber: 1,
+            activeMembershipCount: 2,
+            reviewMembershipCount: 0,
+            archivedAt: null,
+            createdAt: "2099-08-09T08:00:00.000Z",
+            updatedAt: "2099-08-09T08:00:00.000Z",
+          },
+        ],
+      },
+    });
+  });
   await page.goto(`${appBaseUrl}/concepts`);
 
   const navigation = page.getByRole("navigation", { name: "主导航" });
@@ -690,6 +717,20 @@ test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", asyn
   await expect(detail.getByRole("article", { name: /Membership/u })).toHaveCount(
     3,
   );
+  const relations = detail.getByRole("region", { name: "Concept 直接关系" });
+
+  await relations.getByRole("button", { name: "关联 Concept" }).click();
+  const relationBuilder = relations.getByRole("form", {
+    name: "建立 Concept 关系",
+  });
+
+  await relationBuilder
+    .getByLabel("新 Concept 关系类型")
+    .selectOption("prerequisite");
+  await relationBuilder
+    .getByLabel("新 Concept 关系描述")
+    .fill("下游机制需要先理解变更数据捕获的事件边界。");
+  await expect(relationBuilder).toBeVisible();
   await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
   await expectBox(main, { x: 116, y: 72, width: 1_444 });
   await expectBox(workbench, { x: 116, width: 1_444 });
@@ -709,6 +750,7 @@ test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", asyn
   await expectBox(workbench, { x: 116, width: 1_124 });
   await expectBox(catalog, { x: 117, width: 292 });
   await expectBox(stage, { x: 409, width: 830 });
+  await expect(relationBuilder).toBeVisible();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBe(1_280);

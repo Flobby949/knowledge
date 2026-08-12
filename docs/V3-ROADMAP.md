@@ -275,7 +275,7 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 - 提供 `GET /api/v1/network/path` 探索有边界路径；`from` 与 `to` 也使用 typed key；
 - 节点返回当前内容及 Concept Revision 或 Knowledge Point 来源；边返回稳定 `edgeKey`、三类真实 `kind`、规范 source/target、关系类型、是否有向、描述和来源/确认记录；路径另返回有序节点、真实边及每一步的 `forward`、`reverse` 或 `undirected` 遍历方向；
 - Concept 详情展示直接邻居和已确认关系；
-- Concept Relation Suggestion 支持扫描、列表、修改后确认、拒绝，正式 Concept Relation 支持列表和撤销；
+- Concept Relation Suggestion 支持扫描、列表、修改后确认、拒绝；正式 Concept Relation 另支持用户从 Concept 详情直接建立、列表和撤销；
 - 所有网络对象和确认记录进入格式 8 完整导出恢复，恢复器继续接受格式 4–7；
 - 局部子图最多 300 个节点、600 条边、深度 2，并返回节点/边截断状态；路径最大深度 6、最多访问 1000 个节点并使用 2 秒数据库查询预算，超过预算返回明确错误。
 
@@ -283,7 +283,7 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 
 以下问题已经在 Concept Relation 迁移前确定，并由 PRD、CONTEXT 与 ADR-0034 固定：
 
-- [x] 第一版只允许 AI Suggestion 经用户人工确认形成正式 Concept Relation，不提供直接创建；
+- [x] V3.2 第一版只允许 AI Suggestion 经用户人工确认形成正式 Concept Relation；后续由 ADR-0038 增量加入用户直接建立入口，AI 仍不得自动写边；
 - [x] 完全复用 V2 六种预设类型；`SIMILAR`、`CONTRASTS`、`ANALOGY` 对称，`PREREQUISITE`、`EXTENDS`、`APPLIES` 有向；
 - [x] 路径允许反向遍历，但每一步保留正式关系的规范 source、target 与本次遍历方向；
 - [x] 同一对 Concept 可以同时存在不同类型的有效关系，同一规范端点、方向与类型最多一个有效关系；
@@ -439,7 +439,7 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 - 首页和 `/network` 端到端回归：当前稳定版 Chrome 与 Edge（151.0.4129.78）各 64／64、合计 128／128 通过，覆盖真实节点局部展开、路径、URL／历史、抽屉键盘操作、路径截断、WebGL2／上下文／帧／Worker 失败、错误状态并列可读和等价列表；
 - 双主题、1280/1600、减少动态效果和 2D 降级视觉回归：完整视觉矩阵 24／24 通过；首页 1600px 下舞台 1120px + 抽屉 480px，1280px 下舞台 800px + 抽屉 480px，无横向溢出；
 - 500 节点／1000 真实边性能验收连续三轮通过；最差实测为首次可交互 462.1ms、Worker 布局 18.7ms、交互帧 p95 0.9ms、单帧最大 4.2ms、堆增量 15.308MiB，减少动态效果下无持续 RAF；
-- 本地 Docker 构建、迁移、健康检查与页面验收：`docker compose up --build -d` 成功；最新迁移 `0022_concept_relations.sql` 已应用，PostgreSQL 与 API 均为 healthy，Web 容器正常运行；首页、`/api/v1/search-health` 与 `/api/v1/network/subgraph` 均返回 HTTP 200，关键词与语义检索状态均为 ready。
+- 本地 Docker 构建、迁移、健康检查与页面验收：`docker compose up --build -d` 成功；最新迁移 `0023_user_concept_relations.sql` 已应用，PostgreSQL 与 API 均为 healthy，Web 容器正常运行；首页、`/concepts`、`/api/v1/search-health` 与 `/api/v1/concept-relations` 均返回预期响应，关键词与语义检索状态均为 ready。
 
 ## 11. 每个里程碑的执行顺序
 
@@ -494,3 +494,4 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 | V3.2 知识网络语义 | 已完成 | 2026-08-12 | Concept Relation 人工审查、三类真实边、typed-key 邻居/子图/路径 API、固定预算与格式 8（兼容格式 4–7）均通过验收 |
 | V3.3 功能性图谱 | 已完成 | 2026-08-12 | 独立 `/network`、Concept-first 局部展开、确定性 2D 布局、真实路径、URL/抽屉/列表降级与 300 节点/600 边预算均通过验收 |
 | V3.4 3D 体验升级 | 已完成 | 2026-08-12 | 首页支持 Concept／标签双视图；Concept 复用共享网络控制器、确定性 x/y + 稳定浅层 z、URL/抽屉/路径及 `3D → 2D → list`，标签场保持独立导航语义；已通过双浏览器自动化、视觉、性能与本地 Docker 部署验收 |
+| V3.4.1 Concept 直接关系 | 已完成 | 2026-08-12 | Concept 详情可直接选择另一端、六型、方向和描述建立正式边；用户来源不绑定模型配置，关系冻结端点快照并进入现有复核、网络、路径、撤销与格式 8 往返 |
