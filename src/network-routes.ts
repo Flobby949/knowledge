@@ -89,7 +89,7 @@ interface NetworkEdge {
         confirmedAt: string;
         id: string;
         kind: "concept_relation_confirmation";
-        origin: "ai_suggestion" | "user";
+        origin: "ai_automatic" | "ai_suggestion" | "user";
         relationId: string;
         reason: string;
       }
@@ -1224,7 +1224,7 @@ async function readConceptRelationEdges(
 
   const result = await database.query<{
     confidence: number | null;
-    confirmation_source: "AI_SUGGESTION" | "USER";
+    confirmation_source: "AI_AUTOMATIC" | "AI_SUGGESTION" | "USER";
     confirmed_at: Date | string;
     description: string;
     id: string;
@@ -1417,7 +1417,7 @@ function relationEdge(
   kind: "concept_relation" | "knowledge_relation",
   row: {
     confidence: number | null;
-    confirmation_source?: "AI_SUGGESTION" | "USER";
+    confirmation_source?: "AI_AUTOMATIC" | "AI_SUGGESTION" | "USER";
     confirmed_at: Date | string;
     description: string;
     id: string;
@@ -1432,9 +1432,13 @@ function relationEdge(
   const nodeType = kind === "concept_relation" ? "concept" : "knowledge_point";
   const confirmationId = row.suggestion_id ?? row.id;
   const origin =
-    kind === "concept_relation" && row.confirmation_source === "USER"
-      ? "user"
-      : "ai_suggestion";
+    kind !== "concept_relation"
+      ? "ai_suggestion"
+      : row.confirmation_source === "USER"
+        ? "user"
+        : row.confirmation_source === "AI_AUTOMATIC"
+          ? "ai_automatic"
+          : "ai_suggestion";
   const sourceRecord: NetworkEdge["sourceRecord"] =
     kind === "concept_relation"
       ? {

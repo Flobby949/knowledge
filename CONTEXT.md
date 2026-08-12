@@ -1,6 +1,6 @@
 # 个人知识管理
 
-本上下文描述个人知识从原始素材、AI 理解结果到用户确认知识网络的核心语言。所有产品文档、界面和后续实现应优先使用下列术语。
+本上下文描述个人知识从原始素材、AI 理解结果到可追溯知识网络的核心语言。所有产品文档、界面和后续实现应优先使用下列术语。
 
 ## 知识对象
 
@@ -49,8 +49,8 @@ _Avoid_: 自动确认、覆盖候选、删除拒绝记录
 _Avoid_: Tag Assignment、自动分类、知识点所有权
 
 **知识网络（Knowledge Network）**:
-由当前有效的 Knowledge Point 与 Concept 节点，以及真实有效的 Concept Membership、已确认 Knowledge Relation 和已确认 Concept Relation 三类边组成的个人认知网络。撤销、过期或需要复核的边保留为历史，但不属于默认网络。
-_Avoid_: 未经确认的 AI 关系图、自动知识图谱
+由当前有效的 Knowledge Point 与 Concept 节点，以及真实有效的 Concept Membership、已确认 Knowledge Relation 和正式有效 Concept Relation 三类边组成的个人认知网络。撤销、过期或需要复核的边保留为历史，但不属于默认网络。
+_Avoid_: 相似度装饰线、无来源关系图、自动补全的推理边
 
 **知识网络路径（Knowledge Network Path）**:
 在有效知识网络中由真实节点和已确认关系构成的有序可核验路径；遍历可以反向经过关系，但每一步仍保留该关系被确认时的规范方向，它是已有事实的遍历结果而不是 AI 推理补全。
@@ -197,12 +197,16 @@ _Avoid_: 知识关系、图谱边
 _Avoid_: 关系建议、相似度结果
 
 **概念关系建议（Concept Relation Suggestion）**:
-AI 基于两个确切 Concept Revision、各自当时的有效 Concept Membership 集合和模型依据提出的可审查关系；它冻结判断输入，未经用户确认不是 Concept Relation，也不能进入正式知识网络。
-_Avoid_: Concept Relation、自动建图、聚类邻接
+旧版人工审查流程中，AI 基于两个确切 Concept Revision、各自当时的有效 Concept Membership 集合和模型依据提出的可审查关系。既有建议及其决定继续保留为历史与导出兼容数据，但新的自动关联不再把待审建议作为正式关系的必经门。
+_Avoid_: 当前自动关联任务、Concept Relation、聚类邻接
+
+**自动概念关系判断（Automatic Concept Relation Evaluation）**:
+当前知识生效后的全局召回，或 Concept 的当前版本、有效 Membership 变化所触发的一次 AI 判断；它冻结两个 Concept 当时的输入指纹，记录实际调用使用的模型、置信度与理由。判断为相关时直接形成正式 Concept Relation，判断为不相关时也记录该输入已经处理，用户不选择范围、不发起扫描也不确认结果；失败任务保留并在以后使用当时最新生效模型配置恢复。
+_Avoid_: Concept Candidate Scan、待审关系建议、相似度直接成边
 
 **概念关系（Concept Relation）**:
-用户确认的两个 Concept 之间的稳定、可撤销语义联系；既可以由用户确认 AI Suggestion，也可以由用户直接选择另一端、类型、方向和描述建立，后者不调用或绑定模型配置。正式关系自身冻结两端当时的 Concept Revision 与有效 Membership 指纹，并复用六种 Knowledge Relation 类型，其中 `SIMILAR`、`CONTRASTS`、`ANALOGY` 对称，`PREREQUISITE`、`EXTENDS`、`APPLIES` 有向，同一对 Concept 可以同时具有不同类型。任一端归档、当前 Revision 或有效 Membership 集合改变时，关系保留历史但需要复核并退出默认网络；撤销也只结束关系，不删除端点或旧事实。
-_Avoid_: Concept Membership、关系建议、聚类邻接
+两个 Concept 之间稳定、可撤销且有明确来源的正式语义联系；新的关系由自动概念关系判断直接建立，旧版 AI Suggestion 经确认的关系和既有用户来源关系继续作为历史来源，但产品不再提供人工创建入口。正式关系冻结两端当时的 Concept Revision 与有效 Membership 指纹，并复用六种 Knowledge Relation 类型，其中 `SIMILAR`、`CONTRASTS`、`ANALOGY` 对称，`PREREQUISITE`、`EXTENDS`、`APPLIES` 有向，同一对 Concept 可以同时具有不同类型。任一端归档、当前 Revision 或有效 Membership 集合改变时，关系保留历史但需要复核并退出默认网络；新的自动判断可以替代旧的 AI 自动边，撤销也只结束关系，不删除端点或旧事实。
+_Avoid_: Concept Membership、待审关系建议、相似度装饰线
 
 ## 知识分析
 

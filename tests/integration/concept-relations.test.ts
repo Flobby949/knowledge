@@ -5,7 +5,11 @@ import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConceptRelationGenerator } from "../../src/concept-relation-generator.js";
-import { registerConceptRelationRoutes } from "../../src/concept-relation-routes.js";
+import {
+  enqueueConceptRelationDiscoveryForConcept,
+  registerConceptRelationRoutes,
+  type ConceptRelationAutomation,
+} from "../../src/concept-relation-routes.js";
 import { encryptCredential } from "../../src/model-credentials.js";
 import {
   prepareTestDatabase,
@@ -49,6 +53,7 @@ interface ConceptRelationSuggestion {
 
 interface FormalConceptRelation {
   confirmationSource:
+    | { id: string; type: "ai_automatic" }
     | { id: string; type: "concept_relation_suggestion" }
     | { type: "user" };
   description: string;
@@ -67,6 +72,7 @@ const CREDENTIAL_SECRET = "concept-relation-test-secret";
 
 describe("V3.2 Concept relation suggestions and formal relations", () => {
   let app: FastifyInstance;
+  let automation: ConceptRelationAutomation;
   let configurationVersion = 0;
   let database: PreparedTestDatabase;
   let pool: Pool;
@@ -76,10 +82,11 @@ describe("V3.2 Concept relation suggestions and formal relations", () => {
     database = prepareTestDatabase();
     pool = new Pool({ connectionString: database.databaseUrl });
     app = Fastify({ logger: false });
-    registerConceptRelationRoutes(app, {
+    automation = registerConceptRelationRoutes(app, {
       credentialSecret: CREDENTIAL_SECRET,
       generateConceptRelation,
       pool,
+      scheduleSemanticIndex: async () => undefined,
     });
     await app.ready();
   });
@@ -275,139 +282,192 @@ describe("V3.2 Concept relation suggestions and formal relations", () => {
     });
   });
 
-  it("lets a user create, list, and remove a formal Concept relation directly", async () => {
+  it("automatically writes a formal AI relation without leaving a review decision", async () => {
     const first = await seedConcept(pool, configurationVersion, {
       embedding: [1, 0],
-      id: "00000000-0000-4000-8000-000000000091",
-      name: "手动甲",
+      name: "自动关联甲",
     });
-    const second = await seedConcept(pool, configurationVersion, {
-      embedding: [0, 1],
-      id: "00000000-0000-4000-8000-000000000019",
-      name: "手动乙",
+    await seedConcept(pool, configurationVersion, {
+      embedding: [0.98, 0.02],
+      name: "自动关联乙",
     });
 
-    const created = await app.inject({
-      method: "POST",
+    generateConceptRelation.mockResolvedValue({
+      related: true,
+      type: "extends",
+      direction: "a_to_b",
+      description: "自动关联甲扩展自动关联乙。",
+      reason: "两个 Concept 的定义形成明确延伸。",
+      confidence: 0.91,
+    });
+    await enqueueConceptRelationDiscoveryForConcept(pool, first.conceptId);
+    automation.scheduleForConcept(first.conceptId);
+    await automation.settle();
+
+    const formal = await app.inject({
+      method: "GET",
       url: "/api/v1/concept-relations",
-      payload: {
-        sourceConceptId: first.conceptId,
-        targetConceptId: second.conceptId,
-        type: "similar",
-        description: "用户确认两者处理的是同一类一致性问题。",
-      },
     });
+    const relations = formal.json<{ items: FormalConceptRelation[] }>().items;
 
-    expect(created.statusCode).toBe(201);
-    const relation = created.json<{ relation: FormalConceptRelation }>().relation;
-
-    expect(relation).toMatchObject({
-      confirmationSource: { type: "user" },
-      description: "用户确认两者处理的是同一类一致性问题。",
+    expect(relations).toHaveLength(1);
+    expect(relations[0]).toMatchObject({
+      confirmationSource: { type: "ai_automatic" },
+      description: "自动关联甲扩展自动关联乙。",
       needsReview: false,
       removed: false,
-      sourceConceptId: second.conceptId,
-      suggestionId: null,
-      targetConceptId: first.conceptId,
+      type: "extends",
+    });
+    expect(await suggestions(app, "pending")).toEqual([]);
+    expect(await suggestions(app, "resolved")).toEqual([
+      expect.objectContaining({ status: "confirmed" }),
+    ]);
+
+    await enqueueConceptRelationDiscoveryForConcept(pool, first.conceptId);
+    automation.scheduleForConcept(first.conceptId);
+    await automation.settle();
+
+    expect(generateConceptRelation).toHaveBeenCalledTimes(1);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/v1/concept-relations" }))
+        .json<{ items: FormalConceptRelation[] }>()
+        .items,
+    ).toHaveLength(1);
+  });
+
+  it("does not expose a manual Concept Relation creation endpoint", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/concept-relations",
+      payload: {
+        sourceConceptId: randomUUID(),
+        targetConceptId: randomUUID(),
+        type: "similar",
+        description: "人工关系不进入当前产品流程。",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("completes a one-Concept trigger as a valid no-op", async () => {
+    const only = await seedConcept(pool, configurationVersion, {
+      embedding: [1, 0],
+      name: "唯一 Concept",
+    });
+
+    await enqueueConceptRelationDiscoveryForConcept(pool, only.conceptId);
+    automation.scheduleForConcept(only.conceptId);
+    await automation.settle();
+
+    expect(generateConceptRelation).not.toHaveBeenCalled();
+    expect(
+      await pool.query(
+        `SELECT processed_at, last_failure_message
+           FROM concept_relation_discovery_queue
+          WHERE concept_id = $1`,
+        [only.conceptId],
+      ),
+    ).toMatchObject({
+      rows: [{ last_failure_message: null, processed_at: expect.any(Date) }],
+    });
+  });
+
+  it("replays a Concept trigger that arrives while the same durable job is running", async () => {
+    const first = await seedConcept(pool, configurationVersion, {
+      embedding: [1, 0],
+      name: "并发触发甲",
+    });
+    await seedConcept(pool, configurationVersion, {
+      embedding: [1, 0],
+      name: "并发触发乙",
+    });
+    let releaseGeneration: () => void = () => {};
+    let reportStarted: () => void = () => {};
+    const generationStarted = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    const generationReleased = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
+    });
+
+    generateConceptRelation.mockImplementation(async () => {
+      reportStarted();
+      await generationReleased;
+
+      return {
+        related: true,
+        type: "similar",
+        direction: "a_to_b",
+        description: "并发触发仍只形成一条正式关系。",
+        reason: "相同输入的重复任务必须幂等。",
+        confidence: 0.89,
+      };
+    });
+    await enqueueConceptRelationDiscoveryForConcept(pool, first.conceptId);
+    automation.scheduleForConcept(first.conceptId);
+    await generationStarted;
+    await enqueueConceptRelationDiscoveryForConcept(pool, first.conceptId);
+    releaseGeneration();
+    await automation.settle();
+
+    expect(generateConceptRelation).toHaveBeenCalledTimes(1);
+    expect(
+      await pool.query(
+        `SELECT processed_at, last_failure_message
+           FROM concept_relation_discovery_queue
+          WHERE concept_id = $1`,
+        [first.conceptId],
+      ),
+    ).toMatchObject({
+      rows: [{ last_failure_message: null, processed_at: expect.any(Date) }],
+    });
+  });
+
+  it("keeps failed automatic work durable and uses the active configuration when retried", async () => {
+    const first = await seedConcept(pool, configurationVersion, {
+      embedding: [1, 0],
+      name: "配置切换甲",
+    });
+    await seedConcept(pool, configurationVersion, {
+      embedding: [1, 0],
+      name: "配置切换乙",
+    });
+
+    generateConceptRelation.mockRejectedValueOnce(new Error("temporary outage"));
+    await enqueueConceptRelationDiscoveryForConcept(pool, first.conceptId);
+    automation.scheduleForConcept(first.conceptId);
+    await automation.settle();
+
+    expect(
+      (await app.inject({ method: "GET", url: "/api/v1/concept-relations" }))
+        .json<{ items: FormalConceptRelation[] }>()
+        .items,
+    ).toEqual([]);
+
+    const replacementVersion = await activateReplacementConfiguration(pool);
+
+    generateConceptRelation.mockResolvedValue({
+      related: true,
       type: "similar",
+      direction: "a_to_b",
+      description: "切换配置后重新判断为相似。",
+      reason: "当前配置确认两端定义相近。",
+      confidence: 0.87,
     });
+    await automation.schedulePending();
+    await automation.settle();
 
-    const directed = await app.inject({
-      method: "POST",
-      url: "/api/v1/concept-relations",
-      payload: {
-        sourceConceptId: first.conceptId,
-        targetConceptId: second.conceptId,
-        type: "extends",
-        description: "手动甲扩展手动乙。",
-      },
+    expect(generateConceptRelation).toHaveBeenCalledTimes(2);
+    expect(generateConceptRelation.mock.calls[1]?.[0]).toMatchObject({
+      configurationVersion: replacementVersion,
+      model: "concept-relation-next-model",
     });
-
-    expect(directed.statusCode).toBe(201);
-    expect(directed.json()).toMatchObject({
-      relation: {
-        sourceConceptId: first.conceptId,
-        targetConceptId: second.conceptId,
-        type: "extends",
-      },
-    });
-
-    const duplicate = await app.inject({
-      method: "POST",
-      url: "/api/v1/concept-relations",
-      payload: {
-        sourceConceptId: second.conceptId,
-        targetConceptId: first.conceptId,
-        type: "similar",
-        description: "重复关系。",
-      },
-    });
-
-    expect(duplicate.statusCode).toBe(409);
-    expect(duplicate.json()).toMatchObject({
-      error: { code: "CONCEPT_RELATION_CONFLICT" },
-    });
-
-    const filtered = await app.inject({
-      method: "GET",
-      url: `/api/v1/concept-relations?conceptId=${first.conceptId}`,
-    });
-
-    expect(filtered.statusCode).toBe(200);
-    expect(filtered.json<{ items: FormalConceptRelation[] }>().items).toHaveLength(2);
-
-    const removed = await app.inject({
-      method: "DELETE",
-      url: `/api/v1/concept-relations/${relation.id}`,
-    });
-
-    expect(removed.statusCode).toBe(204);
-    const history = await app.inject({
-      method: "GET",
-      url: `/api/v1/concept-relations?conceptId=${first.conceptId}`,
-    });
-    const removedRelation = history
-      .json<{ items: FormalConceptRelation[] }>()
-      .items.find(({ id }) => id === relation.id);
-
-    expect(removedRelation).toMatchObject({
-      confirmationSource: { type: "user" },
-      removed: true,
-    });
-
-    await pool.query(
-      `UPDATE concepts
-          SET archived_at = clock_timestamp(),
-              updated_at = clock_timestamp()
-        WHERE id = $1`,
-      [second.conceptId],
-    );
-    const inactive = await app.inject({
-      method: "POST",
-      url: "/api/v1/concept-relations",
-      payload: {
-        sourceConceptId: first.conceptId,
-        targetConceptId: second.conceptId,
-        type: "applies",
-        description: "归档端点不能建立关系。",
-      },
-    });
-    const selfRelation = await app.inject({
-      method: "POST",
-      url: "/api/v1/concept-relations",
-      payload: {
-        sourceConceptId: first.conceptId,
-        targetConceptId: first.conceptId,
-        type: "similar",
-        description: "不能连接自身。",
-      },
-    });
-
-    expect(inactive.statusCode).toBe(409);
-    expect(inactive.json()).toMatchObject({
-      error: { code: "CONCEPT_RELATION_ENDPOINT_INACTIVE" },
-    });
-    expect(selfRelation.statusCode).toBe(422);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/v1/concept-relations" }))
+        .json<{ items: FormalConceptRelation[] }>()
+        .items[0],
+    ).toMatchObject({ confirmationSource: { type: "ai_automatic" } });
   });
 
   it("marks revision, effective Membership, and archive changes stale", async () => {
@@ -687,6 +747,72 @@ async function resetDatabase(pool: Pool): Promise<number> {
   );
 
   return result.rows[0]?.version ?? 0;
+}
+
+async function activateReplacementConfiguration(pool: Pool): Promise<number> {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ version: number }>(
+      "SELECT version FROM model_configurations WHERE state = 'ACTIVE' FOR UPDATE",
+    );
+    const previousVersion = current.rows[0]?.version;
+
+    if (!previousVersion) {
+      throw new Error("Expected an active model configuration");
+    }
+
+    await client.query(
+      "UPDATE model_configurations SET state = 'SUPERSEDED' WHERE version = $1",
+      [previousVersion],
+    );
+    const inserted = await client.query<{ version: number }>(
+      `INSERT INTO model_configurations
+         (state, text_base_url, text_model, text_credential_ciphertext,
+          embedding_base_url, embedding_model,
+          embedding_credential_ciphertext, activated_at)
+       VALUES ('ACTIVE', 'https://text-next.test/v1/',
+               'concept-relation-next-model', $1,
+               'https://embedding-next.test/v1/', 'embedding-next-model', $1,
+               clock_timestamp())
+       RETURNING version`,
+      [encryptCredential("next-api-key", CREDENTIAL_SECRET)],
+    );
+    const nextVersion = inserted.rows[0]?.version;
+
+    if (!nextVersion) {
+      throw new Error("Replacement model configuration was not created");
+    }
+
+    await client.query(
+      `INSERT INTO semantic_document_states
+         (configuration_version, source_type, source_id, record_id,
+          text_content, status, failure_reason, attempt_count, updated_at)
+       SELECT $2, source_type, source_id, record_id, text_content, status,
+              failure_reason, attempt_count, updated_at
+         FROM semantic_document_states
+        WHERE configuration_version = $1`,
+      [previousVersion, nextVersion],
+    );
+    await client.query(
+      `INSERT INTO semantic_embeddings
+         (configuration_version, embedding_model, source_type, source_id,
+          record_id, text_content, embedding)
+       SELECT $2, 'embedding-next-model', source_type, source_id, record_id,
+              text_content, embedding
+         FROM semantic_embeddings
+        WHERE configuration_version = $1`,
+      [previousVersion, nextVersion],
+    );
+    await client.query("COMMIT");
+    return nextVersion;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function seedPair(

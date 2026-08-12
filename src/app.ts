@@ -394,12 +394,16 @@ export async function buildApp(
     testModelEndpoint:
       options.testModelEndpoint ?? testOpenAICompatibleEndpoint,
   });
-  registerConceptRoutes(app, { pool });
-  registerConceptRelationRoutes(app, {
+  const conceptRelationAutomation = registerConceptRelationRoutes(app, {
     pool,
     credentialSecret,
     generateConceptRelation:
       options.generateConceptRelation ?? generateOpenAICompatibleConceptRelation,
+    scheduleSemanticIndex,
+  });
+  registerConceptRoutes(app, {
+    onConceptChanged: conceptRelationAutomation.scheduleForConcept,
+    pool,
   });
   registerNetworkRoutes(app, { pool });
   const conceptCandidateAutomation = registerConceptCandidateRoutes(app, {
@@ -407,6 +411,7 @@ export async function buildApp(
     credentialSecret,
     generateConceptCandidate:
       options.generateConceptCandidate ?? generateOpenAICompatibleConceptCandidate,
+    onConceptChanged: conceptRelationAutomation.scheduleForConcept,
     scheduleSemanticIndex,
   });
   registerAiOrganizationRoutes(app, {
@@ -417,12 +422,20 @@ export async function buildApp(
     ...(options.onAiTaskSettled
       ? { onTaskSettled: options.onAiTaskSettled }
       : {}),
-    onKnowledgeActivated: conceptCandidateAutomation.scheduleForAnalysis,
+    onKnowledgeActivated: (analysisRevisionId) => {
+      conceptCandidateAutomation.scheduleForAnalysis(analysisRevisionId);
+      conceptRelationAutomation.scheduleForAnalysis(analysisRevisionId);
+    },
     scheduleSemanticIndex,
   });
   registerDataTransferRoutes(app, { pool, scheduleSemanticIndex });
   registerSemanticSearchRoutes(app, {
-    onIndexRebuilt: conceptCandidateAutomation.schedulePending,
+    onIndexRebuilt: async () => {
+      await Promise.all([
+        conceptCandidateAutomation.schedulePending(),
+        conceptRelationAutomation.schedulePending(),
+      ]);
+    },
     pool,
     scheduler: semanticIndexScheduler,
   });
@@ -2221,7 +2234,10 @@ export async function buildApp(
   );
 
   app.addHook("onClose", async () => {
-    await conceptCandidateAutomation.settle();
+    await Promise.all([
+      conceptCandidateAutomation.settle(),
+      conceptRelationAutomation.settle(),
+    ]);
     await pool.end();
   });
 

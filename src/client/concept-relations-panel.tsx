@@ -1,32 +1,21 @@
 /*
- * THESIS: A Concept Relation is a reviewed connection between two maintained definitions, never an automatic graph edge.
- * OWN-WORLD: The existing catalog becomes a relation ledger: compact index at left, paired definition proof sheet at right, with strawberry or electric-blue signals inherited from the active theme.
- * STORY: Scan once, compare both frozen definitions, edit the proposed relation, confirm or reject it, then revisit or revoke the resulting history.
- * FIRST VIEWPORT: A slim scan/status command, relation ledger, and one side-by-side definition pair with the decision controls directly beneath it.
+ * THESIS: A Concept detail exposes automatically maintained formal neighbors without asking the user to construct relationships.
+ * OWN-WORLD: Relations extend the existing definition sheet with compact rows inherited from the active theme.
+ * STORY: Inspect an AI-established neighbor, navigate to it, or revoke an incorrect edge while the automatic pipeline owns creation.
+ * FIRST VIEWPORT: Current formal neighbors and provenance appear below the definition and Membership proof.
  * FORM: Local catalog-and-assembly extension inside the established Concept workspace; no new visual world or graph metaphor.
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
-  confirmConceptRelationSuggestion,
-  createConceptRelation,
   listConceptRelations,
-  listConceptRelationSuggestions,
-  listConcepts,
-  rejectConceptRelationSuggestion,
   removeConceptRelation,
-  scanConceptRelationSuggestions,
   type ConceptRelation,
   type ConceptRelationEndpoint,
-  type ConceptRelationSuggestion,
   type ConceptRelationType,
-  type ConceptSummary,
 } from "./api.js";
 import "./concept-relations-panel.css";
-
-type ReviewSection = "pending" | "resolved";
-type RelationEdit = { description: string; type: ConceptRelationType };
 
 const CONCEPT_RELATION_LABELS: Record<ConceptRelationType, string> = {
   analogy: "类比",
@@ -43,508 +32,20 @@ const SYMMETRIC_TYPES = new Set<ConceptRelationType>([
   "similar",
 ]);
 
-export function ConceptRelationsPanel({
-  initialSuggestionId,
-  onSelectSuggestion,
-}: {
-  initialSuggestionId: string;
-  onSelectSuggestion: (id: string) => void;
-}) {
-  const [pending, setPending] = useState<ConceptRelationSuggestion[]>([]);
-  const [resolved, setResolved] = useState<ConceptRelationSuggestion[]>([]);
-  const [section, setSection] = useState<ReviewSection>("pending");
-  const [selectedId, setSelectedId] = useState(initialSuggestionId);
-  const [edit, setEdit] = useState<RelationEdit | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-
-    setLoading(true);
-    setError("");
-    void Promise.all([
-      listConceptRelationSuggestions("pending"),
-      listConceptRelationSuggestions("resolved"),
-    ])
-      .then(([nextPending, nextResolved]) => {
-        if (!active) {
-          return;
-        }
-
-        setPending(nextPending);
-        setResolved(nextResolved);
-        const requested =
-          [...nextPending, ...nextResolved].find(
-            ({ id }) => id === (initialSuggestionId || selectedId),
-          ) ?? nextPending[0] ?? nextResolved[0] ?? null;
-
-        if (requested) {
-          setSelectedId(requested.id);
-          setSection(
-            requested.status === "pending_review" ? "pending" : "resolved",
-          );
-        } else {
-          setSelectedId("");
-        }
-      })
-      .catch((caught: unknown) => {
-        if (active) {
-          setError(messageFrom(caught, "Concept 关系建议暂时无法载入。"));
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [initialSuggestionId, reload]);
-
-  const items = section === "pending" ? pending : resolved;
-  const suggestion =
-    items.find(({ id }) => id === selectedId) ?? items[0] ?? null;
-
-  useEffect(() => {
-    if (!suggestion) {
-      setEdit(null);
-      return;
-    }
-
-    setEdit({ description: suggestion.description, type: suggestion.type });
-  }, [suggestion?.id]);
-
-  async function scan() {
-    setBusy("scan");
-    setError("");
-    setNotice("");
-
-    try {
-      const result = await scanConceptRelationSuggestions();
-
-      setSection("pending");
-      setNotice(
-        result.embeddingStatus === "building"
-          ? "Embedding 仍在建立，当前未召回可判断的 Concept 对；稍后可再次扫描。"
-          : `扫描完成：检查 ${result.scannedConcepts} 个 Concept，召回 ${result.recalledPairs} 对，` +
-            `新增 ${result.suggestedRelations} 条建议` +
-            (result.failedPairs > 0
-              ? `；${result.failedPairs} 对判断失败，可再次扫描。`
-              : "。"),
-      );
-      setReload((value) => value + 1);
-    } catch (caught) {
-      setError(messageFrom(caught, "Concept 关系扫描失败，请稍后重试。"));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function decide(decision: "confirm" | "reject" | "remove") {
-    if (!suggestion) {
-      return;
-    }
-
-    setBusy(suggestion.id);
-    setError("");
-    setNotice("");
-
-    try {
-      if (decision === "confirm" && edit) {
-        await confirmConceptRelationSuggestion(suggestion.id, edit);
-        setSection("resolved");
-        setNotice("正式 Concept 关系已确认；两端定义与 Membership 没有被改写。");
-      } else if (decision === "reject") {
-        await rejectConceptRelationSuggestion(suggestion.id);
-        setSection("resolved");
-        setNotice("建议已忽略，两个 Concept 保持原样。");
-      } else if (suggestion.relation) {
-        await removeConceptRelation(suggestion.relation.id);
-        setSection("resolved");
-        setNotice("正式 Concept 关系已撤销，确认历史仍可回看。");
-      }
-
-      setReload((value) => value + 1);
-    } catch (caught) {
-      setError(messageFrom(caught, "关系操作失败，请刷新后重试。"));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function changeSection(next: ReviewSection) {
-    const nextItems = next === "pending" ? pending : resolved;
-    const nextId = nextItems[0]?.id ?? "";
-
-    setSection(next);
-    setSelectedId(nextId);
-    setError("");
-    setNotice("");
-
-    if (nextId) {
-      onSelectSuggestion(nextId);
-    }
-  }
-
-  function selectSuggestion(id: string) {
-    setSelectedId(id);
-    setError("");
-    setNotice("");
-    onSelectSuggestion(id);
-  }
-
-  return (
-    <section
-      aria-label="Concept Relation 审查"
-      className="concept-relation-review"
-      role="region"
-    >
-      <header className="concept-relation-toolbar">
-        <div>
-          <strong>
-            {loading
-              ? "正在整理关系台账…"
-              : `${pending.length} 条待审 · ${resolved.length} 条历史`}
-          </strong>
-          <span>AI 只提出建议；正式关系必须由你确认。</span>
-        </div>
-        <div className="concept-relation-toolbar-actions">
-          <div aria-label="Concept 关系审查状态" role="group">
-            <button
-              aria-pressed={section === "pending"}
-              className="concept-relation-section-button"
-              onClick={() => changeSection("pending")}
-              type="button"
-            >
-              待审查 {pending.length}
-            </button>
-            <button
-              aria-pressed={section === "resolved"}
-              className="concept-relation-section-button"
-              onClick={() => changeSection("resolved")}
-              type="button"
-            >
-              已处理 {resolved.length}
-            </button>
-          </div>
-          <button
-            className="concept-relation-scan"
-            disabled={busy === "scan"}
-            onClick={() => void scan()}
-            type="button"
-          >
-            <span aria-hidden="true">↻</span>
-            {busy === "scan" ? "扫描中…" : "扫描 Concept 关系"}
-          </button>
-        </div>
-      </header>
-
-      <RelationFeedback error={error} notice={notice} />
-
-      <div className="concept-relation-workbench">
-        <aside
-          aria-label="Concept Relation 台账"
-          className="concept-relation-catalog"
-        >
-          <div className="concept-relation-catalog-heading">
-            <strong>{section === "pending" ? "等待判断" : "决定历史"}</strong>
-            <span>{items.length} 条</span>
-          </div>
-          <div className="concept-relation-catalog-list">
-            {items.map((item, index) => (
-              <button
-                aria-pressed={suggestion?.id === item.id}
-                className="concept-relation-catalog-entry"
-                data-selected={suggestion?.id === item.id}
-                key={item.id}
-                onClick={() => selectSuggestion(item.id)}
-                type="button"
-              >
-                <span className="concept-relation-code">
-                  R{String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="concept-relation-catalog-copy">
-                  <strong>{item.source.name}</strong>
-                  <i aria-hidden="true">
-                    {relationDirectionMark(item.relation?.type ?? item.type)}
-                  </i>
-                  <strong>{item.target.name}</strong>
-                </span>
-                <small>
-                  {relationStatusLabel(item)} · {Math.round(item.confidence * 100)}%
-                </small>
-                {item.needsReview ? <em>待复核</em> : null}
-              </button>
-            ))}
-            {!loading && items.length === 0 ? (
-              <div className="concept-relation-catalog-empty">
-                <strong>
-                  {section === "pending" ? "没有待审建议" : "尚无处理历史"}
-                </strong>
-                <p>扫描不会直接建立正式关系。</p>
-              </div>
-            ) : null}
-          </div>
-        </aside>
-
-        <div className="concept-relation-stage">
-          {loading ? (
-            <p className="concept-relation-loading" role="status">
-              正在载入 Concept 关系…
-            </p>
-          ) : null}
-          {!loading && suggestion ? (
-            <RelationSheet
-              busy={busy === suggestion.id}
-              edit={edit ?? {
-                description: suggestion.description,
-                type: suggestion.type,
-              }}
-              onDecide={(decision) => void decide(decision)}
-              onEdit={setEdit}
-              suggestion={suggestion}
-            />
-          ) : null}
-          {!loading && !suggestion ? (
-            <div className="concept-relation-empty">
-              <span aria-hidden="true">↔</span>
-              <strong>这里会并排核对两端定义</strong>
-              <p>点击上方扫描，只会生成待审建议。</p>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function RelationSheet({
-  busy,
-  edit,
-  onDecide,
-  onEdit,
-  suggestion,
-}: {
-  busy: boolean;
-  edit: RelationEdit;
-  onDecide: (decision: "confirm" | "reject" | "remove") => void;
-  onEdit: (edit: RelationEdit) => void;
-  suggestion: ConceptRelationSuggestion;
-}) {
-  const pending = suggestion.status === "pending_review";
-  const displayedType = suggestion.relation?.type ?? edit.type;
-  const displayedDescription =
-    suggestion.relation?.description ??
-    (pending ? edit.description : suggestion.description);
-  const symmetric = SYMMETRIC_TYPES.has(displayedType);
-
-  return (
-    <article className="concept-relation-sheet">
-      <header className="concept-relation-sheet-heading">
-        <div>
-          <span className={`concept-relation-status is-${suggestion.status}`}>
-            {relationStatusLabel(suggestion)}
-          </span>
-          {suggestion.needsReview ? (
-            <span className="concept-relation-stale">端点已变化 · 待复核</span>
-          ) : null}
-        </div>
-        <span>{Math.round(suggestion.confidence * 100)}% AI 置信度</span>
-      </header>
-
-      <div
-        aria-label={symmetric ? "Concept 关系定义对" : "Concept 关系方向"}
-        className="concept-relation-pair"
-      >
-        <ConceptEndpoint
-          endpoint={suggestion.source}
-          side={symmetric ? "Concept A" : "起点"}
-        />
-        <div className="concept-relation-bridge">
-          <span aria-hidden="true" />
-          {pending ? (
-            <label>
-              <span className="visually-hidden">Concept 关系类型</span>
-              <select
-                aria-label="Concept 关系类型"
-                disabled={!suggestion.canDecide || busy}
-                onChange={(event) =>
-                  onEdit({
-                    ...edit,
-                    type: event.currentTarget.value as ConceptRelationType,
-                  })
-                }
-                value={edit.type}
-              >
-                {Object.entries(CONCEPT_RELATION_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <strong>{CONCEPT_RELATION_LABELS[displayedType]}</strong>
-          )}
-          <i aria-hidden="true">{relationDirectionMark(displayedType)}</i>
-        </div>
-        <ConceptEndpoint
-          endpoint={suggestion.target}
-          side={symmetric ? "Concept B" : "终点"}
-        />
-      </div>
-
-      {pending ? (
-        <label className="concept-relation-description-editor">
-          <span>关系描述</span>
-          <textarea
-            aria-label="Concept 关系描述"
-            disabled={!suggestion.canDecide || busy}
-            onChange={(event) =>
-              onEdit({ ...edit, description: event.currentTarget.value })
-            }
-            rows={3}
-            value={edit.description}
-          />
-        </label>
-      ) : (
-        <div className="concept-relation-confirmed-copy">
-          <span>确认描述</span>
-          <p>{displayedDescription}</p>
-        </div>
-      )}
-
-      <details className="concept-relation-reason">
-        <summary>
-          <span>AI 判断依据</span>
-          <span>{suggestion.reason}</span>
-          <i aria-hidden="true">⌄</i>
-        </summary>
-        <div>
-          <p>
-            模型 {suggestion.model.name} · 配置版本 {suggestion.model.configurationVersion}
-          </p>
-          <p>建议冻结于 {formatDate(suggestion.createdAt)}，不会随当前定义静默改写。</p>
-        </div>
-      </details>
-
-      <footer className="concept-relation-actions">
-        <span className={suggestion.canDecide || !pending ? "" : "is-warning"}>
-          <i aria-hidden="true">{suggestion.canDecide || !pending ? "✓" : "!"}</i>
-          {pending
-            ? suggestion.canDecide
-              ? "确认只建立关系，不修改两端 Concept"
-              : "Revision、Membership 或归档状态已变化，不能确认"
-            : relationHistoryHint(suggestion)}
-        </span>
-        <div>
-          {pending ? (
-            <>
-              <button
-                className="secondary-button"
-                disabled={busy}
-                onClick={() => onDecide("reject")}
-                type="button"
-              >
-                忽略建议
-              </button>
-              <button
-                className="primary-button"
-                disabled={busy || !suggestion.canDecide || !edit.description.trim()}
-                onClick={() => onDecide("confirm")}
-                type="button"
-              >
-                确认正式关系
-              </button>
-            </>
-          ) : null}
-          {suggestion.relation && !suggestion.relation.removed ? (
-            <button
-              className="concept-relation-remove"
-              disabled={busy}
-              onClick={() => onDecide("remove")}
-              type="button"
-            >
-              撤销正式关系
-            </button>
-          ) : null}
-        </div>
-      </footer>
-    </article>
-  );
-}
-
-function ConceptEndpoint({
-  endpoint,
-  side,
-}: {
-  endpoint: ConceptRelationEndpoint;
-  side: "Concept A" | "Concept B" | "起点" | "终点";
-}) {
-  return (
-    <section className="concept-relation-endpoint">
-      <div>
-        <span>{side} · 冻结定义</span>
-        <Link
-          aria-label={`打开 Concept：${endpoint.name}`}
-          to={`/concepts?concept=${encodeURIComponent(endpoint.id)}`}
-        >
-          打开 Concept ↗
-        </Link>
-      </div>
-      <h3>{endpoint.name}</h3>
-      <p>{endpoint.description}</p>
-      <footer>
-        <span>{endpoint.memberCount} 个当前成员</span>
-        {endpoint.changedSinceSuggestion ? <strong>输入后已变化</strong> : null}
-        {endpoint.archived ? <strong>已归档</strong> : null}
-      </footer>
-    </section>
-  );
-}
-
 export function ConceptRelationsForConcept({
-  canCreate,
   conceptId,
-  conceptName,
 }: {
-  canCreate: boolean;
   conceptId: string;
-  conceptName: string;
 }) {
   const [items, setItems] = useState<ConceptRelation[]>([]);
-  const [availableConcepts, setAvailableConcepts] = useState<ConceptSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
-  const [draft, setDraft] = useState<{
-    description: string;
-    direction: "inward" | "outward";
-    targetConceptId: string;
-    type: ConceptRelationType;
-  }>({
-    description: "",
-    direction: "outward",
-    targetConceptId: "",
-    type: "similar",
-  });
 
   useEffect(() => {
     setNotice("");
-    setCreating(false);
-    setDraft({
-      description: "",
-      direction: "outward",
-      targetConceptId: "",
-      type: "similar",
-    });
   }, [conceptId]);
 
   useEffect(() => {
@@ -574,54 +75,8 @@ export function ConceptRelationsForConcept({
     };
   }, [conceptId, reload]);
 
-  useEffect(() => {
-    if (!creating) {
-      return;
-    }
-
-    let active = true;
-
-    setBusy("targets");
-    setError("");
-    void listConcepts({ archive: "active" })
-      .then((concepts) => {
-        if (!active) {
-          return;
-        }
-
-        const available = concepts.filter(({ id }) => id !== conceptId);
-
-        setAvailableConcepts(available);
-        setDraft((current) => ({
-          ...current,
-          targetConceptId:
-            available.some(({ id }) => id === current.targetConceptId)
-              ? current.targetConceptId
-              : available[0]?.id ?? "",
-        }));
-      })
-      .catch((caught: unknown) => {
-        if (active) {
-          setError(messageFrom(caught, "可关联的 Concept 暂时无法载入。"));
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setBusy("");
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [conceptId, creating]);
-
   const activeItems = items.filter(({ removed }) => !removed);
   const removedItems = items.filter(({ removed }) => removed);
-  const selectedTarget = availableConcepts.find(
-    ({ id }) => id === draft.targetConceptId,
-  );
-  const symmetric = SYMMETRIC_TYPES.has(draft.type);
 
   async function remove(relation: ConceptRelation) {
     setBusy(relation.id);
@@ -639,186 +94,21 @@ export function ConceptRelationsForConcept({
     }
   }
 
-  async function create() {
-    if (!draft.targetConceptId || !draft.description.trim()) {
-      return;
-    }
-
-    const outward = symmetric || draft.direction === "outward";
-
-    setBusy("create");
-    setError("");
-    setNotice("");
-
-    try {
-      await createConceptRelation({
-        description: draft.description.trim(),
-        sourceConceptId: outward ? conceptId : draft.targetConceptId,
-        targetConceptId: outward ? draft.targetConceptId : conceptId,
-        type: draft.type,
-      });
-      setCreating(false);
-      setDraft({
-        description: "",
-        direction: "outward",
-        targetConceptId: "",
-        type: "similar",
-      });
-      setNotice("正式 Concept 关系已建立，并已进入知识网络。");
-      setReload((value) => value + 1);
-    } catch (caught) {
-      setError(messageFrom(caught, "Concept 关系建立失败，请重试。"));
-    } finally {
-      setBusy("");
-    }
-  }
-
   return (
     <section
-      aria-label="Concept 直接关系"
+      aria-label="Concept 自动关系"
       className="concept-direct-relations"
       role="region"
     >
       <header>
         <div>
-          <h3>直接关系与邻居</h3>
-          <p>可直接建立，也可确认 AI 建议；待复核关系保留，但不会进入默认知识网络。</p>
+          <h3>AI 自动关系与邻居</h3>
+          <p>新增知识生效并完成召回后，AI 会自动判断并维护 Concept 之间的正式关系。</p>
         </div>
         <div className="concept-direct-relation-header-actions">
-          {canCreate ? (
-            <button
-              aria-controls="concept-direct-relation-builder"
-              aria-expanded={creating}
-              className="secondary-button"
-              onClick={() => {
-                setCreating((current) => !current);
-                setError("");
-                setNotice("");
-              }}
-              type="button"
-            >
-              {creating ? "收起建立表单" : "关联 Concept"}
-            </button>
-          ) : null}
-          <Link to="/concepts?view=relations">打开 AI 关系审查</Link>
+          <Link to="/concepts?view=relations">查看自动关系台账</Link>
         </div>
       </header>
-
-      {creating ? (
-        <form
-          aria-label="建立 Concept 关系"
-          className="concept-direct-relation-builder"
-          id="concept-direct-relation-builder"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void create();
-          }}
-        >
-          <div className="concept-direct-relation-fields">
-            <label>
-              <span>关联对象</span>
-              <select
-                aria-label="关联的 Concept"
-                disabled={busy === "targets" || availableConcepts.length === 0}
-                onChange={(event) =>
-                  setDraft({ ...draft, targetConceptId: event.currentTarget.value })
-                }
-                value={draft.targetConceptId}
-              >
-                {availableConcepts.map((concept) => (
-                  <option key={concept.id} value={concept.id}>{concept.name}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>关系类型</span>
-              <select
-                aria-label="新 Concept 关系类型"
-                onChange={(event) =>
-                  setDraft({
-                    ...draft,
-                    type: event.currentTarget.value as ConceptRelationType,
-                  })
-                }
-                value={draft.type}
-              >
-                {Object.entries(CONCEPT_RELATION_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-            {!symmetric ? (
-              <label>
-                <span>关系方向</span>
-                <select
-                  aria-label="新 Concept 关系方向"
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      direction: event.currentTarget.value as "inward" | "outward",
-                    })
-                  }
-                  value={draft.direction}
-                >
-                  <option value="outward">
-                    {conceptName} → {selectedTarget?.name ?? "关联对象"}
-                  </option>
-                  <option value="inward">
-                    {selectedTarget?.name ?? "关联对象"} → {conceptName}
-                  </option>
-                </select>
-              </label>
-            ) : (
-              <div className="concept-direct-relation-symmetric-note">
-                <span>关系方向</span>
-                <strong>对称关系 · 两端等价可见</strong>
-              </div>
-            )}
-          </div>
-          <label className="concept-direct-relation-description">
-            <span>关系描述</span>
-            <textarea
-              aria-label="新 Concept 关系描述"
-              maxLength={2_000}
-              onChange={(event) =>
-                setDraft({ ...draft, description: event.currentTarget.value })
-              }
-              placeholder="说明两个 Concept 为什么相关，以及这条边表达什么。"
-              rows={3}
-              value={draft.description}
-            />
-          </label>
-          <footer>
-            <span>
-              {busy === "targets"
-                ? "正在读取可关联的 Concept…"
-                : availableConcepts.length === 0
-                  ? "至少还需要一个生效中的 Concept。"
-                  : "保存后立即进入默认知识网络；后续端点变化会标记待复核。"}
-            </span>
-            <div>
-              <button
-                className="secondary-button"
-                onClick={() => setCreating(false)}
-                type="button"
-              >
-                取消
-              </button>
-              <button
-                className="primary-button"
-                disabled={
-                  busy === "create" ||
-                  !draft.targetConceptId ||
-                  !draft.description.trim()
-                }
-                type="submit"
-              >
-                {busy === "create" ? "正在建立…" : "建立正式关系"}
-              </button>
-            </div>
-          </footer>
-        </form>
-      ) : null}
 
       {error ? <p className="concept-direct-relation-error" role="alert">{error}</p> : null}
       {notice ? (
@@ -904,7 +194,9 @@ function DirectRelationRow({
         <small>
           {relation.confirmationSource.type === "user"
             ? "用户直接建立"
-            : "AI 建议后确认"}
+            : relation.confirmationSource.type === "ai_automatic"
+              ? "AI 自动建立"
+              : "早期 AI 建议后确认"}
         </small>
       </p>
       <button disabled={busy} onClick={onRemove} type="button">
@@ -919,39 +211,6 @@ function relationNeighbor(
   conceptId: string,
 ): ConceptRelationEndpoint {
   return relation.source.id === conceptId ? relation.target : relation.source;
-}
-
-function relationStatusLabel(suggestion: ConceptRelationSuggestion): string {
-  if (suggestion.status === "pending_review") return "待确认";
-  if (suggestion.status === "rejected") return "已忽略";
-  if (suggestion.status === "removed" || suggestion.relation?.removed) {
-    return "已撤销";
-  }
-
-  return "已确认";
-}
-
-function relationHistoryHint(suggestion: ConceptRelationSuggestion): string {
-  if (suggestion.status === "rejected") return "建议已忽略，未建立正式关系";
-  if (suggestion.status === "removed" || suggestion.relation?.removed) {
-    return "正式关系已撤销，确认与撤销时间仍保留";
-  }
-  if (suggestion.needsReview) return "正式关系保留，但端点变化后需要复核";
-  return "正式关系生效中，可随时撤销";
-}
-
-function relationDirectionMark(type: ConceptRelationType): "→" | "↔" {
-  return SYMMETRIC_TYPES.has(type) ? "↔" : "→";
-}
-
-function RelationFeedback({ error, notice }: { error: string; notice: string }) {
-  if (error) {
-    return <p className="concept-relation-feedback error" role="alert">{error}</p>;
-  }
-
-  return notice ? (
-    <p className="concept-relation-feedback notice" role="status">{notice}</p>
-  ) : null;
 }
 
 function formatDate(value: string): string {

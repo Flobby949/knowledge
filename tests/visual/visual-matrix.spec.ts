@@ -717,20 +717,11 @@ test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", asyn
   await expect(detail.getByRole("article", { name: /Membership/u })).toHaveCount(
     3,
   );
-  const relations = detail.getByRole("region", { name: "Concept 直接关系" });
+  const relations = detail.getByRole("region", { name: "Concept 自动关系" });
 
-  await relations.getByRole("button", { name: "关联 Concept" }).click();
-  const relationBuilder = relations.getByRole("form", {
-    name: "建立 Concept 关系",
-  });
-
-  await relationBuilder
-    .getByLabel("新 Concept 关系类型")
-    .selectOption("prerequisite");
-  await relationBuilder
-    .getByLabel("新 Concept 关系描述")
-    .fill("下游机制需要先理解变更数据捕获的事件边界。");
-  await expect(relationBuilder).toBeVisible();
+  await expect(relations.getByRole("heading", { name: "AI 自动关系与邻居" }))
+    .toBeVisible();
+  await expect(relations.getByRole("button", { name: "关联 Concept" })).toHaveCount(0);
   await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
   await expectBox(main, { x: 116, y: 72, width: 1_444 });
   await expectBox(workbench, { x: 116, width: 1_444 });
@@ -750,7 +741,7 @@ test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", asyn
   await expectBox(workbench, { x: 116, width: 1_124 });
   await expectBox(catalog, { x: 117, width: 292 });
   await expectBox(stage, { x: 409, width: 830 });
-  await expect(relationBuilder).toBeVisible();
+  await expect(relations).toBeVisible();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBe(1_280);
@@ -859,20 +850,25 @@ test("Concept Candidates / AI 候选 · 1600×1000 审查台与 1280×800 几何
   }
 });
 
-test("Concept Relations / 概念关系 · 1600×1000 双定义审查台与 1280×800 几何", async ({
+test("Concept Relations / 概念关系 · 1600×1000 自动关系台账与 1280×800 几何", async ({
   page,
 }) => {
-  const suggestion = {
-    canDecide: true,
-    confidence: 0.87,
-    createdAt: "2099-08-09T08:00:00.000Z",
-    decidedAt: null,
+  const relation = {
+    ai: {
+      confidence: 0.87,
+      model: { configurationVersion: 9, name: "deepseek-v4-flash" },
+      reason: "两个 Concept 都围绕增量变化的发布与消费，但各自保留独立职责。",
+    },
+    confirmationSource: {
+      id: "30000000-0000-4000-8000-000000000001",
+      type: "ai_automatic",
+    },
+    confirmedAt: "2099-08-09T08:00:00.000Z",
     description: "变更数据捕获为事件协作提供可靠的增量事实来源。",
-    id: "30000000-0000-4000-8000-000000000001",
-    model: { configurationVersion: 1, name: "deepseek-v4-flash" },
+    id: "30000000-0000-4000-8000-000000000002",
     needsReview: false,
-    reason: "两个 Concept 都围绕增量变化的发布与消费，但各自保留独立职责。",
-    relation: null,
+    removed: false,
+    removedAt: null,
     source: {
       archived: false,
       changedSinceSuggestion: false,
@@ -887,7 +883,8 @@ test("Concept Relations / 概念关系 · 1600×1000 双定义审查台与 1280�
       name: "变更数据捕获",
       revisionId: "31000000-0000-4000-8000-000000000001",
     },
-    status: "pending_review",
+    sourceConceptId: "32000000-0000-4000-8000-000000000001",
+    suggestionId: "30000000-0000-4000-8000-000000000001",
     target: {
       archived: false,
       changedSinceSuggestion: false,
@@ -902,27 +899,20 @@ test("Concept Relations / 概念关系 · 1600×1000 双定义审查台与 1280�
       name: "事件驱动协作",
       revisionId: "31000000-0000-4000-8000-000000000002",
     },
+    targetConceptId: "32000000-0000-4000-8000-000000000002",
     type: "extends",
-    updatedAt: "2099-08-09T08:00:00.000Z",
   };
 
-  await page.route(
-    "**/api/v1/concept-relation-suggestions?*",
-    async (route) => {
-      const status = new URL(route.request().url()).searchParams.get("status");
-
-      await route.fulfill({
-        json: { items: status === "pending" ? [suggestion] : [] },
-      });
-    },
-  );
+  await page.route("**/api/v1/concept-relations", async (route) => {
+    await route.fulfill({ json: { items: [relation] } });
+  });
   await page.goto(
-    `${appBaseUrl}/concepts?view=relations&relation=${encodeURIComponent(suggestion.id)}`,
+    `${appBaseUrl}/concepts?view=relations&relation=${encodeURIComponent(relation.id)}`,
   );
 
   const navigation = page.getByRole("navigation", { name: "主导航" });
   const main = page.getByRole("main", { name: "知识概念" });
-  const review = main.getByRole("region", { name: "Concept Relation 审查" });
+  const review = main.getByRole("region", { name: "Concept 自动关系台账" });
   const workbench = review.locator(".concept-relation-workbench");
   const catalog = review.getByRole("complementary", {
     name: "Concept Relation 台账",
@@ -933,7 +923,9 @@ test("Concept Relations / 概念关系 · 1600×1000 双定义审查台与 1280�
     .toBeVisible();
   await expect(review.getByRole("heading", { name: "事件驱动协作" }))
     .toBeVisible();
-  await expect(review.getByLabel("Concept 关系类型")).toHaveValue("extends");
+  await expect(review.getByText("自动关联已启用", { exact: true })).toBeVisible();
+  await expect(review.getByText("AI 自动建立", { exact: true }).first()).toBeVisible();
+  await expect(review.getByRole("button", { name: /确认正式关系/u })).toHaveCount(0);
   await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
   await expectBox(main, { x: 116, y: 72, width: 1_444 });
   await expectBox(workbench, { x: 116, width: 1_444 });
@@ -1323,7 +1315,11 @@ function networkRelation(
       id: id.replace(/^4/u, "5"),
       relationId: id,
       confirmedAt: "2099-08-09T08:00:00.000Z",
-      reason: "视觉基线中的真实确认来源。",
+      ...(kind === "concept_relation" ? { origin: "ai_automatic" as const } : {}),
+      reason:
+        kind === "concept_relation"
+          ? "视觉基线中的真实自动判断来源。"
+          : "视觉基线中的真实确认来源。",
       confidence: 0.88,
     },
   };

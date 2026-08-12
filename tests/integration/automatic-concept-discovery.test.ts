@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AnalysisGenerator } from "../../src/analysis-generator.js";
 import { buildApp } from "../../src/app.js";
 import type { ConceptCandidateGenerator } from "../../src/concept-candidate-generator.js";
+import type { ConceptRelationGenerator } from "../../src/concept-relation-generator.js";
 import type { EmbedText } from "../../src/embedding-provider.js";
 import {
   prepareTestDatabase,
@@ -50,6 +51,9 @@ describe("automatic Concept discovery", () => {
       },
     }),
   );
+  const generateConceptRelation = vi.fn<ConceptRelationGenerator>(async () => ({
+    related: false,
+  }));
   const embedText = vi.fn<EmbedText>(async () => {
     if (embeddingUnavailable) {
       throw new Error("Embedding temporarily unavailable");
@@ -65,6 +69,7 @@ describe("automatic Concept discovery", () => {
       embedText,
       generateAnalysis,
       generateConceptCandidate,
+      generateConceptRelation,
       testModelEndpoint: vi.fn(async () => ({ status: "passed" as const })),
     });
     await app.ready();
@@ -303,6 +308,77 @@ describe("automatic Concept discovery", () => {
       embeddingUnavailable = false;
     }
   });
+
+  it("uses a newly effective knowledge recall to create a formal Concept relation automatically", async () => {
+    const sourcesResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/concept-sources",
+    });
+    const pointIds = sourcesResponse
+      .json<{ items: Array<{ id: string }> }>()
+      .items.slice(0, 4)
+      .map(({ id }) => id);
+
+    expect(pointIds).toHaveLength(4);
+    generateConceptRelation.mockRejectedValueOnce(
+      new Error("relation service temporarily unavailable"),
+    );
+
+    for (const [index, ids] of [pointIds.slice(0, 2), pointIds.slice(2, 4)].entries()) {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/v1/concepts",
+        payload: {
+          name: `自动关系触发 Concept ${index + 1}`,
+          description: `用于验证新增知识自动召回后建立正式关系的 Concept ${index + 1}。`,
+          knowledgePointIds: ids,
+        },
+      });
+
+      expect(created.statusCode).toBe(201);
+    }
+
+    await waitForRelationGenerationCalls(generateConceptRelation, 1);
+    const callsAfterConceptCreation = generateConceptRelation.mock.calls.length;
+    const saved = await createSaveOnlyRecord(
+      app,
+      "新增知识先仅保存时不应触发 Concept 自动关系",
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(generateConceptRelation).toHaveBeenCalledTimes(
+      callsAfterConceptCreation,
+    );
+
+    generateConceptRelation.mockResolvedValue({
+      related: true,
+      type: "extends",
+      direction: "a_to_b",
+      description: "新增知识的全局召回确认两个 Concept 存在扩展关系。",
+      reason: "召回范围中的 Concept 定义形成稳定延伸。",
+      confidence: 0.89,
+    });
+    const taskId = await organizeRecord(app, saved.id, "automatic");
+
+    await waitForAiTask(app, taskId);
+    const relation = await waitForAutomaticConceptRelation(app);
+
+    expect(relation).toMatchObject({
+      confirmationSource: { type: "ai_automatic" },
+      description: "新增知识的全局召回确认两个 Concept 存在扩展关系。",
+      needsReview: false,
+      removed: false,
+      type: "extends",
+    });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/v1/concept-relation-suggestions?status=pending",
+        })
+      ).json<{ items: unknown[] }>().items,
+    ).toEqual([]);
+  });
 });
 
 async function createSaveOnlyRecord(app: FastifyInstance, text: string) {
@@ -423,6 +499,49 @@ async function waitForFailedEmbedding(app: FastifyInstance): Promise<void> {
   }
 
   throw new Error("Expected at least one failed semantic document");
+}
+
+async function waitForRelationGenerationCalls(
+  generator: ReturnType<typeof vi.fn<ConceptRelationGenerator>>,
+  count: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (generator.mock.calls.length >= count) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error(`Concept relation generation did not reach ${count} calls`);
+}
+
+async function waitForAutomaticConceptRelation(app: FastifyInstance) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/concept-relations",
+    });
+    const relation = response.json<{
+      items: Array<{
+        confirmationSource: { type: string };
+        description: string;
+        needsReview: boolean;
+        removed: boolean;
+        type: string;
+      }>;
+    }>().items.find(
+      ({ confirmationSource }) => confirmationSource.type === "ai_automatic",
+    );
+
+    if (relation) {
+      return relation;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error("Automatic Concept relation was not created");
 }
 
 async function activateConfiguration(app: FastifyInstance): Promise<void> {

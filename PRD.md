@@ -79,7 +79,7 @@ AI 结构化整理
 - V1 严格采用单用户数据模型，不内置登录、注册、会话、密码找回或多租户隔离；
 - V1 只交付 PC Web；不开发原生桌面端、移动 Web 或原生移动端，也不为移动设备建立布局与交互验收基线；
 - 不以主动知识缺口分析、弱关联推荐或图谱规模衡量当前产品是否成功；
-- 不把未经用户确认的 AI 关系当作事实。
+- 不把未经确认的 Knowledge Relation Suggestion，或没有输入与模型审计的 AI 连线，当作事实。
 
 ## 4. 目标用户与核心场景
 
@@ -116,9 +116,9 @@ Fragment 的整体标题与摘要，以及 Knowledge Point 的标题、正文和
 
 用户对 Fragment 整体标题与摘要以及 Knowledge Point 标题与正文的修正不改写 AI 原始输出；标签则通过升级候选 Tag 或屏蔽、恢复 Tag Assignment 管理，不把关联改写成内容修正。用户内容修正可以纠正或补充原文没有表达的内容，因为它代表用户自己的认知，而不是 AI 对原文的有据提炼；系统必须明确它由用户撰写。默认展示和搜索使用“生效 AI 版本 + 用户修正”形成的有效知识视图。
 
-### 5.5 AI 关系必须经人工确认
+### 5.5 Knowledge Relation 必须经人工确认
 
-关系发现的置信度只用于排序，不代表事实。关系建议只有经过用户确认，才能成为知识关系。
+两个 Knowledge Point 之间的关系发现置信度只用于排序，不代表事实。V2 Relation Suggestion 只有经过用户确认，才能成为 Knowledge Relation。Concept Relation 使用第 5.9 节的自动维护语义，不受这条人工门约束。
 
 ### 5.6 自动发布不等于用户确认
 
@@ -133,6 +133,10 @@ Fragment 的整体标题与摘要，以及 Knowledge Point 的标题、正文和
 ### 5.8 用户只操作“记录”
 
 Fragment、Fragment Revision、AI Analysis Revision 和 Knowledge Point 是内部领域对象。V1 用户只创建、编辑、浏览和搜索“记录”：每条记录保留原文，并可包含 AI 标题、摘要和一个或多个知识点。用户不需要判断录入内容属于 Fragment 还是 Knowledge Point，也不提供独立手动创建 Knowledge Point 的入口。
+
+### 5.9 Concept Relation 随有效知识自动维护
+
+新增知识生效后的全局召回不仅发现 Concept Candidate，也会召回已经存在的 Concept 并由 AI 判断它们之间是否存在六型关系。相关结果直接形成带输入快照、理由、置信度和实际模型来源的正式 Concept Relation；用户不选择范围、不发起扫描也不确认结果，但可以追溯和撤销错误边。“仅保存”没有生效知识，因此不触发自动关联。
 
 ### 5.9 V1 的 AI 只做有据整理
 
@@ -164,7 +168,7 @@ V1 唯一支持并验收的操作体验是 PC Web，包括记录整理、AI 审�
 | --- | --- | --- | --- |
 | V1 | 建立可用的知识整理与检索闭环 | 不超过 1000 个用户感知字符的纯文本输入、统一标签词表、仅保存或 AI 整理、AI 标题/摘要/知识点/候选标签、Mode A/B、版本化、关键词与简单语义搜索 | 重复检测与合并、长文章与文件导入、独立 Source Material、Concept、正式关系网络、图数据库 |
 | V2 | 增强知识质量并发现关联 | 标签规范化与批量修正、重复检测、合并建议、关系建议与人工确认、实验性知识覆盖分析 | Concept、图谱展示、复杂路径探索 |
-| V3 | 形成个人知识网络 | Concept Candidate、用户确认 Concept、知识点归属、正式关系类型、图谱展示、路径探索 | 全自动且无需确认的知识图谱 |
+| V3 | 形成个人知识网络 | Concept Candidate、用户确认 Concept、知识点归属、自动维护的 Concept Relation、图谱展示、路径探索 | 无来源推理边、全自动创建 Concept、稳定领域本体 |
 
 说明：V1 已生成基础 AI 候选标签；V2 的标签增强指同义词归一、批量治理和跨知识点建议，不是第一次引入标签。
 
@@ -530,7 +534,7 @@ CONFIRMED → REMOVED（用户撤销）
 
 规则：
 
-- 所有 AI 关系建议均需人工确认，Mode A 不适用于关系；
+- 所有 Knowledge Relation Suggestion 均需人工确认，Mode A 不适用于 Knowledge Relation；
 - 用户可修改关系描述或类型后确认；
 - 只有 `CONFIRMED` 关系参与正式关联展示和后续分析；
 - 已拒绝的同一对知识点和同一关系，不应在输入无实质变化时反复推荐；
@@ -679,7 +683,7 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-REL-04` 只有已确认关系进入正式关联结果；
 - `FR-CON-01` V3 可以生成 Concept Candidate；
 - `FR-CON-02` 只有用户确认后才能创建正式 Concept；
-- `FR-CON-03` V3 支持基于确认关系与 Concept 的图谱展示和路径探索。
+- `FR-CON-03` V3 支持基于当前有效正式关系与 Concept 的图谱展示和路径探索。
 - `FR-CON-04` V3.0 用户可以从至少两个当前生效且未排除的 Knowledge Point 主动创建 Concept；名称和描述均为必填，规范化同名 Concept 不得重复；
 - `FR-CON-05` 用户可以修改 Concept 名称和描述，每次修改保留不可变 Concept Revision，且不得改变 Concept 稳定身份；
 - `FR-CON-06` 用户可以为未归档 Concept 增加、移除和恢复 Concept Membership；Membership 始终绑定原 Knowledge Point，操作不得改写或删除知识点；
@@ -697,16 +701,17 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-CON-18` 同一触发分析只能形成一次自动扫描；同一输入内容指纹下已经待处理、确认或拒绝的等价 Candidate 不得再次进入审查队列；Candidate、输入快照、触发来源和全部审查决定必须进入完整导出恢复。
 - `FR-CON-19` 用户可以主动发起全量概念发现；系统必须把所有尚无自动 Scan 且尚无发现待办的当前 `ACTIVE` Analysis Revision 幂等登记到持久化队列，并返回本次登记数量与已覆盖数量。“仅保存”记录没有生效分析，不得纳入；全量发现只生成待确认 Candidate，不得直接创建 Concept。
 - `FR-CON-20` 全量概念发现不得无界并发调用模型；发现队列消费与 Candidate 生成必须具有明确并发上限，并在重复点击时复用已有 Scan 或待办，不重复计算。
-- `FR-CON-21` V3.2 的 Concept Relation 首版只允许 AI Suggestion 经用户人工确认后形成；Suggestion 必须冻结两端 Concept、各自不可变 Concept Revision、当时有效 Membership 集合的 SHA-256 指纹、类型、描述、理由、置信度与模型信息，不保存成员快照。后续直接建立入口由 `FR-CON-30` 与 ADR-0038 增量扩展。
+- `FR-CON-21` Concept Relation 的 AI 主流程在有效知识完成全局召回后自动执行：AI 基于两个 Concept 的当前不可变 Concept Revision、当时有效 Membership 集合的 SHA-256 指纹和召回语义判断是否相关；相关时必须在同一事务中保存类型、方向、描述、理由、置信度、实际模型信息与输入指纹并直接创建正式关系，不相关时也记录该输入已经判断。用户不得承担选择扫描范围、发起扫描或确认结果；旧版 Suggestion 与审查决定只作为历史和导出兼容事实保留。
 - `FR-CON-22` Concept Relation 完全复用 `SIMILAR`、`CONTRASTS`、`PREREQUISITE`、`EXTENDS`、`APPLIES`、`ANALOGY` 六型；其中 `SIMILAR`、`CONTRASTS`、`ANALOGY` 为对称关系，另外三型为有向关系。路径可以反向遍历任一关系，但返回结果必须同时保留规范 source、target 与本次遍历方向。
-- `FR-CON-23` 同一对 Concept 可以同时存在不同类型的有效关系，同一规范端点、方向与类型最多一个有效关系；Suggestion 的冻结输入以及正式关系的端点、类型、描述、确认来源、确认快照和确认时间不得原地改写，撤销只记录结束时间。AI 确认必须绑定新的 Suggestion，用户直接建立必须新增正式关系行而不是复用旧历史。
+- `FR-CON-23` 同一对 Concept 可以同时存在不同类型的有效关系，同一规范端点、方向与类型最多一个有效关系；自动判断记录的冻结输入以及正式关系的端点、类型、描述、来源、快照和建立时间不得原地改写，撤销只记录结束时间。新的 AI 自动判断必须写入新的审计来源，既有用户来源关系不得被改写或伪装成模型结果。
 - `FR-CON-24` 任一端 Concept 归档、当前 Concept Revision 与正式关系冻结版本不一致，或按当前有效 Knowledge Point 计算的有效 Membership 集合指纹变化时，Concept Relation 必须显示 `needsReview` 并退出默认网络与路径；恢复到相同有效输入时可重新满足有效性，历史行不得因复核状态变化被删除。
 - `FR-CON-25` 永久删除 Record 时，指向其 Knowledge Point 的 Concept Membership、对应 Membership 活动和 Candidate 决定成员引用必须在同一删除事务中级联移除；普通业务事务仍不得直接修改或删除 Concept Activity。
 - `FR-CON-26` V3.2 提供局部子图、单节点邻居和路径 API；所有节点引用统一使用 `concept:<uuid>` 或 `knowledge_point:<uuid>` typed key。节点必须携带当前展示内容及 Concept Revision 或 Knowledge Point 来源，边必须携带稳定 `edgeKey`、规范 source/target、关系类型、是否有向、描述和来源/确认记录。
 - `FR-CON-27` 网络只公开 `concept_membership`、`knowledge_relation`、`concept_relation` 三类真实边。Concept Membership 按无向边遍历；后两类关系保留确认时的规范方向，对称类型按无向边表达；路径步骤另行返回 `forward`、`reverse` 或 `undirected` 遍历方向，不得改写正式边。
 - `FR-CON-28` 局部子图固定限制为最多 300 个节点、600 条边和深度 2，并明确返回截断状态；路径固定限制为最大深度 6、最多访问 1000 个节点和 2 秒数据库查询预算，超过预算必须返回明确错误，不得无界扫描或静默降级。
 - `FR-CON-29` V3.3 提供网络节点搜索 API，只返回当前有效 Concept 与当前生效且未排除的 Knowledge Point；查询文本去除首尾空白后为 1–200 个字符，支持按节点类型筛选，单次返回 1–50 项并明确标记截断。排序优先稳定的名称或标题前缀命中，其次使用现有全文/相似能力，最终按 typed key 稳定排序；搜索不得返回归档、过期或需要复核的网络对象。
-- `FR-CON-30` 用户可以从任一未归档 Concept 详情直接选择另一个当前有效 Concept、六种既有关系类型、规范方向和非空描述，建立正式 Concept Relation。直接建立不调用模型、不绑定或伪造模型配置与 Suggestion，确认来源记录为用户；正式关系必须冻结两端当前 Concept Revision 和有效 Membership 指纹，并立即遵循与 AI 确认关系相同的去重、复核、默认网络、路径、撤销和导出恢复规则。
+- `FR-CON-30` 当前产品不提供人工建立 Concept Relation 的界面或写接口；Concept 详情只展示自动关系、邻居、来源、复核状态和撤销历史，并允许撤销错误边。升级前已经存在的用户来源关系继续保留、读取、撤销、导出和恢复，不得改写来源或伪造模型配置。
+- `FR-CON-31` 自动 Concept Relation 必须在当前知识首次生效、Concept 当前 Revision 改变或有效 Membership 增删恢复时事务性登记持久任务；“仅保存”、Mode B 待审、拒绝或丢弃不得触发。任务队列不得绑定或缓存模型配置，文本与 Embedding 调用开始时读取当时唯一 `ACTIVE` 配置；失败任务保留并可恢复，重复触发、重启和重试不得对相同 Concept 对与输入指纹重复调用或重复建边。
 
 ### 10.7 完整导出与恢复
 
@@ -817,7 +822,7 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - `FR-UI-81` V3.4 正式支持当前稳定版 Chrome 与 Edge 桌面端，在 1280×800 与 1600×1000、设备像素比不超过 2 的环境验收。合成的 500 个节点与 1000 条真实边只用于 3D 渲染压力，不改变线上网络 API 的 300 节点／600 边上限；压力场景交互帧时间 p95 不超过 20ms、任一单帧不超过 50ms，确定性布局不超过 250ms，首次可交互不超过 1.5s，页面堆增量不超过 64MB。
 - `FR-UI-82` 首页真实网络不得改名或改型复用旧 Tag 场的无语义随机位置、虚假装饰连线、按关联记录数缩放、`USER_APPROVED`／`CANDIDATE` 完整／断续外圈、Tag 色相或其他认可状态语义。LOD 只能降低标签密度、辉光、粒子和几何细节，不能静默删除 API 已返回的真实节点或边；节点类型、关系类型、方向与状态不能只靠颜色表达。
 - `FR-UI-83` 首页必须提供可键盘操作的 `Concept`／`标签` 双视图切换并记住本地偏好，首次访问仍默认 `Concept`；带网络深链状态进入首页时优先恢复 Concept 视图。标签视图恢复全部现存 Tag 的独立空间场、认可状态和记录数量语义，选择 Tag 进入既有硬筛选搜索；它不得复用 Concept 网络的 typed node、真实边、路径或详情，也不得让标签位置、色相或装饰线看起来像知识关系。两个视图切换时不得改写当前网络 URL，切回 Concept 后必须恢复可由 URL 表达的选择、筛选、路径和抽屉状态。
-- `FR-UI-84` 未归档 Concept 的“直接关系与邻居”区域必须提供可见的“关联 Concept”入口；用户可以在同一详情工作台选择另一端、六型关系、方向和描述后建立正式关系，不需要先运行 AI 扫描。列表必须区分“用户直接建立”与“AI 建议后确认”，并继续提供邻居导航、待复核状态、撤销和撤销历史；关系保存成功后必须明确说明它已进入默认知识网络。
+- `FR-UI-84` Concept 关系主视图必须是自动关系台账，显示自动关联已启用、生效与撤销历史、两端冻结定义、AI 理由、置信度和实际执行模型，不得要求用户扫描、建立或确认。Concept 详情的“AI 自动关系与邻居”区域只提供查看、邻居导航和撤销；列表继续区分“AI 自动建立”、既有“用户直接建立”与旧版“AI 建议后确认”的历史来源。
 
 ## 11. 主要产品界面
 
@@ -1102,7 +1107,7 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - **用户修正加入原文没有的内容**：允许保存并作为有效知识参与搜索；明确标注为用户内容，保留 AI 原值与原 Evidence Span，且不修改 Fragment Revision；
 - **用户不采用已发布知识点**：将独立使用状态改为 `EXCLUDED`，立即退出有效展示、搜索和标签聚合；不删除历史或改变原发布状态，用户可以恢复；
 - **新分析再次生成曾不采用的相似内容**：不读取或迁移旧知识点的 `usage_status`；Mode A 可正常切换，新知识点默认 `INCLUDED`，用户需要时再次执行“不采用”；
-- **模型给出高置信度错误关系**：仍必须由用户确认，置信度不改变流程。
+- **模型给出高置信度错误 Knowledge Relation**：仍必须由用户确认，置信度不改变流程；错误的自动 Concept Relation 必须显示 AI 来源并允许撤销。
 
 ## 14. 非功能需求
 
@@ -1298,7 +1303,7 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 
 ### 16.2 V2 完成标准
 
-- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；V2 以完整导出格式 4 完成无损往返，V3.0 格式 5 增加全部 Concept 事实，V3.1 格式 6 增加全部终态 Concept Candidate 与冻结审查决定，格式 7 再保存自动扫描的触发分析来源，当前格式 8 增加 Concept Relation Suggestion 与用户确认后的 Concept Relation；恢复器支持格式 4–8，并把旧格式缺少的集合或字段严格适配为空集合或 `null`。格式 4 是首个承诺长期恢复兼容的导出格式，格式 1–3 不属于兼容范围；
+- V1 原始记录、全部 Fragment Revision、AI Analysis Revision、Knowledge Point、Evidence Span、用户修正、Tag 与 Tag Assignment 在升级后保持原身份、内容、状态和引用；V2 迁移只新增结构，不批量改写 V1 领域行；V2 以完整导出格式 4 完成无损往返，V3.0 格式 5 增加全部 Concept 事实，V3.1 格式 6 增加全部终态 Concept Candidate 与冻结审查决定，格式 7 再保存自动扫描的触发分析来源，当前格式 8 增加 Concept Relation Suggestion 与正式 Concept Relation；恢复器支持格式 4–8，并把旧格式缺少的集合或字段严格适配为空集合或 `null`。格式 4 是首个承诺长期恢复兼容的导出格式，格式 1–3 不属于兼容范围；
 - 用户能为已认可标签维护别名，并能把一个或多个同义标签合并到主标签后撤销；合并前后的 Tag 身份、Assignment 来源和历史版本均不丢失，有效展示与检索按主标签聚合；
 - 系统能提示重复知识并提供不丢来源的合并建议；
 - 系统能生成带理由、证据和置信度的关系建议；
@@ -1442,7 +1447,7 @@ Concept 不由聚类阈值自动创建。聚类或相似度只能用于产生候
 - 多选 Tag 搜索固定使用 OR；记录级有效用户标签与当前纳入知识点的有效 AI 标签共同构成可匹配集合，任一所选标签命中即可返回记录。
 - 文本查询与 Tag 条件之间使用 AND；Tag 是硬筛选，文本为空时可以仅按 Tag 浏览记录。
 - Relation Discovery 与 Knowledge Analysis 是两个独立职责；
-- AI 关系建议必须人工确认后才成为知识关系。
+- Knowledge Relation Suggestion 必须人工确认后才成为 Knowledge Relation；Concept Relation 按 `FR-CON-21` 自动维护。
 - V1 完整导出采用 ZIP 双层格式：Markdown 用于直接阅读，带格式版本号的 JSON 用于无损重建领域数据；Embedding 等派生数据和密钥、日志不导出。
 - V1 支持将完整 ZIP 全有或全无地恢复到空实例，不支持与已有数据合并；恢复保留领域数据与历史引用，但不覆盖部署配置和凭据，并重新生成派生索引。
 - V1 不检测或提示精确重复、语义重复，也不阻止重复内容保存；重复识别和合并统一属于 V2。

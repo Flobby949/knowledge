@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool, PoolClient } from "pg";
 
+import { enqueueConceptRelationDiscoveryForConcept } from "./concept-relation-routes.js";
 import { normalizeConceptName } from "./domain/concept-name.js";
 
 type Timestamp = Date | string;
@@ -86,9 +87,9 @@ interface ConceptSourceRow {
 
 export function registerConceptRoutes(
   app: FastifyInstance,
-  options: { pool: Pool },
+  options: { onConceptChanged?: (conceptId: string) => void; pool: Pool },
 ): void {
-  const { pool } = options;
+  const { onConceptChanged, pool } = options;
 
   app.get<{ Querystring: { q?: string } }>(
     "/api/v1/concept-sources",
@@ -261,6 +262,7 @@ export function registerConceptRoutes(
         sequenceNumber += 1;
       }
 
+      await enqueueConceptRelationDiscoveryForConcept(client, conceptId);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -277,6 +279,8 @@ export function registerConceptRoutes(
     } finally {
       client.release();
     }
+
+    onConceptChanged?.(conceptId);
 
     const detail = await readConceptDetail(pool, conceptId);
 
@@ -424,6 +428,7 @@ export function registerConceptRoutes(
            VALUES ($1, $2, 'UPDATED', $3)`,
           [request.params.id, sequenceNumber, revisionId],
         );
+        await enqueueConceptRelationDiscoveryForConcept(client, request.params.id);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");
@@ -443,6 +448,8 @@ export function registerConceptRoutes(
       } finally {
         client.release();
       }
+
+      onConceptChanged?.(request.params.id);
 
       const detail = await readConceptDetail(pool, request.params.id);
 
@@ -534,6 +541,7 @@ export function registerConceptRoutes(
           [request.params.id, sequenceNumber, membershipId],
         );
         await touchConcept(client, request.params.id);
+        await enqueueConceptRelationDiscoveryForConcept(client, request.params.id);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");
@@ -541,6 +549,8 @@ export function registerConceptRoutes(
       } finally {
         client.release();
       }
+
+      onConceptChanged?.(request.params.id);
 
       const detail = await requiredConceptDetail(pool, request.params.id);
 
@@ -620,6 +630,7 @@ export function registerConceptRoutes(
           [request.params.id, sequenceNumber, membership.id],
         );
         await touchConcept(client, request.params.id);
+        await enqueueConceptRelationDiscoveryForConcept(client, request.params.id);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");
@@ -627,6 +638,8 @@ export function registerConceptRoutes(
       } finally {
         client.release();
       }
+
+      onConceptChanged?.(request.params.id);
 
       return { detail: await requiredConceptDetail(pool, request.params.id) };
     },
@@ -705,6 +718,7 @@ export function registerConceptRoutes(
           [request.params.id, sequenceNumber, membership.id],
         );
         await touchConcept(client, request.params.id);
+        await enqueueConceptRelationDiscoveryForConcept(client, request.params.id);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");
@@ -712,6 +726,8 @@ export function registerConceptRoutes(
       } finally {
         client.release();
       }
+
+      onConceptChanged?.(request.params.id);
 
       return { detail: await requiredConceptDetail(pool, request.params.id) };
     },
@@ -765,6 +781,7 @@ export function registerConceptRoutes(
         });
       }
 
+      onConceptChanged?.(request.params.id);
       return { detail: await requiredConceptDetail(pool, request.params.id) };
     },
   );
@@ -806,6 +823,9 @@ async function setConceptArchiveState(
        VALUES ($1, $2, $3)`,
       [conceptId, sequenceNumber, archive ? "ARCHIVED" : "RESTORED"],
     );
+    if (!archive) {
+      await enqueueConceptRelationDiscoveryForConcept(client, conceptId);
+    }
     await client.query("COMMIT");
     return "changed";
   } catch (error) {

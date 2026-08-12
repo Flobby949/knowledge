@@ -32,10 +32,10 @@
 
 ### 3.1 人工确认边界
 
-- AI 输出只能形成 Candidate 或 Suggestion；
-- 只有用户明确确认后才能形成 Concept 或正式关系；
-- Mode A 不适用于 Concept 和知识关系；
-- 相似度、聚类结果和模型置信度都不能直接进入正式知识网络。
+- AI 输出可以形成待审 Concept Candidate、待审 Knowledge Relation Suggestion，或带完整审计的自动 Concept Relation 判断；
+- 只有用户明确确认后才能形成 Concept 或 Knowledge Relation；Concept Relation 按 ADR-0039 随有效知识召回自动维护；
+- Mode A 不直接创建 Concept，但知识成为当前有效结果后会触发自动 Concept Relation；
+- 相似度只负责召回，不能单独成边；自动 Concept Relation 还必须经过文本模型判断并保存输入、理由、置信度与实际模型来源。
 
 ### 3.2 版本与溯源
 
@@ -262,9 +262,9 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 - 节点：有效 Concept、当前生效且未排除的 Knowledge Point；
 - 边：`concept_membership`，连接有效 Concept 与当前有效 Knowledge Point，按无向边遍历；
 - 边：`knowledge_relation`，连接两个当前有效 Knowledge Point，只包含 V2 已确认且未撤销、输入仍有效的 Knowledge Relation；
-- 边：`concept_relation`，连接两个有效 Concept，只包含 V3 已确认且未撤销、冻结 Revision 与 Membership 指纹仍有效的 Concept Relation。
+- 边：`concept_relation`，连接两个有效 Concept，只包含 V3 正式、未撤销且冻结 Revision 与 Membership 指纹仍有效的 Concept Relation。
 
-默认网络和路径只使用当前有效且已确认的事实。历史端点、已撤销边和需要复核的边仍可在详情中查看，但不参与默认遍历。
+默认网络和路径只使用当前有效且具有明确来源的正式事实。历史端点、已撤销边和需要复核的边仍可在详情中查看，但不参与默认遍历。
 
 ### 8.3 交付范围
 
@@ -275,24 +275,25 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 - 提供 `GET /api/v1/network/path` 探索有边界路径；`from` 与 `to` 也使用 typed key；
 - 节点返回当前内容及 Concept Revision 或 Knowledge Point 来源；边返回稳定 `edgeKey`、三类真实 `kind`、规范 source/target、关系类型、是否有向、描述和来源/确认记录；路径另返回有序节点、真实边及每一步的 `forward`、`reverse` 或 `undirected` 遍历方向；
 - Concept 详情展示直接邻居和已确认关系；
-- Concept Relation Suggestion 支持扫描、列表、修改后确认、拒绝；正式 Concept Relation 另支持用户从 Concept 详情直接建立、列表和撤销；
+- 有效知识和 Concept 输入变化登记持久化自动关联任务，执行时使用最新生效模型配置进行全局召回与 AI 判断，相关结果直接建立正式 Concept Relation；关系台账展示来源、实际模型、理由、生效状态和撤销历史，用户无需扫描或确认；
+- Concept 详情只展示、导航和撤销自动正式关系，不要求用户建立；既有用户来源关系以及旧版 Suggestion、确认与拒绝继续保留为历史兼容事实；
 - 所有网络对象和确认记录进入格式 8 完整导出恢复，恢复器继续接受格式 4–7；
 - 局部子图最多 300 个节点、600 条边、深度 2，并返回节点/边截断状态；路径最大深度 6、最多访问 1000 个节点并使用 2 秒数据库查询预算，超过预算返回明确错误。
 
 ### 8.4 关系决策门
 
-以下问题已经在 Concept Relation 迁移前确定，并由 PRD、CONTEXT 与 ADR-0034 固定：
+以下问题先由 ADR-0034、ADR-0038 固定首版，再由 ADR-0039 根据真实使用升级自动关联入口：
 
-- [x] V3.2 第一版只允许 AI Suggestion 经用户人工确认形成正式 Concept Relation；后续由 ADR-0038 增量加入用户直接建立入口，AI 仍不得自动写边；
+- [x] Concept Relation 由有效知识召回或 Concept 输入变化自动触发；AI 判断相关后直接建立带审计的正式边，不要求用户扫描、建立或确认，产品不提供人工创建入口；
 - [x] 完全复用 V2 六种预设类型；`SIMILAR`、`CONTRASTS`、`ANALOGY` 对称，`PREREQUISITE`、`EXTENDS`、`APPLIES` 有向；
 - [x] 路径允许反向遍历，但每一步保留正式关系的规范 source、target 与本次遍历方向；
 - [x] 同一对 Concept 可以同时存在不同类型的有效关系，同一规范端点、方向与类型最多一个有效关系；
-- [x] Suggestion 冻结两端不可变 Concept Revision 与当时有效 Membership 集合的 SHA-256 指纹，不建立成员快照表；
+- [x] 自动判断冻结两端不可变 Concept Revision 与当时有效 Membership 集合的 SHA-256 指纹，并记录实际执行模型，不建立成员快照表；
 - [x] 端点归档、当前 Revision 或有效 Membership 集合变化使正式边需要复核并退出默认网络，建议、确认、撤销和过期历史均不删除。
 
 ### 8.5 路径语义
 
-- 路径是现有确认事实的遍历结果，不是 AI 推理链；
+- 路径是现有有效正式事实的遍历结果，不是 AI 推理链；
 - 每一步必须引用一个真实 Membership、Knowledge Relation 或 Concept Relation；
 - 反向遍历只改变该路径步骤的行进方向，不改写关系确认时的规范方向；
 - 系统不得为了连通两个节点而生成不存在的中间关系；
@@ -478,8 +479,8 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 - Concept 别名、层级和合并；
 - 用户自定义关系类型及关系类型管理器；
 - Knowledge Point 跨分析版本自动身份映射；
-- 无用户动作的持续后台聚类或自动归属；
-- 自动创建、自动修复或自动删除正式图谱边；
+- 无知识生效或 Concept 输入变化触发的持续后台聚类、自动归属或无界重算；
+- 自动创建 Concept、自动补全推理边，或无审计地修复、删除正式图谱边；
 - 图数据库、搜索集群或独立图计算服务；
 - 基于图谱生成无来源的问答答案；
 - 移动端专用图谱体验。
@@ -491,7 +492,8 @@ V3.1 实施时以本次生效知识点为种子，按语义相似度补充召回
 | V2.1 V2 收尾 | 已完成 | 2026-08-11 | PRD 16.2、格式 4 往返与全量自动化验收通过 |
 | V3.0 Concept 核心 | 已完成 | 2026-08-11 | 稳定版本与 Membership、独立工作区、格式 5 与格式 4 适配均通过验收 |
 | V3.1 Concept Candidate | 已完成 | 2026-08-11 | 新知识自动召回、一键补齐历史发现、三种保存模式边界、冻结证据、人工晋级与格式 7 均通过验收 |
-| V3.2 知识网络语义 | 已完成 | 2026-08-12 | Concept Relation 人工审查、三类真实边、typed-key 邻居/子图/路径 API、固定预算与格式 8（兼容格式 4–7）均通过验收 |
+| V3.2 知识网络语义 | 已完成 | 2026-08-12 | Concept Relation 六型与快照、三类真实边、typed-key 邻居/子图/路径 API、固定预算与格式 8（兼容格式 4–7）均通过验收 |
 | V3.3 功能性图谱 | 已完成 | 2026-08-12 | 独立 `/network`、Concept-first 局部展开、确定性 2D 布局、真实路径、URL/抽屉/列表降级与 300 节点/600 边预算均通过验收 |
 | V3.4 3D 体验升级 | 已完成 | 2026-08-12 | 首页支持 Concept／标签双视图；Concept 复用共享网络控制器、确定性 x/y + 稳定浅层 z、URL/抽屉/路径及 `3D → 2D → list`，标签场保持独立导航语义；已通过双浏览器自动化、视觉、性能与本地 Docker 部署验收 |
 | V3.4.1 Concept 直接关系 | 已完成 | 2026-08-12 | Concept 详情可直接选择另一端、六型、方向和描述建立正式边；用户来源不绑定模型配置，关系冻结端点快照并进入现有复核、网络、路径、撤销与格式 8 往返 |
+| V3.4.2 Concept 自动关系 | 实现中 | — | 有效知识全局召回后自动判断并建立正式 Concept Relation；队列不绑定模型配置，失败恢复使用最新配置，主界面不再要求扫描或确认 |

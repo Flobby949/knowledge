@@ -15,7 +15,7 @@
 - **统一标签体系**：手动标签与 AI 候选标签共享词表，并保留创建来源和认可状态。
 - **可维护 Concept**：可以把多个当前知识点组织成稳定定义，保留定义版本、成员变更、来源状态和归档历史。
 - **AI Concept 候选**：新知识生效后自动从全局知识点召回关联内容，也可一键为尚未覆盖的历史知识补做全量发现；“仅保存”不进入 Concept 关联，候选只有人工编辑并确认后才会晋级为正式 Concept。
-- **功能性知识网络**：Concept Relation 可由用户直接建立，或先经 AI 建议再人工确认；独立 `/network` 工作区只绘制真实有效的 Membership、Knowledge Relation 与 Concept Relation，支持节点搜索、局部展开、来源抽屉、服务端路径和键盘等价列表。
+- **功能性知识网络**：新知识生效并完成全局召回后，AI 自动判断并建立带模型、理由和输入快照的 Concept Relation；用户也可直接补充或撤销关系。独立 `/network` 工作区只绘制真实有效的 Membership、Knowledge Relation 与 Concept Relation，支持节点搜索、局部展开、来源抽屉、服务端路径和键盘等价列表。
 - **Concept／标签双视图首页**：首次默认展示真实 3D Concept 网络，也可随时切换到全部现存 Tag 的独立标签场；Concept 与 `/network` 共享真实边、URL、抽屉和路径，标签只用于进入记录筛选，两种语义不会混合。
 - **关键词与语义检索**：同时搜索原文、AI 概览、知识点和标签，并按同一记录聚合结果。
 - **完整数据管理**：支持版本历史、归档、永久删除，以及 Markdown + JSON 完整导出和恢复。
@@ -88,7 +88,7 @@ pnpm run dev
 
 网络节点统一使用 `concept:<uuid>` 或 `knowledge_point:<uuid>` typed key。公开读取接口为 `GET /api/v1/network/nodes/search`、`GET /api/v1/network/subgraph`、`GET /api/v1/network/nodes/:typedKey/neighbors` 和 `GET /api/v1/network/path`；只返回 `concept_membership`、`knowledge_relation`、`concept_relation` 三类真实边，并保留来源、确认记录、规范端点和路径遍历方向。
 
-局部子图最多返回 300 个节点、600 条边并展开到深度 2；路径最多搜索深度 6、访问 1000 个节点，并受 2 秒数据库查询预算保护。Concept Relation 可以在 Concept 详情中直接选择另一端、六型、方向和描述建立，也可以扫描 AI Suggestion 后修改确认；两种来源都支持复核与撤销，用户直接建立不会调用或绑定模型配置。
+局部子图最多返回 300 个节点、600 条边并展开到深度 2；路径最多搜索深度 6、访问 1000 个节点，并受 2 秒数据库查询预算保护。Concept Relation 由有效知识触发全局召回并自动建立，关系台账展示实际执行模型、AI 理由、生效状态与撤销历史；Concept 详情用于查看、导航和撤销错误边，不要求用户扫描、选择范围、建立或确认关系。
 
 `/network` 默认以 Concept 为入口，选择或搜索后按需展开 Knowledge Point。2D 布局由真实 typed node key 与 edge key 确定性生成，局部展开不会移动已有节点；筛选、路径、选中对象和列表模式可由 URL 恢复。布局 Worker 或 SVG 失败时会保留当前状态并降级到键盘可操作列表。
 
@@ -124,6 +124,7 @@ V3.4 首页的 Concept 视图复用同一网络控制器和确定性布局：3D 
 - [架构决策记录](docs/adr)
 - [Concept Relation 的确认、方向与复核边界](docs/adr/0034-concept-relations-require-confirmation.md)
 - [用户直接建立 Concept Relation](docs/adr/0038-users-can-create-concept-relations-directly.md)
+- [知识召回后自动维护 Concept Relation](docs/adr/0039-concept-relations-are-automatically-maintained-after-knowledge-recall.md)
 - [功能性网络的确定性 2D 布局与降级合同](docs/adr/0035-network-workspace-uses-deterministic-2d-layout.md)
 - [首页真实 3D 网络复用功能性网络合同](docs/adr/0036-home-3d-reuses-network-workspace-contract.md)
 - [本地开发环境](docs/DEVELOPMENT.md)

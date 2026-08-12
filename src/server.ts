@@ -131,7 +131,7 @@ async function generateE2eConceptRelation({
     type: "extends",
     direction: "a_to_b",
     description: `${conceptA.name} 的机制延伸到 ${conceptB.name}。`,
-    reason: "两个 Concept 的定义与成员语义接近，适合交由用户判断。",
+    reason: "两个 Concept 的定义与成员语义接近，适合自动建立正式关系。",
     confidence: 0.86,
   };
 }

@@ -11,6 +11,7 @@ import {
   type GeneratedConceptCandidate,
 } from "./concept-candidate-generator.js";
 import { recallConceptKnowledgePoints } from "./concept-recall.js";
+import { enqueueConceptRelationDiscoveryForConcept } from "./concept-relation-routes.js";
 import { readConceptDetail } from "./concept-routes.js";
 import { normalizeConceptName } from "./domain/concept-name.js";
 import { decryptCredential } from "./model-credentials.js";
@@ -111,6 +112,7 @@ export function registerConceptCandidateRoutes(
   options: {
     credentialSecret: string;
     generateConceptCandidate: ConceptCandidateGenerator;
+    onConceptChanged?: (conceptId: string) => void;
     pool: Pool;
     scheduleSemanticIndex: () => Promise<void>;
   },
@@ -118,6 +120,7 @@ export function registerConceptCandidateRoutes(
   const {
     credentialSecret,
     generateConceptCandidate,
+    onConceptChanged,
     pool,
     scheduleSemanticIndex,
   } = options;
@@ -558,6 +561,8 @@ export function registerConceptCandidateRoutes(
       if (accepted.status !== "accepted") {
         throw new Error("Unhandled Concept Candidate acceptance result");
       }
+
+      onConceptChanged?.(accepted.conceptId);
 
       const [scan, concept] = await Promise.all([
         readConceptCandidateScan(pool, accepted.scanId),
@@ -1184,6 +1189,7 @@ async function acceptConceptCandidate(
         WHERE id = $1`,
       [input.candidateId, conceptId, input.name, input.description],
     );
+    await enqueueConceptRelationDiscoveryForConcept(client, conceptId);
     await client.query("COMMIT");
     return { status: "accepted", conceptId, scanId: candidate.scan_id };
   } catch (error) {

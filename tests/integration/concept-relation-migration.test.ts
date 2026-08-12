@@ -410,8 +410,129 @@ it("backfills AI confirmation snapshots and permits immutable user-authored rela
   }
 }, 30_000);
 
+it("adds automatic Concept relation audits and queues active knowledge without caching a model configuration", async () => {
+  const database = prepareTestDatabase({
+    migrationsThrough: "0023_user_concept_relations.sql",
+  });
+  const pool = new Pool({ connectionString: database.databaseUrl });
+  const client = await pool.connect();
+
+  try {
+    const seeded = await seedConceptHistory(client);
+    const migration = await readFile(
+      new URL(
+        "../../migrations/0024_automatic_concept_relations.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    await client.query(migration);
+
+    expect(
+      await client.query<{ column_name: string }>(
+        `SELECT column_name
+           FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'concept_relation_discovery_queue'
+          ORDER BY ordinal_position`,
+      ),
+    ).toMatchObject({
+      rows: [
+        { column_name: "id" },
+        { column_name: "analysis_revision_id" },
+        { column_name: "concept_id" },
+        { column_name: "generation" },
+        { column_name: "enqueued_at" },
+        { column_name: "processed_at" },
+        { column_name: "last_failure_message" },
+      ],
+    });
+    expect(
+      await client.query(
+        `SELECT analysis_revision_id, concept_id, processed_at
+           FROM concept_relation_discovery_queue`,
+      ),
+    ).toMatchObject({
+      rowCount: 1,
+      rows: [
+        {
+          analysis_revision_id: seeded.analysisRevisionId,
+          concept_id: null,
+          processed_at: null,
+        },
+      ],
+    });
+
+    const suggestionId = randomUUID();
+    const relationId = randomUUID();
+
+    await insertSuggestion(client, seeded, {
+      id: suggestionId,
+      inputFingerprint: "8".repeat(64),
+      relationType: "EXTENDS",
+      status: "CONFIRMED",
+    });
+    await client.query(
+      `INSERT INTO concept_relations
+         (id, suggestion_id, confirmation_source, source_concept_id,
+          target_concept_id, relation_type, description)
+       VALUES ($1, $2, 'AI_AUTOMATIC', $3, $4, 'EXTENDS',
+               'AI 自动建立的正式关系。')`,
+      [
+        relationId,
+        suggestionId,
+        seeded.sourceConceptId,
+        seeded.targetConceptId,
+      ],
+    );
+    await client.query(
+      `INSERT INTO concept_relation_automatic_evaluations
+         (pair_key, input_fingerprint, outcome, relation_id,
+          model_configuration_version, text_model)
+       VALUES ('concept-a:concept-b', $1, 'RELATED', $2, 9, 'latest-model')`,
+      ["8".repeat(64), relationId],
+    );
+
+    expect(
+      await client.query(
+        `SELECT confirmation_source
+           FROM concept_relations
+          WHERE id = $1`,
+        [relationId],
+      ),
+    ).toMatchObject({ rows: [{ confirmation_source: "AI_AUTOMATIC" }] });
+    await expect(
+      client.query(
+        `INSERT INTO concept_relations
+           (confirmation_source, source_concept_id, target_concept_id,
+            source_concept_revision_id, target_concept_revision_id,
+            source_membership_fingerprint, target_membership_fingerprint,
+            relation_type, description)
+         VALUES ('AI_AUTOMATIC', $1, $2, $3, $4, $5, $6,
+                 'APPLIES', '缺少 AI 审计来源。')`,
+        [
+          seeded.sourceConceptId,
+          seeded.targetConceptId,
+          seeded.sourceRevisionId,
+          seeded.targetRevisionId,
+          seeded.sourceMembershipFingerprint,
+          seeded.targetMembershipFingerprint,
+        ],
+      ),
+    ).rejects.toMatchObject({
+      constraint: "concept_relations_confirmation_snapshot",
+    });
+  } finally {
+    client.release();
+    await pool.end();
+    database.dispose();
+  }
+}, 30_000);
+
 interface SeededConceptHistory {
   activityId: string;
+  analysisRevisionId: string;
   sourceConceptId: string;
   sourceMembershipFingerprint: string;
   sourceRevisionId: string;
@@ -521,6 +642,7 @@ async function seedConceptHistory(
 
   return {
     activityId,
+    analysisRevisionId,
     sourceConceptId,
     sourceMembershipFingerprint: conceptMembershipFingerprint([
       { id: membershipId, knowledgePointId },

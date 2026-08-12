@@ -403,7 +403,7 @@ interface ConceptRelationSuggestionSnapshotRow extends DomainRow {
 interface ConceptRelationSnapshotRow extends DomainRow {
   id: string;
   suggestion_id: string | null;
-  confirmation_source: "AI_SUGGESTION" | "USER";
+  confirmation_source: "AI_AUTOMATIC" | "AI_SUGGESTION" | "USER";
   source_concept_id: string;
   target_concept_id: string;
   source_concept_revision_id: string;
@@ -2271,7 +2271,11 @@ function validateConceptRelationRow(row: DomainRow): void {
   ]);
   requireUuid(row, "id");
   requireNullableUuid(row, "suggestion_id");
-  requireEnum(row, "confirmation_source", ["AI_SUGGESTION", "USER"]);
+  requireEnum(row, "confirmation_source", [
+    "AI_AUTOMATIC",
+    "AI_SUGGESTION",
+    "USER",
+  ]);
   requireUuid(row, "source_concept_id");
   requireUuid(row, "target_concept_id");
   requireUuid(row, "source_concept_revision_id");
@@ -2285,7 +2289,7 @@ function validateConceptRelationRow(row: DomainRow): void {
 
   if (
     row.source_concept_id === row.target_concept_id ||
-    (row.confirmation_source === "AI_SUGGESTION") !==
+    (row.confirmation_source !== "USER") !==
       (row.suggestion_id !== null) ||
     (isSymmetricRelationType(row.relation_type) &&
       (row.source_concept_id as string) >= (row.target_concept_id as string)) ||

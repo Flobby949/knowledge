@@ -23,9 +23,9 @@ import {
   type ConceptSummary,
 } from "./api.js";
 import { ConceptCandidatesPanel } from "./concept-candidates-panel.js";
+import { ConceptRelationsLedger } from "./concept-relations-ledger.js";
 import {
   ConceptRelationsForConcept,
-  ConceptRelationsPanel,
 } from "./concept-relations-panel.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
@@ -251,14 +251,14 @@ export function ConceptsPage() {
             type="button"
           >
             Concept 关系
-            <span>扫描、确认与邻居历史</span>
+            <span>自动关联、网络边与历史</span>
           </button>
         </nav>
 
         {relationView ? (
-          <ConceptRelationsPanel
-            initialSuggestionId={requestedRelationId}
-            onSelectSuggestion={(id) =>
+          <ConceptRelationsLedger
+            initialRelationId={requestedRelationId}
+            onSelectRelation={(id) =>
               setSearchParams({ relation: id, view: "relations" })
             }
           />
@@ -603,9 +603,7 @@ function ConceptDetailWorkspace({
       ) : null}
 
       <ConceptRelationsForConcept
-        canCreate={concept.lifecycle === "active"}
         conceptId={concept.id}
-        conceptName={concept.name}
       />
 
       <section aria-label="Concept Membership" className="concept-membership-section">

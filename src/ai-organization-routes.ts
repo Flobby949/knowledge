@@ -5,6 +5,7 @@ import type { Pool, PoolClient } from "pg";
 
 import type { AnalysisGenerator, GeneratedAnalysis } from "./analysis-generator.js";
 import { enqueueConceptCandidateDiscovery } from "./concept-candidate-routes.js";
+import { enqueueConceptRelationDiscoveryForAnalysis } from "./concept-relation-routes.js";
 import {
   validateAnalysisOutput,
   type AnalysisOutput,
@@ -1008,6 +1009,7 @@ async function settleFirstReviewIfComplete(
     [recordId, analysisId],
   );
   await enqueueConceptCandidateDiscovery(client, analysisId);
+  await enqueueConceptRelationDiscoveryForAnalysis(client, analysisId);
   return true;
 }
 
@@ -1101,6 +1103,7 @@ async function decideOrganizationCandidate(options: {
       [recordId, candidateId],
     );
     await enqueueConceptCandidateDiscovery(client, candidateId);
+    await enqueueConceptRelationDiscoveryForAnalysis(client, candidateId);
     await client.query("COMMIT");
     return true;
   } catch (error) {
@@ -1847,6 +1850,7 @@ async function publishAnalysis(
         [task.record_id, analysisId],
       );
       await enqueueConceptCandidateDiscovery(client, analysisId);
+      await enqueueConceptRelationDiscoveryForAnalysis(client, analysisId);
     }
 
     await client.query(

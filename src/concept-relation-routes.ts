@@ -10,6 +10,7 @@ import {
   type GeneratedConceptRelation,
   type GeneratedConceptRelationType,
 } from "./concept-relation-generator.js";
+import { recallConceptKnowledgePoints } from "./concept-recall.js";
 import {
   SYMMETRIC_CONCEPT_RELATION_TYPES,
   type ConceptRelationType,
@@ -94,7 +95,11 @@ interface ConceptRelationSuggestionRow {
 }
 
 interface ConceptRelationRow {
-  confirmation_source: "AI_SUGGESTION" | "USER";
+  ai_confidence: number | null;
+  ai_model_configuration_version: number | null;
+  ai_reason: string | null;
+  ai_text_model: string | null;
+  confirmation_source: "AI_AUTOMATIC" | "AI_SUGGESTION" | "USER";
   confirmed_at: Timestamp;
   description: string;
   id: string;
@@ -113,10 +118,18 @@ interface ConceptRelationRow {
   target_name: string;
 }
 
+interface ConceptRelationDiscoveryRow {
+  analysis_revision_id: string | null;
+  concept_id: string | null;
+  generation: string;
+  id: string;
+}
+
 const CONCEPT_RELATION_RECALL_THRESHOLD = 0.65;
 const MAX_CONCEPT_RELATION_CANDIDATES = 12;
 const MAX_SCANNED_CONCEPTS = 100;
 const CONCEPT_RELATION_SCAN_TIMEOUT_MS = 900_000;
+const AUTOMATIC_RELATION_POLICY_VERSION = "automatic-v1";
 const PUBLIC_CONCEPT_RELATION_TYPES = new Set<GeneratedConceptRelationType>([
   "analogy",
   "applies",
@@ -126,15 +139,130 @@ const PUBLIC_CONCEPT_RELATION_TYPES = new Set<GeneratedConceptRelationType>([
   "similar",
 ]);
 
+export interface ConceptRelationAutomation {
+  scheduleForAnalysis(analysisRevisionId: string): void;
+  scheduleForConcept(conceptId: string): void;
+  schedulePending(): Promise<void>;
+  settle(): Promise<void>;
+}
+
 export function registerConceptRelationRoutes(
   app: FastifyInstance,
   options: {
     credentialSecret: string;
     generateConceptRelation: ConceptRelationGenerator;
     pool: Pool;
+    scheduleSemanticIndex: () => Promise<void>;
   },
-): void {
-  const { credentialSecret, generateConceptRelation, pool } = options;
+): ConceptRelationAutomation {
+  const {
+    credentialSecret,
+    generateConceptRelation,
+    pool,
+    scheduleSemanticIndex,
+  } = options;
+  const backgroundWork = new Set<Promise<void>>();
+  const scheduledJobs = new Set<string>();
+  let discoveryTail = Promise.resolve();
+  const track = <T>(operation: Promise<T>): Promise<T> => {
+    const settled = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    backgroundWork.add(settled);
+    void settled.finally(() => backgroundWork.delete(settled));
+    return operation;
+  };
+  const scheduleJob = (jobId: string) => {
+    if (scheduledJobs.has(jobId)) {
+      return;
+    }
+
+    scheduledJobs.add(jobId);
+    const pending = discoveryTail
+      .then(() =>
+        processAutomaticConceptRelationDiscovery({
+          credentialSecret,
+          generateConceptRelation,
+          jobId,
+          log: app.log,
+          pool,
+          scheduleSemanticIndex,
+        }),
+      )
+      .catch((error) =>
+        app.log.error(
+          { err: error, jobId },
+          "Automatic Concept relation discovery failed",
+        ),
+      )
+      .finally(async () => {
+        scheduledJobs.delete(jobId);
+        const superseded = await pool.query(
+          `SELECT 1
+             FROM concept_relation_discovery_queue
+            WHERE id = $1
+              AND processed_at IS NULL
+              AND last_failure_message IS NULL`,
+          [jobId],
+        );
+
+        if (superseded.rows[0]) {
+          scheduleJob(jobId);
+        }
+      });
+
+    discoveryTail = pending;
+    backgroundWork.add(pending);
+    void pending.finally(() => backgroundWork.delete(pending));
+  };
+  const scheduleFor = (
+    column: "analysis_revision_id" | "concept_id",
+    triggerId: string,
+  ) => {
+    void track(
+      pool
+        .query<{ id: string }>(
+          `SELECT id
+             FROM concept_relation_discovery_queue
+            WHERE ${column} = $1
+              AND processed_at IS NULL`,
+          [triggerId],
+        )
+        .then((result) => {
+          const jobId = result.rows[0]?.id;
+
+          if (jobId) {
+            scheduleJob(jobId);
+          }
+        }),
+    );
+  };
+  const scheduleForAnalysis = (analysisRevisionId: string) =>
+    scheduleFor("analysis_revision_id", analysisRevisionId);
+  const scheduleForConcept = (conceptId: string) =>
+    scheduleFor("concept_id", conceptId);
+  const schedulePending = () =>
+    track(
+      pool
+        .query<{ id: string }>(
+          `SELECT id
+             FROM concept_relation_discovery_queue
+            WHERE processed_at IS NULL
+            ORDER BY enqueued_at, id`,
+        )
+        .then((pending) => pending.rows.forEach(({ id }) => scheduleJob(id))),
+    );
+  const settle = async () => {
+    while (backgroundWork.size > 0) {
+      await Promise.all([...backgroundWork]);
+    }
+  };
+
+  app.addHook("onReady", async () => {
+    await schedulePending();
+  });
 
   app.post(
     "/api/v1/concept-relation-suggestions/scan",
@@ -309,80 +437,6 @@ export function registerConceptRelationRoutes(
     },
   );
 
-  app.post<{
-    Body: {
-      description?: unknown;
-      sourceConceptId?: unknown;
-      targetConceptId?: unknown;
-      type?: unknown;
-    };
-  }>("/api/v1/concept-relations", async (request, reply) => {
-    const sourceConceptId = request.body?.sourceConceptId;
-    const targetConceptId = request.body?.targetConceptId;
-    const type = request.body?.type;
-    const description = request.body?.description;
-
-    if (
-      !isUuid(sourceConceptId) ||
-      !isUuid(targetConceptId) ||
-      sourceConceptId === targetConceptId ||
-      typeof type !== "string" ||
-      !PUBLIC_CONCEPT_RELATION_TYPES.has(
-        type as GeneratedConceptRelationType,
-      ) ||
-      typeof description !== "string" ||
-      !description.trim() ||
-      description.trim().length > 2_000
-    ) {
-      return reply.code(422).send({
-        error: {
-          code: "CONCEPT_RELATION_CREATION_INVALID",
-          message: "请选择两个不同的 Concept、关系类型，并填写关系描述。",
-        },
-      });
-    }
-
-    const outcome = await createUserConceptRelation(pool, {
-      description: description.trim(),
-      sourceConceptId,
-      targetConceptId,
-      type: databaseConceptRelationType(type as GeneratedConceptRelationType),
-    });
-
-    if (outcome.kind !== "created") {
-      const responses = {
-        conflict: {
-          status: 409,
-          code: "CONCEPT_RELATION_CONFLICT",
-          message: "相同类型的有效 Concept 关系已经存在。",
-        },
-        inactive: {
-          status: 409,
-          code: "CONCEPT_RELATION_ENDPOINT_INACTIVE",
-          message: "已归档的 Concept 不能建立新关系。",
-        },
-        not_found: {
-          status: 404,
-          code: "CONCEPT_RELATION_ENDPOINT_NOT_FOUND",
-          message: "要关联的 Concept 不存在。",
-        },
-      } as const;
-      const response = responses[outcome.kind];
-
-      return reply.code(response.status).send({
-        error: { code: response.code, message: response.message },
-      });
-    }
-
-    const relation = await readConceptRelation(pool, outcome.id);
-
-    if (!relation) {
-      throw new Error("Created Concept relation could not be read");
-    }
-
-    return reply.code(201).send({ relation });
-  });
-
   app.delete<{ Params: { id: string } }>(
     "/api/v1/concept-relations/:id",
     async (request, reply) => {
@@ -455,16 +509,273 @@ export function registerConceptRelationRoutes(
       };
     },
   );
+
+  return { scheduleForAnalysis, scheduleForConcept, schedulePending, settle };
+}
+
+export async function enqueueConceptRelationDiscoveryForAnalysis(
+  client: Pool | PoolClient,
+  analysisRevisionId: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO concept_relation_discovery_queue (analysis_revision_id)
+     VALUES ($1)
+     ON CONFLICT (analysis_revision_id) DO UPDATE
+       SET generation = concept_relation_discovery_queue.generation + 1,
+           enqueued_at = clock_timestamp(),
+           processed_at = NULL,
+           last_failure_message = NULL`,
+    [analysisRevisionId],
+  );
+}
+
+export async function enqueueConceptRelationDiscoveryForConcept(
+  client: Pool | PoolClient,
+  conceptId: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO concept_relation_discovery_queue (concept_id)
+     VALUES ($1)
+     ON CONFLICT (concept_id) DO UPDATE
+       SET generation = concept_relation_discovery_queue.generation + 1,
+           enqueued_at = clock_timestamp(),
+           processed_at = NULL,
+           last_failure_message = NULL`,
+    [conceptId],
+  );
+}
+
+async function processAutomaticConceptRelationDiscovery(options: {
+  credentialSecret: string;
+  generateConceptRelation: ConceptRelationGenerator;
+  jobId: string;
+  log: FastifyInstance["log"];
+  pool: Pool;
+  scheduleSemanticIndex: () => Promise<void>;
+}): Promise<void> {
+  const {
+    credentialSecret,
+    generateConceptRelation,
+    jobId,
+    log,
+    pool,
+    scheduleSemanticIndex,
+  } = options;
+  const queued = await pool.query<ConceptRelationDiscoveryRow>(
+    `SELECT id, analysis_revision_id, concept_id, generation
+       FROM concept_relation_discovery_queue
+      WHERE id = $1
+        AND processed_at IS NULL`,
+    [jobId],
+  );
+  const job = queued.rows[0];
+
+  if (!job) {
+    return;
+  }
+
+  try {
+    await scheduleSemanticIndex();
+    const configuration = await readActiveTextConfiguration(pool);
+
+    if (!configuration) {
+      await recordConceptRelationDiscoveryFailure(
+        pool,
+        job,
+        "当前没有生效的模型配置，任务保留等待后续执行。",
+      );
+      return;
+    }
+
+    let focusConceptIds: string[];
+
+    if (job.analysis_revision_id) {
+      const seedIds = await readActiveAnalysisKnowledgePointIds(
+        pool,
+        job.analysis_revision_id,
+      );
+
+      if (seedIds.length === 0) {
+        await markConceptRelationDiscoveryProcessed(pool, job);
+        return;
+      }
+
+      const recall = await recallConceptKnowledgePoints({
+        configurationVersion: configuration.version,
+        pool,
+        seedKnowledgePointIds: seedIds,
+      });
+
+      if (!recall.embeddingReady) {
+        await recordConceptRelationDiscoveryFailure(
+          pool,
+          job,
+          "Embedding 尚未就绪，任务保留等待自动重试。",
+        );
+        return;
+      }
+
+      focusConceptIds = await readConceptIdsForKnowledgePoints(
+        pool,
+        recall.knowledgePointIds,
+      );
+    } else if (job.concept_id) {
+      const active = await pool.query(
+        "SELECT 1 FROM concepts WHERE id = $1 AND archived_at IS NULL",
+        [job.concept_id],
+      );
+
+      if (!active.rows[0]) {
+        await markConceptRelationDiscoveryProcessed(pool, job);
+        return;
+      }
+
+      focusConceptIds = [job.concept_id];
+    } else {
+      await markConceptRelationDiscoveryProcessed(pool, job);
+      return;
+    }
+
+    if (focusConceptIds.length === 0) {
+      await markConceptRelationDiscoveryProcessed(pool, job);
+      return;
+    }
+
+    const scan = await scanConceptRelationSuggestions({
+      automatic: true,
+      configuration,
+      credentialSecret,
+      focusConceptIds,
+      generateConceptRelation,
+      pool,
+    });
+
+    if (scan.failedPairs > 0 || scan.embeddingStatus === "building") {
+      await recordConceptRelationDiscoveryFailure(
+        pool,
+        job,
+        scan.embeddingStatus === "building"
+          ? "Concept Embedding 尚未就绪，任务保留等待自动重试。"
+          : `${scan.failedPairs} 对 Concept 的 AI 判断失败，任务保留等待重试。`,
+      );
+      return;
+    }
+
+    await markConceptRelationDiscoveryProcessed(pool, job);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "未知自动关联错误";
+
+    await recordConceptRelationDiscoveryFailure(pool, job, message).catch(
+      () => undefined,
+    );
+    log.error({ err: error, jobId }, "Automatic Concept relation job failed");
+    throw error;
+  }
+}
+
+async function readActiveAnalysisKnowledgePointIds(
+  pool: Pool,
+  analysisRevisionId: string,
+): Promise<string[]> {
+  const result = await pool.query<{ id: string }>(
+    `SELECT point.id
+       FROM ai_analysis_revisions AS analysis
+       INNER JOIN records AS record
+         ON record.current_analysis_revision_id = analysis.id
+        AND record.archived_at IS NULL
+       INNER JOIN knowledge_points AS point
+         ON point.analysis_revision_id = analysis.id
+        AND point.publication_status IN ('AUTO_PUBLISHED', 'CONFIRMED')
+        AND point.usage_status = 'INCLUDED'
+      WHERE analysis.id = $1
+        AND analysis.status = 'ACTIVE'
+      ORDER BY point.position, point.id`,
+    [analysisRevisionId],
+  );
+
+  return result.rows.map(({ id }) => id);
+}
+
+async function readConceptIdsForKnowledgePoints(
+  pool: Pool,
+  knowledgePointIds: string[],
+): Promise<string[]> {
+  if (knowledgePointIds.length === 0) {
+    return [];
+  }
+
+  const result = await pool.query<{ concept_id: string }>(
+    `SELECT DISTINCT membership.concept_id
+       FROM concept_memberships AS membership
+       INNER JOIN concepts AS concept
+         ON concept.id = membership.concept_id
+        AND concept.archived_at IS NULL
+       INNER JOIN knowledge_points AS point
+         ON point.id = membership.knowledge_point_id
+        AND point.publication_status IN ('AUTO_PUBLISHED', 'CONFIRMED')
+        AND point.usage_status = 'INCLUDED'
+       INNER JOIN records AS record
+         ON record.id = point.record_id
+        AND record.current_analysis_revision_id = point.analysis_revision_id
+        AND record.archived_at IS NULL
+       INNER JOIN ai_analysis_revisions AS analysis
+         ON analysis.id = point.analysis_revision_id
+        AND analysis.status = 'ACTIVE'
+      WHERE membership.removed_at IS NULL
+        AND membership.knowledge_point_id = ANY($1::uuid[])
+      ORDER BY membership.concept_id`,
+    [knowledgePointIds],
+  );
+
+  return result.rows.map(({ concept_id }) => concept_id);
+}
+
+async function markConceptRelationDiscoveryProcessed(
+  pool: Pool,
+  job: ConceptRelationDiscoveryRow,
+): Promise<void> {
+  await pool.query(
+    `UPDATE concept_relation_discovery_queue
+        SET processed_at = clock_timestamp(),
+            last_failure_message = NULL
+      WHERE id = $1
+        AND generation = $2
+        AND processed_at IS NULL`,
+    [job.id, job.generation],
+  );
+}
+
+async function recordConceptRelationDiscoveryFailure(
+  pool: Pool,
+  job: ConceptRelationDiscoveryRow,
+  message: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE concept_relation_discovery_queue
+        SET last_failure_message = $2
+      WHERE id = $1
+        AND generation = $3
+        AND processed_at IS NULL`,
+    [job.id, message.slice(0, 2_000), job.generation],
+  );
 }
 
 async function scanConceptRelationSuggestions(options: {
+  automatic?: boolean;
   configuration: ActiveTextConfiguration;
   credentialSecret: string;
+  focusConceptIds?: string[];
   generateConceptRelation: ConceptRelationGenerator;
   pool: Pool;
 }) {
-  const { configuration, credentialSecret, generateConceptRelation, pool } =
-    options;
+  const {
+    automatic = false,
+    configuration,
+    credentialSecret,
+    focusConceptIds = [],
+    generateConceptRelation,
+    pool,
+  } = options;
   const concepts = await readConceptStates(pool, {
     activeOnly: true,
     includeMemberships: true,
@@ -507,6 +818,14 @@ async function scanConceptRelationSuggestions(options: {
         continue;
       }
 
+      if (
+        focusConceptIds.length > 0 &&
+        !focusConceptIds.includes(left.id) &&
+        !focusConceptIds.includes(right.id)
+      ) {
+        continue;
+      }
+
       const leftCentroid = centroids.get(left.id);
       const rightCentroid = centroids.get(right.id);
 
@@ -523,7 +842,11 @@ async function scanConceptRelationSuggestions(options: {
       candidates.push({
         conceptA: left,
         conceptB: right,
-        inputFingerprint: conceptRelationInputFingerprint(left, right),
+        inputFingerprint: conceptRelationInputFingerprint(
+          left,
+          right,
+          automatic ? AUTOMATIC_RELATION_POLICY_VERSION : undefined,
+        ),
         pairKey: conceptRelationPairKey(left.id, right.id),
         score,
       });
@@ -534,14 +857,24 @@ async function scanConceptRelationSuggestions(options: {
     (left, right) =>
       right.score - left.score || left.pairKey.localeCompare(right.pairKey),
   );
-  const recalled = candidates.slice(0, MAX_CONCEPT_RELATION_CANDIDATES);
-  const existingInputs = await readExistingConceptRelationInputs(pool, recalled);
-  const toGenerate = recalled.filter(
+  const considered = automatic
+    ? candidates
+    : candidates.slice(0, MAX_CONCEPT_RELATION_CANDIDATES);
+  const existingInputs = await readExistingConceptRelationInputs(
+    pool,
+    considered,
+    automatic,
+  );
+  const unevaluated = considered.filter(
     (candidate) =>
       !existingInputs.has(
         `${candidate.pairKey}:${candidate.inputFingerprint}`,
       ),
   );
+  const toGenerate = automatic
+    ? unevaluated.slice(0, MAX_CONCEPT_RELATION_CANDIDATES)
+    : unevaluated;
+  const recalled = automatic ? toGenerate : considered;
   const apiKey = decryptCredential(
     configuration.text_credential_ciphertext,
     credentialSecret,
@@ -567,16 +900,32 @@ async function scanConceptRelationSuggestions(options: {
       );
 
       if (!generated) {
+        if (automatic) {
+          await applyAutomaticConceptRelationEvaluation(
+            pool,
+            candidate,
+            null,
+            configuration,
+          );
+        }
         skippedPairs += 1;
         continue;
       }
 
-      const inserted = await insertConceptRelationSuggestion(
-        pool,
-        candidate,
-        normalizeGeneratedConceptRelation(candidate, generated),
-        configuration,
-      );
+      const normalized = normalizeGeneratedConceptRelation(candidate, generated);
+      const inserted = automatic
+        ? await applyAutomaticConceptRelationEvaluation(
+            pool,
+            candidate,
+            normalized,
+            configuration,
+          )
+        : await insertConceptRelationSuggestion(
+            pool,
+            candidate,
+            normalized,
+            configuration,
+          );
 
       if (inserted) {
         suggestedRelations += 1;
@@ -585,16 +934,24 @@ async function scanConceptRelationSuggestions(options: {
       failedPairs += 1;
     }
   }
+  const conceptsWithMemberships = concepts.filter(
+    ({ memberships }) => memberships.length > 0,
+  );
 
   return {
     scannedConcepts: concepts.length,
     recalledPairs: recalled.length,
-    alreadyReviewedPairs: recalled.length - toGenerate.length,
+    alreadyReviewedPairs: automatic
+      ? considered.length - unevaluated.length
+      : recalled.length - toGenerate.length,
     suggestedRelations,
     skippedPairs,
     failedPairs,
     embeddingStatus:
-      centroids.size >= 2 ? ("ready" as const) : ("building" as const),
+      conceptsWithMemberships.length < 2 ||
+      conceptsWithMemberships.every(({ id }) => centroids.has(id))
+        ? ("ready" as const)
+        : ("building" as const),
     pendingSuggestions: (
       await readConceptRelationSuggestions(pool, "pending")
     ).length,
@@ -693,6 +1050,208 @@ async function insertConceptRelationSuggestion(
   );
 
   return Boolean(result.rows[0]);
+}
+
+async function applyAutomaticConceptRelationEvaluation(
+  pool: Pool,
+  candidate: ConceptRelationCandidate,
+  relation: ValidatedConceptRelation | null,
+  configuration: ActiveTextConfiguration,
+): Promise<boolean> {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const endpointIds = [candidate.conceptA.id, candidate.conceptB.id].sort();
+
+    await client.query(
+      `SELECT id
+         FROM concepts
+        WHERE id = ANY($1::uuid[])
+        ORDER BY id
+        FOR UPDATE`,
+      [endpointIds],
+    );
+    await client.query(
+      `SELECT revision.id
+         FROM concepts AS concept
+         INNER JOIN concept_revisions AS revision
+           ON revision.id = concept.current_revision_id
+          AND revision.concept_id = concept.id
+        WHERE concept.id = ANY($1::uuid[])
+        ORDER BY concept.id
+        FOR SHARE OF revision`,
+      [endpointIds],
+    );
+    const current = conceptStateMap(
+      await readConceptStates(client, {
+        ids: endpointIds,
+        lockMembershipDependencies: true,
+      }),
+    );
+    const currentA = current.get(candidate.conceptA.id);
+    const currentB = current.get(candidate.conceptB.id);
+
+    if (
+      !sameConceptRelationInput(currentA, candidate.conceptA) ||
+      !sameConceptRelationInput(currentB, candidate.conceptB)
+    ) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+
+    const evaluated = await client.query(
+      `SELECT 1
+         FROM concept_relation_automatic_evaluations
+        WHERE pair_key = $1
+          AND input_fingerprint = $2
+        FOR UPDATE`,
+      [candidate.pairKey, candidate.inputFingerprint],
+    );
+
+    if (evaluated.rows[0]) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+
+    const previousAutomatic = await client.query<{
+      id: string;
+      suggestion_id: string;
+    }>(
+      `SELECT id, suggestion_id
+         FROM concept_relations
+        WHERE confirmation_source = 'AI_AUTOMATIC'
+          AND removed_at IS NULL
+          AND (
+            (source_concept_id = $1 AND target_concept_id = $2)
+            OR (source_concept_id = $2 AND target_concept_id = $1)
+          )
+        ORDER BY id
+        FOR UPDATE`,
+      [candidate.conceptA.id, candidate.conceptB.id],
+    );
+    const previousSuggestionIds = previousAutomatic.rows.map(
+      ({ suggestion_id }) => suggestion_id,
+    );
+
+    if (previousSuggestionIds.length > 0) {
+      await client.query(
+        `UPDATE concept_relation_suggestions
+            SET status = 'REMOVED',
+                updated_at = clock_timestamp()
+          WHERE id = ANY($1::uuid[])
+            AND status = 'CONFIRMED'`,
+        [previousSuggestionIds],
+      );
+      await client.query(
+        `UPDATE concept_relations
+            SET removed_at = clock_timestamp()
+          WHERE id = ANY($1::uuid[])
+            AND removed_at IS NULL`,
+        [previousAutomatic.rows.map(({ id }) => id)],
+      );
+    }
+
+    let formalRelationId: string | null = null;
+
+    if (relation) {
+      const conflict = await client.query<{ id: string }>(
+        `SELECT id
+           FROM concept_relations
+          WHERE source_concept_id = $1
+            AND target_concept_id = $2
+            AND relation_type = $3
+            AND removed_at IS NULL
+          FOR UPDATE`,
+        [relation.source.id, relation.target.id, relation.type],
+      );
+
+      formalRelationId = conflict.rows[0]?.id ?? null;
+
+      if (!formalRelationId) {
+        const suggestionId = randomUUID();
+
+        formalRelationId = randomUUID();
+        await client.query(
+          `INSERT INTO concept_relation_suggestions
+             (id, pair_key, input_fingerprint, source_concept_id,
+              target_concept_id, source_concept_revision_id,
+              target_concept_revision_id, source_membership_fingerprint,
+              target_membership_fingerprint, relation_type, description, reason,
+              confidence, model_configuration_version, text_model, status,
+              decided_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                   $13, $14, $15, 'CONFIRMED', clock_timestamp())`,
+          [
+            suggestionId,
+            candidate.pairKey,
+            candidate.inputFingerprint,
+            relation.source.id,
+            relation.target.id,
+            relation.source.revisionId,
+            relation.target.revisionId,
+            relation.source.membershipFingerprint,
+            relation.target.membershipFingerprint,
+            relation.type,
+            relation.description,
+            relation.reason,
+            relation.confidence,
+            configuration.version,
+            configuration.text_model,
+          ],
+        );
+        await client.query(
+          `INSERT INTO concept_relations
+             (id, suggestion_id, confirmation_source, source_concept_id,
+              target_concept_id, relation_type, description)
+           VALUES ($1, $2, 'AI_AUTOMATIC', $3, $4, $5, $6)`,
+          [
+            formalRelationId,
+            suggestionId,
+            relation.source.id,
+            relation.target.id,
+            relation.type,
+            relation.description,
+          ],
+        );
+      }
+    }
+
+    await client.query(
+      `INSERT INTO concept_relation_automatic_evaluations
+         (id, pair_key, input_fingerprint, outcome, relation_id,
+          model_configuration_version, text_model)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        randomUUID(),
+        candidate.pairKey,
+        candidate.inputFingerprint,
+        relation ? "RELATED" : "UNRELATED",
+        formalRelationId,
+        configuration.version,
+        configuration.text_model,
+      ],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function sameConceptRelationInput(
+  current: ConceptState | undefined,
+  frozen: ConceptState,
+): boolean {
+  return Boolean(
+    current &&
+      !current.archived &&
+      current.revisionId === frozen.revisionId &&
+      current.membershipFingerprint === frozen.membershipFingerprint,
+  );
 }
 
 async function confirmConceptRelationSuggestion(
@@ -823,111 +1382,6 @@ async function confirmConceptRelationSuggestion(
   }
 }
 
-async function createUserConceptRelation(
-  pool: Pool,
-  input: {
-    description: string;
-    sourceConceptId: string;
-    targetConceptId: string;
-    type: ConceptRelationType;
-  },
-): Promise<
-  | { id: string; kind: "created" }
-  | { kind: "conflict" | "inactive" | "not_found" }
-> {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-    const endpointIds = [input.sourceConceptId, input.targetConceptId].sort();
-    const locked = await client.query<{ id: string }>(
-      `SELECT id
-         FROM concepts
-        WHERE id = ANY($1::uuid[])
-        ORDER BY id
-        FOR UPDATE`,
-      [endpointIds],
-    );
-
-    if (locked.rows.length !== 2) {
-      await client.query("ROLLBACK");
-      return { kind: "not_found" };
-    }
-
-    await client.query(
-      `SELECT revision.id
-         FROM concepts AS concept
-         INNER JOIN concept_revisions AS revision
-           ON revision.id = concept.current_revision_id
-          AND revision.concept_id = concept.id
-        WHERE concept.id = ANY($1::uuid[])
-        ORDER BY concept.id
-        FOR SHARE OF revision`,
-      [endpointIds],
-    );
-    const concepts = conceptStateMap(
-      await readConceptStates(client, {
-        ids: endpointIds,
-        lockMembershipDependencies: true,
-      }),
-    );
-    let source = concepts.get(input.sourceConceptId);
-    let target = concepts.get(input.targetConceptId);
-
-    if (!source || !target) {
-      await client.query("ROLLBACK");
-      return { kind: "not_found" };
-    }
-
-    if (source.archived || target.archived) {
-      await client.query("ROLLBACK");
-      return { kind: "inactive" };
-    }
-
-    if (
-      SYMMETRIC_CONCEPT_RELATION_TYPES.has(input.type) &&
-      source.id.localeCompare(target.id) > 0
-    ) {
-      [source, target] = [target, source];
-    }
-
-    const id = randomUUID();
-
-    await client.query(
-      `INSERT INTO concept_relations
-         (id, confirmation_source, source_concept_id, target_concept_id,
-          source_concept_revision_id, target_concept_revision_id,
-          source_membership_fingerprint, target_membership_fingerprint,
-          relation_type, description)
-       VALUES ($1, 'USER', $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        id,
-        source.id,
-        target.id,
-        source.revisionId,
-        target.revisionId,
-        source.membershipFingerprint,
-        target.membershipFingerprint,
-        input.type,
-        input.description,
-      ],
-    );
-    await client.query("COMMIT");
-
-    return { id, kind: "created" };
-  } catch (error) {
-    await client.query("ROLLBACK");
-
-    if (isConceptRelationConflict(error)) {
-      return { kind: "conflict" };
-    }
-
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 async function readConceptRelationSuggestions(
   pool: Pool | PoolClient,
   section: "pending" | "resolved",
@@ -1033,9 +1487,28 @@ async function publicConceptRelations(
     return {
       id: row.id,
       suggestionId: row.suggestion_id,
+      ai:
+        row.ai_reason &&
+        row.ai_confidence !== null &&
+        row.ai_model_configuration_version !== null &&
+        row.ai_text_model
+          ? {
+              confidence: row.ai_confidence,
+              reason: row.ai_reason,
+              model: {
+                configurationVersion: row.ai_model_configuration_version,
+                name: row.ai_text_model,
+              },
+            }
+          : null,
       confirmationSource:
         row.confirmation_source === "USER"
           ? ({ type: "user" } as const)
+          : row.confirmation_source === "AI_AUTOMATIC"
+            ? ({
+                type: "ai_automatic" as const,
+                id: row.suggestion_id ?? row.id,
+              } as const)
           : ({
               type: "concept_relation_suggestion" as const,
               id: row.suggestion_id ?? row.id,
@@ -1511,6 +1984,7 @@ function conceptCentroid(
 async function readExistingConceptRelationInputs(
   pool: Pool,
   candidates: ConceptRelationCandidate[],
+  automatic: boolean,
 ): Promise<Set<string>> {
   if (candidates.length === 0) {
     return new Set();
@@ -1520,9 +1994,17 @@ async function readExistingConceptRelationInputs(
     input_fingerprint: string;
     pair_key: string;
   }>(
-    `SELECT pair_key, input_fingerprint
-       FROM concept_relation_suggestions
-      WHERE pair_key = ANY($1::text[])`,
+    automatic
+      ? `SELECT pair_key, input_fingerprint
+           FROM concept_relation_automatic_evaluations
+          WHERE pair_key = ANY($1::text[])
+         UNION
+         SELECT pair_key, input_fingerprint
+           FROM concept_relation_suggestions
+          WHERE pair_key = ANY($1::text[])`
+      : `SELECT pair_key, input_fingerprint
+           FROM concept_relation_suggestions
+          WHERE pair_key = ANY($1::text[])`,
     [[...new Set(candidates.map(({ pairKey }) => pairKey))]],
   );
 
@@ -1608,18 +2090,20 @@ function conceptRelationPairKey(firstId: string, secondId: string): string {
 function conceptRelationInputFingerprint(
   first: ConceptState,
   second: ConceptState,
+  policyVersion?: string,
 ): string {
   const ordered = [first, second].sort((left, right) =>
     left.id.localeCompare(right.id),
   );
 
   return fingerprint(
-    ordered
-      .map(
+    [
+      ...(policyVersion ? [policyVersion] : []),
+      ...ordered.map(
         (concept) =>
           `${concept.id}:${concept.revisionId}:${concept.membershipFingerprint}`,
-      )
-      .join("|"),
+      ),
+    ].join("|"),
   );
 }
 
@@ -1713,6 +2197,10 @@ const CONCEPT_RELATION_SELECT = `SELECT relation.id,
        relation.description,
        relation.confirmed_at,
        relation.removed_at,
+       suggestion.reason AS ai_reason,
+       suggestion.confidence AS ai_confidence,
+       suggestion.model_configuration_version AS ai_model_configuration_version,
+       suggestion.text_model AS ai_text_model,
        source_revision.display_name AS source_name,
        source_revision.description AS source_description,
        target_revision.display_name AS target_name,
@@ -1723,7 +2211,9 @@ const CONCEPT_RELATION_SELECT = `SELECT relation.id,
    AND source_revision.concept_id = relation.source_concept_id
   INNER JOIN concept_revisions AS target_revision
     ON target_revision.id = relation.target_concept_revision_id
-   AND target_revision.concept_id = relation.target_concept_id`;
+   AND target_revision.concept_id = relation.target_concept_id
+  LEFT JOIN concept_relation_suggestions AS suggestion
+    ON suggestion.id = relation.suggestion_id`;
 
 const CONCEPT_RELATION_SUGGESTION_SELECT = `SELECT suggestion.id,
        suggestion.pair_key,

@@ -63,7 +63,7 @@ export function conceptRelationRequestTimeoutMs(
   return 600_000;
 }
 
-const CONCEPT_RELATION_SYSTEM_PROMPT = `你负责审查两个已经由用户确认的 Concept 之间是否存在高价值关系。只能依据给定名称、定义和成员数量，不补充外部事实，也不能创建或修改 Concept。
+const CONCEPT_RELATION_SYSTEM_PROMPT = `你负责判断两个正式 Concept 之间是否存在高价值关系。只能依据给定名称、定义和成员数量，不补充外部事实，也不能创建或修改 Concept。
 
 如果没有明确、可复用的关系，返回 {"related":false}。
 如果有关，返回一个 JSON 对象：
@@ -74,7 +74,7 @@ const CONCEPT_RELATION_SYSTEM_PROMPT = `你负责审查两个已经由用户确�
 - reason: 解释为什么形成该关系，且不得把置信度写成事实
 - confidence: 0 到 1
 
-不要返回 Markdown。输出只是待审查建议，不能绕过用户确认形成正式关系。`;
+不要返回 Markdown。related=true 会由系统自动建立为正式 Concept Relation，因此不确定时必须返回 related=false。`;
 
 export const generateOpenAICompatibleConceptRelation: ConceptRelationGenerator =
   async (input) => {

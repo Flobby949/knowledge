@@ -865,7 +865,14 @@ function edgeSourceLabel(edge: NetworkEdge): string {
   }
 
   if (edge.sourceRecord.kind === "concept_relation_confirmation") {
-    return `${edge.sourceRecord.origin === "user" ? "用户直接建立" : "AI 建议后确认"} · ${formatDate(edge.sourceRecord.confirmedAt)}`;
+    const origin =
+      edge.sourceRecord.origin === "user"
+        ? "用户直接建立"
+        : edge.sourceRecord.origin === "ai_automatic"
+          ? "AI 自动建立"
+          : "AI 建议后确认";
+
+    return `${origin} · ${formatDate(edge.sourceRecord.confirmedAt)}`;
   }
 
   return `用户确认 · ${formatDate(edge.sourceRecord.confirmedAt)}`;
