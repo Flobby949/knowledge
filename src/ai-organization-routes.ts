@@ -671,7 +671,7 @@ export function registerAiOrganizationRoutes(
               AND point.record_id = $2
               AND point.publication_status = 'PENDING_REVIEW'
               AND analysis.status = 'GENERATED'
-            FOR UPDATE OF point, analysis, record`,
+            FOR UPDATE OF record, analysis, point`,
           [request.params.itemId, request.params.id],
         );
         const point = selected.rows[0];
@@ -767,7 +767,7 @@ export function registerAiOrganizationRoutes(
                   AND analysis.status = 'GENERATED'
                 )
               )
-            FOR UPDATE OF point, analysis, record`,
+            FOR UPDATE OF record, analysis, point`,
           [request.params.itemId, request.params.id],
         );
         const point = eligible.rows[0];

@@ -379,6 +379,66 @@ describe("automatic Concept discovery", () => {
       ).json<{ items: unknown[] }>().items,
     ).toEqual([]);
   });
+
+  it("accepts immediate user corrections while automatic Concept discovery starts", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const sourceV1 = `用户修正与概念发现可以并发执行 ${attempt}`;
+      const sourceV2 = `${sourceV1}，并保留更新后的来源版本。`;
+      const record = await createSaveOnlyRecord(app, sourceV1);
+      const tagId = record.myTags[0]?.id;
+
+      if (!tagId) {
+        throw new Error("Expected the record's required user tag");
+      }
+
+      const updated = await app.inject({
+        method: "PUT",
+        url: `/api/v1/records/${record.id}`,
+        payload: {
+          text: sourceV2,
+          myTags: [{ id: tagId }],
+          processing: "save_only",
+        },
+      });
+      expect(updated.statusCode, updated.body).toBe(200);
+      const taskId = await organizeRecord(app, record.id, "automatic");
+
+      await waitForAiTask(app, taskId);
+
+      const detail = await app.inject({
+        method: "GET",
+        url: `/api/v1/records/${record.id}`,
+      });
+      expect(detail.statusCode, detail.body).toBe(200);
+      const pointId = detail.json<{
+        organizedItems: Array<{ id: string }>;
+      }>().organizedItems[0]?.id;
+
+      if (!pointId) {
+        throw new Error("Expected one automatically published knowledge point");
+      }
+
+      const overviewCorrected = await app.inject({
+        method: "PUT",
+        url: `/api/v1/records/${record.id}/overview-correction`,
+        payload: {
+          title: `并发修正后的概览 ${attempt}`,
+          summary: "自动概念发现不应阻塞用户保存概览修正。",
+        },
+      });
+      expect(overviewCorrected.statusCode, overviewCorrected.body).toBe(200);
+
+      const pointCorrected = await app.inject({
+        method: "PUT",
+        url: `/api/v1/records/${record.id}/organized-items/${pointId}/correction`,
+        payload: {
+          title: `并发修正后的知识点 ${attempt}`,
+          body: "自动概念发现不应让用户知识点修正返回服务端错误。",
+        },
+      });
+      expect(pointCorrected.statusCode, pointCorrected.body).toBe(200);
+    }
+  });
 });
 
 async function createSaveOnlyRecord(app: FastifyInstance, text: string) {
@@ -393,7 +453,9 @@ async function createSaveOnlyRecord(app: FastifyInstance, text: string) {
   });
 
   expect(response.statusCode).toBe(201);
-  return (response.json() as { record: { id: string } }).record;
+  return response.json<{
+    record: { id: string; myTags: Array<{ id: string }> };
+  }>().record;
 }
 
 async function organizeRecord(

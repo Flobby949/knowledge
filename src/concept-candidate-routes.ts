@@ -855,6 +855,15 @@ async function createCandidateScan(
 
   try {
     await client.query("BEGIN");
+    // Match user mutations: acquire record locks before analysis and point locks.
+    await client.query(
+      `SELECT id
+         FROM records
+        WHERE id = ANY($1::uuid[])
+        ORDER BY id
+        FOR KEY SHARE`,
+      [[...new Set(snapshots.map(({ recordId }) => recordId))]],
+    );
     await client.query(
       `INSERT INTO concept_candidate_scans
          (id, input_fingerprint, input_count, model_configuration_version,
