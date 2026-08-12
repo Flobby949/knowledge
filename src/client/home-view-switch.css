@@ -1,0 +1,78 @@
+.home-view-root {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.home-view-switch {
+  position: absolute;
+  z-index: 28;
+  bottom: 24px;
+  left: 50%;
+  display: grid;
+  grid-template-columns: repeat(2, 82px);
+  gap: 3px;
+  padding: 3px;
+  color: #4b3542;
+  background: rgb(255 253 253 / 94%);
+  border: 1px solid #d8bbc8;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgb(95 52 71 / 16%);
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.home-view-switch button {
+  min-height: 36px;
+  padding: 0 12px;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.home-view-switch button:hover {
+  background: #fff0f5;
+}
+
+.home-view-switch button[aria-pressed="true"] {
+  color: #fff;
+  background: #c63d68;
+  border-color: #c63d68;
+}
+
+.home-view-root:has(.home-workbench.drawer-open) .home-view-switch {
+  right: 504px;
+  left: auto;
+  transform: none;
+}
+
+.home-workbench.drawer-open .home-network-legend {
+  bottom: 84px;
+}
+
+html[data-theme="scifi"] .home-view-switch {
+  color: #dceaff;
+  background: rgb(4 15 31 / 94%);
+  border-color: #8ba2c1;
+  border-radius: 5px;
+  box-shadow: 0 14px 34px rgb(0 0 0 / 48%);
+}
+
+html[data-theme="scifi"] .home-view-switch button {
+  border-radius: 3px;
+}
+
+html[data-theme="scifi"] .home-view-switch button:hover {
+  background: color-mix(in srgb, #00030b 78%, #39c6ff);
+}
+
+html[data-theme="scifi"] .home-view-switch button[aria-pressed="true"] {
+  color: #00030b;
+  background: #39c6ff;
+  border-color: #39c6ff;
+}

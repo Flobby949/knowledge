@@ -125,7 +125,7 @@ for (const theme of visualThemes) {
       }, theme);
     });
 
-test("Home / 首页真实 3D 知识网络 · 双主题、2D 降级与 1280×800 几何", async ({
+test("Home / Concept 与标签双视图 · 双主题、2D 降级与 1280×800 几何", async ({
   context,
   page,
 }) => {
@@ -147,6 +147,23 @@ test("Home / 首页真实 3D 知识网络 · 双主题、2D 降级与 1280×800 
   const networkSearchbox = networkSearch.getByRole("searchbox", {
     name: "搜索网络节点",
   });
+  const homeView = page.getByRole("group", { name: "首页知识视图" });
+
+  await homeView.getByRole("button", { name: "标签" }).click();
+  const tagStage = main.getByRole("region", {
+    name: theme === "scifi" ? "神经标签场" : "气泡标签场",
+  });
+
+  await expect(tagStage).toHaveAttribute("data-state", /webgl2/u);
+  await expect(tagStage.getByRole("list", { name: "全部标签" }))
+    .toBeVisible();
+  await expect(page).toHaveScreenshot(snapshotName(theme, "home-tags"), {
+    animations: "disabled",
+    caret: "hide",
+    fullPage: false,
+    maxDiffPixels: 1_200,
+  });
+  await homeView.getByRole("button", { name: "Concept" }).click();
 
   await expect(stage).toHaveAttribute("data-renderer", "webgl2");
   await expect(stage).toHaveAttribute("data-motion", "reduce");

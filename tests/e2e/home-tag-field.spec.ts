@@ -32,6 +32,104 @@ test.describe("V3.4 home real knowledge network", () => {
     viewport: { width: 1_600, height: 1_000 },
   });
 
+  test("switches freely between the Concept network and the Tag field", async ({
+    page,
+  }) => {
+    const fixture = homeNetworkFixture();
+
+    await installHomeNetworkRoutes(page, fixture);
+    await page.goto(appUrl("/"));
+
+    const homeView = page.getByRole("group", { name: "首页知识视图" });
+    const conceptView = homeView.getByRole("button", { name: "Concept" });
+    const tagView = homeView.getByRole("button", { name: "标签" });
+
+    await expect(conceptView).toHaveAttribute("aria-pressed", "true");
+    const conceptCanvas = page.locator(
+      'canvas[aria-label="真实知识网络 3D 图幅"]',
+    );
+
+    await expect(conceptCanvas).toBeVisible();
+    await conceptCanvas.press("ArrowRight");
+    await conceptCanvas.press("ArrowUp");
+    const cameraBeforeSwitch = await conceptCanvas.getAttribute(
+      "data-camera-state",
+    );
+
+    expect(cameraBeforeSwitch).not.toBeNull();
+
+    await tagView.click();
+    await expect(tagView).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("region", { name: "气泡标签场" }))
+      .toBeVisible();
+    await expect(
+      page.getByRole("list", { name: "全部标签" }).getByRole("button", {
+        name: fixture.tag.name,
+      }),
+    ).toBeVisible();
+
+    await homeView.getByRole("button", { name: "Concept" }).click();
+    await expect(conceptCanvas).toBeVisible();
+    await expect(conceptCanvas).toHaveAttribute(
+      "data-camera-state",
+      cameraBeforeSwitch ?? "",
+    );
+    await homeView.getByRole("button", { name: "标签" }).click();
+
+    await page.reload();
+    await expect(
+      page
+        .getByRole("group", { name: "首页知识视图" })
+        .getByRole("button", { name: "标签" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    await page
+      .getByRole("group", { name: "首页知识视图" })
+      .getByRole("button", { name: "Concept" })
+      .click();
+    const home = page.getByRole("main", { name: "首页" });
+    const networkSearch = home.getByRole("search", {
+      name: "首页网络节点搜索",
+    });
+
+    await selectNetworkSearchResult(
+      networkSearch,
+      networkSearch.getByRole("searchbox", { name: "搜索网络节点" }),
+      fixture.conceptA,
+    );
+    await expect(page.getByRole("region", { name: "节点详情" })).toBeVisible();
+    await expectNetworkQuery(page, { node: fixture.conceptA.key });
+
+    await page
+      .getByRole("group", { name: "首页知识视图" })
+      .getByRole("button", { name: "标签" })
+      .click();
+    await expect(page.getByRole("region", { name: "节点详情" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "气泡标签场" }))
+      .toBeVisible();
+    await expectNetworkQuery(page, { node: fixture.conceptA.key });
+
+    await page
+      .getByRole("group", { name: "首页知识视图" })
+      .getByRole("button", { name: "Concept" })
+      .click();
+    await expect(
+      page
+        .getByRole("region", { name: "节点详情" })
+        .getByRole("heading", { name: fixture.conceptA.label }),
+    ).toBeVisible();
+
+    await page
+      .getByRole("group", { name: "首页知识视图" })
+      .getByRole("button", { name: "标签" })
+      .click();
+    await page
+      .getByRole("list", { name: "全部标签" })
+      .getByRole("button", { name: fixture.tag.name })
+      .click();
+    await expect(page).toHaveURL(tagSearchUrl(fixture.tag.id));
+  });
+
   test("starts with Concepts, expands real Knowledge Points, and keeps selection and path in browser history", async ({
     page,
   }) => {

@@ -74,13 +74,23 @@ export interface NetworkGraph3DHandle {
   resetCamera(): void;
 }
 
+export interface NetworkGraph3DCameraSnapshot {
+  distance: number;
+  focusedKey: string;
+  pitch: number;
+  target: { x: number; y: number; z: number };
+  yaw: number;
+}
+
 export interface NetworkGraph3DProps {
   ariaLabel?: string;
   className?: string;
   edges: readonly NetworkEdge[];
+  initialCamera: NetworkGraph3DCameraSnapshot | null;
   layout: NetworkLayoutSnapshot;
   nodes: readonly NetworkNode[];
   onFailure: (failure: NetworkGraph3DFailure) => void;
+  onCameraChange: (camera: NetworkGraph3DCameraSnapshot) => void;
   onSelect: (node: NetworkNode) => void;
   pathEdgeKeys: ReadonlySet<string> | readonly string[];
   pathNodeKeys: ReadonlySet<string> | readonly string[];
@@ -114,9 +124,11 @@ export const NetworkGraph3D = forwardRef<
     ariaLabel = "真实知识网络 3D 图幅",
     className,
     edges,
+    initialCamera,
     layout,
     nodes,
     onFailure,
+    onCameraChange,
     onSelect,
     pathEdgeKeys,
     pathNodeKeys,
@@ -130,11 +142,11 @@ export const NetworkGraph3D = forwardRef<
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelCanvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<NetworkGraph3DSession | null>(null);
-  const callbacksRef = useRef({ onFailure, onSelect });
+  const callbacksRef = useRef({ onCameraChange, onFailure, onSelect });
   const nodesByKeyRef = useRef(new Map(nodes.map((node) => [node.key, node])));
   const failureReportedRef = useRef(false);
 
-  callbacksRef.current = { onFailure, onSelect };
+  callbacksRef.current = { onCameraChange, onFailure, onSelect };
   nodesByKeyRef.current = new Map(nodes.map((node) => [node.key, node]));
 
   useImperativeHandle(
@@ -192,16 +204,22 @@ export const NetworkGraph3D = forwardRef<
     }
 
     try {
-      sessionRef.current = new NetworkGraph3DSession(canvas, labelCanvas, context, {
-        onFailure: reportFailure,
-        onSelectKey(key) {
-          const node = nodesByKeyRef.current.get(key);
+      sessionRef.current = new NetworkGraph3DSession(
+        canvas,
+        labelCanvas,
+        context,
+        {
+          onFailure: reportFailure,
+          onSelectKey(key) {
+            const node = nodesByKeyRef.current.get(key);
 
-          if (node) {
-            callbacksRef.current.onSelect(node);
-          }
+            if (node) {
+              callbacksRef.current.onSelect(node);
+            }
+          },
         },
-      });
+        initialCamera,
+      );
     } catch (error) {
       reportFailure({
         code: "renderer-initialization",
@@ -210,6 +228,11 @@ export const NetworkGraph3D = forwardRef<
     }
 
     return () => {
+      const camera = sessionRef.current?.getCameraSnapshot();
+
+      if (camera) {
+        callbacksRef.current.onCameraChange(camera);
+      }
       sessionRef.current?.dispose();
       sessionRef.current = null;
     };
@@ -327,6 +350,7 @@ class NetworkGraph3DSession {
   private graphResources: NetworkResourceRegistry = createNetworkResourceRegistry();
   private hasCameraFrame = false;
   private height = 0;
+  private readonly initialCamera: NetworkGraph3DCameraSnapshot | null;
   private model: NetworkGraph3DRenderModel | null = null;
   private nodeKeysByObject = new Map<THREE.Object3D, readonly string[]>();
   private pickMeshes: THREE.InstancedMesh[] = [];
@@ -342,10 +366,12 @@ class NetworkGraph3DSession {
     labelCanvas: HTMLCanvasElement,
     context: WebGL2RenderingContext,
     callbacks: NetworkGraph3DSessionCallbacks,
+    initialCamera: NetworkGraph3DCameraSnapshot | null,
   ) {
     this.canvas = canvas;
     this.labelCanvas = labelCanvas;
     this.callbacks = callbacks;
+    this.initialCamera = initialCamera;
     const labelContext = labelCanvas.getContext("2d");
 
     if (!labelContext) {
@@ -444,6 +470,20 @@ class NetworkGraph3DSession {
     this.scheduler.invalidate();
   }
 
+  getCameraSnapshot(): NetworkGraph3DCameraSnapshot {
+    return {
+      distance: this.distance,
+      focusedKey: this.focusedKey,
+      pitch: this.pitch,
+      target: {
+        x: this.target.x,
+        y: this.target.y,
+        z: this.target.z,
+      },
+      yaw: this.yaw,
+    };
+  }
+
   renderNow() {
     this.scheduler.renderNow();
   }
@@ -485,7 +525,11 @@ class NetworkGraph3DSession {
       nextResources = createNetworkResourceRegistry();
 
       if (!this.hasCameraFrame) {
-        this.frameModel();
+        if (this.initialCamera) {
+          this.restoreCamera(this.initialCamera);
+        } else {
+          this.frameModel();
+        }
         this.hasCameraFrame = true;
       }
       const selected = model.nodes.find(({ selected }) => selected);
@@ -521,6 +565,16 @@ class NetworkGraph3DSession {
     );
     this.camera.lookAt(this.target);
     this.camera.updateMatrixWorld();
+    this.canvas.dataset.cameraState = JSON.stringify(this.getCameraSnapshot());
+  }
+
+  private restoreCamera(snapshot: NetworkGraph3DCameraSnapshot) {
+    this.yaw = snapshot.yaw;
+    this.pitch = THREE.MathUtils.clamp(snapshot.pitch, -1.34, 1.34);
+    this.distance = THREE.MathUtils.clamp(snapshot.distance, 90, 16_000);
+    this.focusedKey = snapshot.focusedKey;
+    this.target.set(snapshot.target.x, snapshot.target.y, snapshot.target.z);
+    this.applyCamera();
   }
 
   private buildEdgeMeshes(

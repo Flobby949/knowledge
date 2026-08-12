@@ -450,6 +450,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   filter: none;
 }
 
+html[data-theme="scifi"] .home-tag-state {
+  color: #9eb9d8;
+}
+
+html[data-theme="scifi"] .home-tag-state > span {
+  border-color: #315579;
+  border-top-color: #39c9f1;
+}
+
+html[data-theme="scifi"] .home-tag-state strong {
+  color: #eef8ff;
+}
+
 .tag-field::before,
 .tag-field::after {
   position: absolute;
@@ -516,7 +529,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   border: 0;
   border-radius: 10px;
   cursor: pointer;
-  opacity: min(var(--node-opacity), var(--depth-opacity, 1));
+  opacity: var(--depth-opacity, 1);
   pointer-events: none;
 }
 
@@ -570,6 +583,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   place-items: center;
   width: var(--node-diameter);
   height: var(--node-diameter);
+  opacity: var(--node-opacity);
   border-radius: 50%;
   filter: drop-shadow(0 5px 15px color-mix(in srgb, var(--node-color) 34%, transparent));
   transform: scale(var(--projection-scale, 1));
