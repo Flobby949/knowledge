@@ -23,7 +23,11 @@ export interface NetworkLayoutSnapshot {
 const NODE_SEPARATION = 112;
 const LAYER_GAP = 176;
 const COMPONENT_GAP = 240;
+const COMPONENT_CLEARANCE = 120;
+const COMPONENT_SPIRAL_STEP = 220;
 const EXPANSION_LAYER_GAP = 160;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const INITIAL_LAYER_ANGLE = -Math.PI / 4;
 const MIN_NODE_DISTANCE = 96;
 const FNV_OFFSET = 14_695_981_039_346_656_037n;
 const FNV_PRIME = 1_099_511_628_211n;
@@ -417,7 +421,8 @@ function layoutComponent(
     const radius = Math.max(previousRadius + LAYER_GAP, circumferenceRadius);
 
     layer.forEach((key, index) => {
-      const angle = -Math.PI / 2 + (index * Math.PI * 2) / layer.length;
+      const angle =
+        INITIAL_LAYER_ANGLE + (index * Math.PI * 2) / layer.length;
 
       positions.set(key, {
         x: radius * Math.cos(angle),
@@ -479,35 +484,63 @@ function packComponents(
     return {};
   }
 
-  const ordered = [...components].sort((left, right) =>
-    left.key.localeCompare(right.key),
-  );
-  const totalArea = ordered.reduce(
-    (sum, { bounds }) => sum + bounds.width * bounds.height,
-    0,
-  );
-  const targetWidth = Math.max(
-    ...ordered.map(({ bounds }) => bounds.width),
-    Math.sqrt(totalArea) * 1.4,
+  const ordered = [...components].sort(
+    (left, right) =>
+      right.positions.size - left.positions.size ||
+      left.key.localeCompare(right.key),
   );
   const packed = new Map<string, NetworkPosition>();
-  let cursorX = 0;
-  let cursorY = 0;
-  let rowHeight = 0;
-  let packedWidth = 0;
+  const occupied: Array<{
+    maxX: number;
+    maxY: number;
+    minX: number;
+    minY: number;
+  }> = [];
+  let nextProbe = 1;
 
-  for (const component of ordered) {
-    if (
-      cursorX > 0 &&
-      cursorX + component.bounds.width > targetWidth
-    ) {
-      cursorX = 0;
-      cursorY += rowHeight + COMPONENT_GAP;
-      rowHeight = 0;
+  ordered.forEach((component, index) => {
+    const localCenterX = component.bounds.minX + component.bounds.width / 2;
+    const localCenterY = component.bounds.minY + component.bounds.height / 2;
+    let desiredX = 0;
+    let desiredY = 0;
+
+    if (index > 0) {
+      let probe = nextProbe;
+
+      while (true) {
+        const radius = COMPONENT_SPIRAL_STEP * Math.sqrt(probe);
+        const angle = -Math.PI / 2 + probe * GOLDEN_ANGLE;
+        const candidateX = Math.cos(angle) * radius * 1.2;
+        const candidateY = Math.sin(angle) * radius * 0.86;
+        const offsetX = candidateX - localCenterX;
+        const offsetY = candidateY - localCenterY;
+        const candidate = {
+          maxX: component.bounds.minX + component.bounds.width + offsetX,
+          maxY: component.bounds.minY + component.bounds.height + offsetY,
+          minX: component.bounds.minX + offsetX,
+          minY: component.bounds.minY + offsetY,
+        };
+        const open = occupied.every(
+          (placed) =>
+            candidate.maxX + COMPONENT_CLEARANCE <= placed.minX ||
+            candidate.minX - COMPONENT_CLEARANCE >= placed.maxX ||
+            candidate.maxY + COMPONENT_CLEARANCE <= placed.minY ||
+            candidate.minY - COMPONENT_CLEARANCE >= placed.maxY,
+        );
+
+        if (open) {
+          desiredX = candidateX;
+          desiredY = candidateY;
+          nextProbe = probe + 1;
+          break;
+        }
+
+        probe += 1;
+      }
     }
 
-    const offsetX = cursorX - component.bounds.minX;
-    const offsetY = cursorY - component.bounds.minY;
+    const offsetX = desiredX - localCenterX;
+    const offsetY = desiredY - localCenterY;
 
     for (const [key, position] of component.positions) {
       packed.set(key, {
@@ -515,13 +548,13 @@ function packComponents(
         y: position.y + offsetY,
       });
     }
-
-    cursorX += component.bounds.width + COMPONENT_GAP;
-    rowHeight = Math.max(rowHeight, component.bounds.height);
-    packedWidth = Math.max(packedWidth, cursorX - COMPONENT_GAP);
-  }
-
-  const packedHeight = cursorY + rowHeight;
+    occupied.push({
+      maxX: component.bounds.minX + component.bounds.width + offsetX,
+      maxY: component.bounds.minY + component.bounds.height + offsetY,
+      minX: component.bounds.minX + offsetX,
+      minY: component.bounds.minY + offsetY,
+    });
+  });
 
   return Object.fromEntries(
     [...packed]
@@ -529,8 +562,8 @@ function packComponents(
       .map(([key, position]) => [
         key,
         {
-          x: roundCoordinate(position.x - packedWidth / 2),
-          y: roundCoordinate(position.y - packedHeight / 2),
+          x: roundCoordinate(position.x),
+          y: roundCoordinate(position.y),
         },
       ]),
   );

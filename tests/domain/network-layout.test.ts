@@ -133,6 +133,46 @@ describe("knowledge network layout", () => {
     expect(expanded.topologyKey).not.toBe(previous.topologyKey);
   });
 
+  it("uses a wide two-dimensional composition for a sparse Concept-first graph", () => {
+    const nodes: NetworkLayoutNode[] = Array.from({ length: 7 }, (_, index) => ({
+      key: `concept:${String(index).padStart(2, "0")}`,
+      type: "concept",
+    }));
+    const edges: NetworkLayoutEdge[] = [
+      {
+        edgeKey: "concept_relation:00-01",
+        source: "concept:00",
+        target: "concept:01",
+      },
+      {
+        edgeKey: "concept_relation:01-02",
+        source: "concept:01",
+        target: "concept:02",
+      },
+    ];
+    const snapshot = layoutNetwork(nodes, edges);
+    const positions = Object.values(snapshot.positions);
+    const xSpan = coordinateSpan(positions.map(({ x }) => x));
+    const ySpan = coordinateSpan(positions.map(({ y }) => y));
+    const center = snapshot.positions["concept:01"]!;
+    const connectedXSpread = Math.max(
+      Math.abs(snapshot.positions["concept:00"]!.x - center.x),
+      Math.abs(snapshot.positions["concept:02"]!.x - center.x),
+    );
+    const isolatedOffsets = ["concept:03", "concept:04", "concept:05", "concept:06"]
+      .map((key) => ({
+        x: snapshot.positions[key]!.x - center.x,
+        y: snapshot.positions[key]!.y - center.y,
+      }));
+
+    expect(xSpan).toBeGreaterThan(ySpan * 0.8);
+    expect(connectedXSpread).toBeGreaterThan(80);
+    expect(isolatedOffsets.some(({ x }) => x < -250)).toBe(true);
+    expect(isolatedOffsets.some(({ x }) => x > 250)).toBe(true);
+    expect(isolatedOffsets.some(({ y }) => y < -250)).toBe(true);
+    expect(isolatedOffsets.some(({ y }) => y > 250)).toBe(true);
+  });
+
   it("keeps a 300-node and 600-edge layout finite, usable, and within budget", () => {
     const nodes: NetworkLayoutNode[] = Array.from({ length: 300 }, (_, index) => ({
       key: `${index % 5 === 0 ? "concept" : "knowledge_point"}:${String(index).padStart(3, "0")}`,
@@ -187,4 +227,8 @@ function distance(
   second: { x: number; y: number },
 ): number {
   return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function coordinateSpan(values: readonly number[]): number {
+  return Math.max(...values) - Math.min(...values);
 }
