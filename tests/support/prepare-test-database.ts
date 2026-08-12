@@ -33,31 +33,35 @@ export function prepareTestDatabase(options?: {
   ]);
 
   try {
-    for (const filename of readdirSync(migrationsDirectory)
+    const migrations = readdirSync(migrationsDirectory)
       .filter((entry) => entry.endsWith(".sql"))
       .filter(
         (entry) =>
           options?.migrationsThrough === undefined ||
           entry <= options.migrationsThrough,
       )
-      .sort()) {
-      runDockerCompose(
-        [
-          "exec",
-          "-T",
-          "postgres",
-          "psql",
-          "--username",
-          postgresUser,
-          "--dbname",
-          databaseName,
-          "--no-psqlrc",
-          "--set",
-          "ON_ERROR_STOP=1",
-        ],
+      .sort()
+      .map((filename) =>
         readFileSync(`${migrationsDirectory}/${filename}`, "utf8"),
-      );
-    }
+      )
+      .join("\n");
+
+    runDockerCompose(
+      [
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "--username",
+        postgresUser,
+        "--dbname",
+        databaseName,
+        "--no-psqlrc",
+        "--set",
+        "ON_ERROR_STOP=1",
+      ],
+      migrations,
+    );
   } catch (error) {
     dropDatabase(postgresUser, databaseName);
     throw error;
