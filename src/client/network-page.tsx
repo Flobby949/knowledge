@@ -1,9 +1,9 @@
 /*
- * THESIS: The Knowledge Network is a cartographer's proof sheet for confirmed facts, not a cloud of related cards or an AI-generated constellation.
- * OWN-WORLD: One continuous paper-white SVG map, concentric Concept stations, square Knowledge Point ports, and three auditable line grammars inherit strawberry or electric-blue ink from the active workbench theme.
- * STORY: Start from stable Concepts, search or select one to unfold its current Knowledge Points, inspect its source, then trace a server-verified path step by step.
- * FIRST VIEWPORT: A compact title/search band and cartographic controls sit above the full map; path findings form a narrow docket below, while a selected node opens a 480px verification drawer without recomputing the map.
- * FORM: Operate-mode knowledge cartography desk; precisely pinned structure inside the established dual-theme world, with no decorative or inferred edges.
+ * THESIS: The confirmed network is the workspace itself; controls and proof appear on demand instead of shrinking the map into a dashboard panel.
+ * OWN-WORLD: One continuous paper field, quiet dot coordinates, circular Concept stations, square Knowledge Point ports, and the existing three auditable line grammars.
+ * STORY: Search, pan, or zoom across the full map, select a real node, verify its source in a compact inspector, then trace a server-confirmed path without moving the underlying layout.
+ * FIRST VIEWPORT: A compact search band sits above a map that reaches every remaining edge; filters float over the field, path proof docks below, and a summary-first node inspector overlays the safe right edge.
+ * FORM: Immersive map desk selected from the approved V2 concept; established dual-theme workbench identity with no decorative or inferred edges.
  */
 import {
   Component,
@@ -11,7 +11,9 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Link } from "react-router-dom";
 
@@ -43,6 +45,13 @@ export interface NetworkCanvasProps {
   positions: Record<string, NetworkPosition>;
   selectedKey: string;
   focusedKey: string;
+}
+
+interface NetworkViewport {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
 }
 
 export function NetworkPage() {
@@ -116,8 +125,8 @@ export function NetworkPage() {
                 <i />
               </span>
               <div>
-                <span>已确认事实的制图台</span>
-                <h1>知识网络</h1>
+                <span>KNOWLEDGE MAP / CONFIRMED FACTS ONLY</span>
+                <h1 aria-label="知识网络">网络</h1>
               </div>
             </div>
 
@@ -183,21 +192,21 @@ export function NetworkPage() {
                 />
               ))}
             </FilterGroup>
-            <FilterGroup label="真实边">
-              {EDGE_KINDS.map((kind) => (
-                <FilterCheck
-                  checked={edgeKinds.has(kind)}
-                  key={kind}
-                  label={edgeKindLabel(kind)}
-                  onChange={() => toggleEdgeKind(kind)}
-                />
-              ))}
-            </FilterGroup>
-            <div aria-label="边图例" className="network-legend">
-              <span><i className="is-membership" />Membership</span>
-              <span><i className="is-symmetric" />对称关系</span>
-              <span><i className="is-directed" />有向关系</span>
-            </div>
+            <details className="network-edge-filter-menu">
+              <summary>筛选关系 <span>{edgeKinds.size}</span></summary>
+              <div>
+                <FilterGroup label="真实边">
+                  {EDGE_KINDS.map((kind) => (
+                    <FilterCheck
+                      checked={edgeKinds.has(kind)}
+                      key={kind}
+                      label={edgeKindLabel(kind)}
+                      onChange={() => toggleEdgeKind(kind)}
+                    />
+                  ))}
+                </FilterGroup>
+              </div>
+            </details>
             <div className="network-view-actions">
               <button
                 aria-pressed={view === "graph"}
@@ -223,6 +232,12 @@ export function NetworkPage() {
               </button>
               <button onClick={resetView} type="button">重置视图</button>
             </div>
+          </div>
+
+          <div aria-label="边图例" className="network-legend">
+            <span><i className="is-membership" />Membership</span>
+            <span><i className="is-symmetric" />对称关系</span>
+            <span><i className="is-directed" />有向关系</span>
           </div>
 
           {rendererFailure ? (
@@ -355,17 +370,116 @@ export function NetworkCanvas({
     (path?.steps ?? []).map(({ edgeKey }, index) => [edgeKey, index + 1]),
   );
   const pathNodeKeys = new Set(path?.nodes.map(({ key }) => key) ?? []);
-  const viewBox = networkViewBox(drawableNodes, positions, focusedKey);
+  const baseViewBox = networkViewBox(drawableNodes, positions, focusedKey);
+  const baseViewport = parseNetworkViewport(baseViewBox);
+  const [viewport, setViewport] = useState(baseViewport);
+  const [panning, setPanning] = useState(false);
+  const panStart = useRef<{
+    clientX: number;
+    clientY: number;
+    pointerId: number;
+    viewport: NetworkViewport;
+  } | null>(null);
   const parallelIndexes = parallelEdgeIndexes(drawableEdges);
 
+  useEffect(() => {
+    setViewport(baseViewport);
+  }, [baseViewBox]);
+
+  function zoomBy(factor: number, anchorX = .5, anchorY = .5) {
+    setViewport((current) =>
+      zoomNetworkViewport(current, baseViewport, factor, anchorX, anchorY),
+    );
+  }
+
+  function handleWheel(event: ReactWheelEvent<SVGSVGElement>) {
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const anchorX = (event.clientX - rect.left) / rect.width;
+    const anchorY = (event.clientY - rect.top) / rect.height;
+
+    zoomBy(event.deltaY < 0 ? .86 : 1.16, anchorX, anchorY);
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (
+      event.button !== 0 ||
+      (event.target instanceof Element && event.target.closest(".network-node"))
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    panStart.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerId: event.pointerId,
+      viewport,
+    };
+    setPanning(true);
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    const start = panStart.current;
+
+    if (!start || start.pointerId !== event.pointerId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+
+    setViewport({
+      ...start.viewport,
+      x: start.viewport.x - ((event.clientX - start.clientX) / rect.width) * start.viewport.width,
+      y: start.viewport.y - ((event.clientY - start.clientY) / rect.height) * start.viewport.height,
+    });
+  }
+
+  function finishPan(event: ReactPointerEvent<SVGSVGElement>) {
+    if (panStart.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    panStart.current = null;
+    setPanning(false);
+  }
+
+  function handleCanvasKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
+    if (event.target !== event.currentTarget) return;
+    const panX = viewport.width * .08;
+    const panY = viewport.height * .08;
+
+    if (event.key === "+" || event.key === "=") zoomBy(.82);
+    else if (event.key === "-") zoomBy(1.22);
+    else if (event.key === "0") setViewport(baseViewport);
+    else if (event.key === "ArrowLeft") setViewport((current) => ({ ...current, x: current.x - panX }));
+    else if (event.key === "ArrowRight") setViewport((current) => ({ ...current, x: current.x + panX }));
+    else if (event.key === "ArrowUp") setViewport((current) => ({ ...current, y: current.y - panY }));
+    else if (event.key === "ArrowDown") setViewport((current) => ({ ...current, y: current.y + panY }));
+    else return;
+
+    event.preventDefault();
+  }
+
   return (
-    <svg
-      aria-label="真实知识网络图幅"
-      className="network-canvas"
-      preserveAspectRatio="xMidYMid meet"
-      role="group"
-      viewBox={viewBox}
-    >
+    <div className="network-canvas-shell" data-panning={panning ? "true" : undefined}>
+      <p className="visually-hidden" id="network-canvas-instructions">
+        滚轮或加减按钮缩放图幅，拖拽空白区域平移，方向键也可移动视野。
+      </p>
+      <svg
+        aria-describedby="network-canvas-instructions"
+        aria-label="真实知识网络图幅"
+        className="network-canvas"
+        onKeyDown={handleCanvasKeyDown}
+        onPointerCancel={finishPan}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishPan}
+        onWheel={handleWheel}
+        preserveAspectRatio="xMidYMid meet"
+        role="group"
+        tabIndex={0}
+        viewBox={`${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`}
+      >
       <defs>
         <marker
           id="network-arrow"
@@ -466,7 +580,13 @@ export function NetworkCanvas({
           );
         })}
       </g>
-    </svg>
+      </svg>
+      <div aria-label="图幅导航" className="network-zoom-controls" role="group">
+        <button aria-label="缩小图幅" onClick={() => zoomBy(1.22)} type="button">−</button>
+        <button aria-label="放大图幅" onClick={() => zoomBy(.82)} type="button">＋</button>
+        <button aria-label="还原图幅" onClick={() => setViewport(baseViewport)} type="button">1:1</button>
+      </div>
+    </div>
   );
 }
 
@@ -661,39 +781,44 @@ export function NetworkNodeDrawer({
           <section className="network-drawer-definition">
             <span>{nodeSourceLabel(node)}</span>
             <p>{node.description ?? "当前节点没有补充描述。"}</p>
+          </section>
+          <section className="network-drawer-actions" aria-label="节点操作">
             {node.type === "concept" ? (
-              <Link to={`/concepts?concept=${encodeURIComponent(node.id)}`}>打开 Concept</Link>
+              <Link
+                aria-label="打开 Concept"
+                to={`/concepts?concept=${encodeURIComponent(node.id)}`}
+              >查看详情</Link>
             ) : (
-              <Link to={`/records/${encodeURIComponent(node.source.kind === "knowledge_point" ? node.source.recordId : "")}`}>
-                打开来源记录
+              <Link
+                aria-label="打开来源记录"
+                to={`/records/${encodeURIComponent(node.source.kind === "knowledge_point" ? node.source.recordId : "")}`}
+              >
+                查看来源
               </Link>
             )}
-          </section>
-          <section className="network-drawer-path-actions" aria-label="路径端点">
-            <div>
-              <strong>路径端点</strong>
-              <span>路径由服务端在真实边上探索，最大深度 6。</span>
-            </div>
             <button
+              aria-label={fromKey === node.key ? "已设为起点" : "设为路径起点"}
               aria-pressed={fromKey === node.key}
               onClick={() => onSetEndpoint("from", node.key)}
               type="button"
             >
-              {fromKey === node.key ? "已设为起点" : "设为路径起点"}
+              {fromKey === node.key ? "已是起点" : "设为起点"}
             </button>
             <button
+              aria-label={toKey === node.key ? "已设为终点" : "设为路径终点"}
               aria-pressed={toKey === node.key}
               onClick={() => onSetEndpoint("to", node.key)}
               type="button"
             >
-              {toKey === node.key ? "已设为终点" : "设为路径终点"}
+              {toKey === node.key ? "已是终点" : "设为终点"}
             </button>
           </section>
-          <section className="network-drawer-connections">
-            <header>
-              <div><strong>直接真实关系</strong><span>{incident.length} 条</span></div>
-              {node.type === "concept" ? <p>{membershipCount} 个 Knowledge Point</p> : null}
-            </header>
+          <details className="network-drawer-connections">
+            <summary>
+              <strong>直接真实关系</strong>
+              <span>{incident.length} 条</span>
+              {node.type === "concept" ? <small>{membershipCount} 个 Knowledge Point</small> : null}
+            </summary>
             {incident.length === 0 ? (
               <p className="network-drawer-state">当前局部图没有直接关系。</p>
             ) : (
@@ -721,7 +846,7 @@ export function NetworkNodeDrawer({
                 })}
               </div>
             )}
-          </section>
+          </details>
         </div>
       ) : null}
     </aside>
@@ -910,6 +1035,32 @@ function networkViewBox(
   const height = Math.max(650, maxY - minY + 220);
 
   return `${(minX + maxX - width) / 2} ${(minY + maxY - height) / 2} ${width} ${height}`;
+}
+
+function parseNetworkViewport(value: string): NetworkViewport {
+  const [x = 0, y = 0, width = 1_200, height = 720] = value
+    .split(/\s+/u)
+    .map(Number);
+
+  return { height, width, x, y };
+}
+
+function zoomNetworkViewport(
+  current: NetworkViewport,
+  base: NetworkViewport,
+  factor: number,
+  anchorX: number,
+  anchorY: number,
+): NetworkViewport {
+  const width = Math.min(base.width * 2.5, Math.max(base.width * .35, current.width * factor));
+  const height = width * (current.height / current.width);
+
+  return {
+    height,
+    width,
+    x: current.x + (current.width - width) * anchorX,
+    y: current.y + (current.height - height) * anchorY,
+  };
 }
 
 function parallelEdgeIndexes(edges: NetworkEdge[]) {

@@ -1,9 +1,9 @@
 /*
- * THESIS: A Concept is a maintained definition with traceable membership, not a decorative cluster.
- * OWN-WORLD: A compact concept catalog opens onto one assembly sheet, like a marked reference index beside its working plate.
- * STORY: Find or create a definition, inspect its exact knowledge-point membership, revise without erasing history, then archive or restore deliberately.
- * FIRST VIEWPORT: A searchable catalog column, one definition plate, and a dense membership proof sheet with review warnings visible before secondary history.
- * FORM: Catalog-and-assembly staging, ranked fourth and carried in the established knowledge workbench identity; direction seed b4e0c450.
+ * THESIS: A Concept is read as a maintained definition whose proof remains one step away, not managed as a stack of boxed records.
+ * OWN-WORLD: A horizontal reference index opens onto a continuous cloud-paper reading sheet, with strawberry signals reserved for the active definition and real actions.
+ * STORY: Scan the library, settle into one definition, read its current evidence in sequence, then reveal relations or history without losing the page.
+ * FIRST VIEWPORT: A compact library statement leads into a horizontal Concept index and one wide definition sheet whose members read as a sourced proof list.
+ * FORM: Immersive reading desk selected from the approved V2 concept; established dual-theme workbench identity, no new visual world.
  */
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -213,15 +213,24 @@ export function ConceptsPage() {
       <main aria-label="知识概念" className="concepts-main">
         <header className="concepts-heading">
           <div>
-            <span className="concepts-kicker">可维护的知识定义</span>
-            <h1>Concept 图册</h1>
+            <span className="concepts-kicker">
+              CONCEPT LIBRARY · {listLoading ? "…" : concepts.length}
+            </span>
+            <h1 aria-label="Concept 图册">
+              把知识整理成<br />可维护的定义。
+            </h1>
           </div>
           <p>
             用稳定定义组织多个知识点。名称、描述和成员变化都留下历史，原始记录与知识点不会被改写。
           </p>
           <div className="concepts-heading-actions">
-            <button className="primary-button" onClick={startCreate} type="button">
-              新建 Concept
+            <button
+              aria-label="新建 Concept"
+              className="primary-button"
+              onClick={startCreate}
+              type="button"
+            >
+              创建新概念 <span aria-hidden="true">↗</span>
             </button>
           </div>
         </header>

@@ -125,6 +125,65 @@ test.describe("Knowledge Network workspace", () => {
     await expect(page).not.toHaveURL(/(?:\?|&)node=/u);
   });
 
+  test("keeps the graph directly navigable and inspection compact", async ({
+    page,
+    request,
+  }) => {
+    const graph = await seedNetwork(request, randomUUID().slice(0, 8));
+
+    await page.goto(appUrl("/network"));
+    const main = page.getByRole("main", { name: "知识网络" });
+    const canvas = main.getByRole("group", { name: "真实知识网络图幅" });
+    const navigation = main.getByRole("group", { name: "图幅导航" });
+    const firstNodeLabel = canvas.locator(".network-node-label").first();
+
+    await expect(canvas).toBeVisible();
+    await expect(firstNodeLabel).toBeVisible();
+    expect(await firstNodeLabel.evaluate((label) => getComputedStyle(label).userSelect))
+      .toBe("none");
+    const initialViewBox = await canvas.getAttribute("viewBox");
+
+    await navigation.getByRole("button", { name: "放大图幅" }).click();
+    await expect.poll(() => canvas.getAttribute("viewBox")).not.toBe(initialViewBox);
+    await navigation.getByRole("button", { name: "还原图幅" }).click();
+    await expect(canvas).toHaveAttribute("viewBox", initialViewBox ?? "");
+
+    await canvas.hover({ position: { x: 120, y: 360 } });
+    await page.mouse.wheel(0, -420);
+    await expect.poll(() => canvas.getAttribute("viewBox")).not.toBe(initialViewBox);
+    await navigation.getByRole("button", { name: "还原图幅" }).click();
+
+    await canvas.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => canvas.getAttribute("viewBox")).not.toBe(initialViewBox);
+    await navigation.getByRole("button", { name: "还原图幅" }).click();
+
+    const canvasBox = await canvas.boundingBox();
+
+    if (!canvasBox) throw new Error("Network canvas must have a measurable viewport");
+    await page.mouse.move(canvasBox.x + 120, canvasBox.y + 360);
+    await page.mouse.down();
+    await page.mouse.move(canvasBox.x + 210, canvasBox.y + 410, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(() => canvas.getAttribute("viewBox")).not.toBe(initialViewBox);
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
+
+    const toolbarBox = await main.getByRole("toolbar", { name: "网络视图工具" }).boundingBox();
+
+    expect(toolbarBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(700);
+
+    await main.getByRole("button", { name: `打开节点：${graph.source.label}` }).click();
+    const inspector = page.getByRole("region", { name: "节点详情" });
+    const inspectorBox = await inspector.boundingBox();
+
+    expect(inspectorBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(340);
+    expect(inspectorBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(520);
+    await expect(inspector.getByText("直接真实关系", { exact: true })).toBeVisible();
+    await expect(inspector.getByRole("list")).toBeHidden();
+    await inspector.getByText("直接真实关系", { exact: true }).click();
+    await expect(inspector.getByRole("list")).toBeVisible();
+  });
+
   test("falls back to the list without discarding URL state when the renderer fails", async ({
     page,
     request,

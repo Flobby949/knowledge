@@ -674,7 +674,7 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
   await expectBox(cards.nth(2), { x: 547.67, width: 218.33, height: 128 }, 3);
 });
 
-test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", async ({
+test("Concepts / 概念 · 1600×1000 横向索引阅读台与 1280×800 几何", async ({
   page,
 }) => {
   await page.route("**/api/v1/concepts?*", async (route) => {
@@ -729,8 +729,8 @@ test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", asyn
   await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
   await expectBox(main, { x: 116, y: 72, width: 1_444 });
   await expectBox(workbench, { x: 116, width: 1_444 });
-  await expectBox(catalog, { x: 117, width: 324 });
-  await expectBox(stage, { x: 441, width: 1_118 });
+  await expectBox(catalog, { x: 117, width: 1_442 });
+  await expectBox(stage, { x: 117, width: 1_442 });
   await expect(page).toHaveScreenshot(snapshotName(theme, "concepts"), {
     animations: "disabled",
     caret: "hide",
@@ -743,8 +743,8 @@ test("Concepts / 概念 · 1600×1000 图册组装台与 1280×800 几何", asyn
   await expectBox(navigation, { x: 76, y: 0, width: 1_204, height: 72 });
   await expectBox(main, { x: 116, y: 72, width: 1_124 });
   await expectBox(workbench, { x: 116, width: 1_124 });
-  await expectBox(catalog, { x: 117, width: 292 });
-  await expectBox(stage, { x: 409, width: 830 });
+  await expectBox(catalog, { x: 117, width: 1_122 });
+  await expectBox(stage, { x: 117, width: 1_122 });
   await expect(relations).toBeVisible();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
@@ -953,7 +953,7 @@ test("Concept Relations / 概念关系 · 1600×1000 自动关系台账与 1280�
   ).toBe(1_280);
 });
 
-test("Network / 知识网络 · 1600×1000 制图台与 1280×800 开合抽屉几何", async ({
+test("Network / 知识网络 · 1600×1000 沉浸图幅与 1280×800 浮动详情几何", async ({
   page,
 }) => {
   const conceptA = networkConcept(
@@ -1096,8 +1096,8 @@ test("Network / 知识网络 · 1600×1000 制图台与 1280×800 开合抽屉�
   ).toBeGreaterThanOrEqual(11);
   await expectBox(navigation, { x: 76, y: 0, width: 1_524, height: 72 });
   await expectBox(main, { x: 76, y: 72, width: 1_524, height: 928 });
-  await expectBox(stage, { x: 76, y: 72, width: 1_044, height: 928 });
-  await expectBox(drawer, { x: 1_120, y: 72, width: 480, height: 928 });
+  await expectBox(stage, { x: 76, y: 72, width: 1_524, height: 928 });
+  await expectBox(drawer, { x: 1_280, y: 160, width: 300, height: 356.75 });
   await expect(page).toHaveScreenshot(snapshotName(theme, "network"), {
     animations: "disabled",
     caret: "hide",
@@ -1127,8 +1127,8 @@ test("Network / 知识网络 · 1600×1000 制图台与 1280×800 开合抽屉�
   await canvas.getByRole("button", { name: "打开节点：变更数据捕获" }).click();
   const reopenedDrawer = page.getByRole("region", { name: "节点详情" });
 
-  await expectBox(stage, { x: 76, y: 72, width: 724, height: 728 });
-  await expectBox(reopenedDrawer, { x: 800, y: 72, width: 480, height: 728 });
+  await expectBox(stage, { x: 76, y: 72, width: 1_204, height: 728 });
+  await expectBox(reopenedDrawer, { x: 960, y: 160, width: 300, height: 356.75 });
   expect(
     (await canvas.locator(".network-node-label").first().boundingBox())?.height ?? 0,
   ).toBeGreaterThanOrEqual(11);
