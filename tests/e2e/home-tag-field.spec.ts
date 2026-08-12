@@ -44,6 +44,10 @@ test.describe("V3.4 home real knowledge network", () => {
     const conceptView = homeView.getByRole("button", { name: "Concept" });
     const tagView = homeView.getByRole("button", { name: "标签" });
 
+    await expect(tagView).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("region", { name: "气泡标签场" }))
+      .toBeVisible();
+    await conceptView.click();
     await expect(conceptView).toHaveAttribute("aria-pressed", "true");
     const conceptCanvas = page.locator(
       'canvas[aria-label="真实知识网络 3D 图幅"]',
@@ -130,13 +134,14 @@ test.describe("V3.4 home real knowledge network", () => {
     await expect(page).toHaveURL(tagSearchUrl(fixture.tag.id));
   });
 
-  test("starts with Concepts, expands real Knowledge Points, and keeps selection and path in browser history", async ({
+  test("switches to Concepts, expands real Knowledge Points, and keeps selection and path in browser history", async ({
     page,
   }) => {
     const fixture = homeNetworkFixture();
 
     await installHomeNetworkRoutes(page, fixture);
     await page.goto(appUrl("/"));
+    await selectConceptView(page);
 
     const home = page.getByRole("main", { name: "首页" });
     const stage = home.getByRole("region", { name: "真实 3D 知识网络" });
@@ -250,6 +255,10 @@ test.describe("V3.4 home real knowledge network", () => {
     await homeSearch
       .getByRole("button", { name: fixture.tag.name, exact: true })
       .click();
+    await page
+      .getByRole("list", { name: "全部标签" })
+      .getByRole("button", { name: fixture.tag.name, exact: true })
+      .click();
     await expect(page).toHaveURL(tagSearchUrl(fixture.tag.id));
 
     await page.goBack();
@@ -280,6 +289,7 @@ test.describe("V3.4 home real knowledge network", () => {
 
     await installHomeNetworkRoutes(page, fixture);
     await page.goto(appUrl("/"));
+    await selectConceptView(page);
 
     const home = page.getByRole("main", { name: "首页" });
     const networkSearch = home.getByRole("search", {
@@ -380,6 +390,7 @@ test.describe("V3.4 home real knowledge network", () => {
       failExpandedSubgraph: true,
     });
     await page.goto(appUrl("/"));
+    await selectConceptView(page);
 
     const home = page.getByRole("main", { name: "首页" });
     const stage = home.getByRole("region", { name: "真实 3D 知识网络" });
@@ -489,6 +500,7 @@ test.describe("V3.4 home real knowledge network", () => {
     await auditAnimationFrames(page);
     await installHomeNetworkRoutes(page, fixture);
     await page.goto(appUrl("/"));
+    await selectConceptView(page);
 
     const stage = page.getByRole("region", { name: "真实 3D 知识网络" });
 
@@ -508,6 +520,13 @@ test.describe("V3.4 home real knowledge network", () => {
     expect(idleEnd.requested).toBe(idleStart.requested);
   });
 });
+
+async function selectConceptView(page: Page): Promise<void> {
+  await page
+    .getByRole("group", { name: "首页知识视图" })
+    .getByRole("button", { name: "Concept" })
+    .click();
+}
 
 interface HomeNetworkFixture {
   conceptA: NetworkNode;

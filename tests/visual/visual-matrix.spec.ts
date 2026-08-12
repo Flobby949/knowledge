@@ -243,6 +243,10 @@ test("Home / Concept 与标签双视图 · 双主题、2D 降级与 1280×800 �
     await fallbackPage.emulateMedia({ reducedMotion: "reduce" });
     await installHomeVisualNetworkRoutes(fallbackPage);
     await fallbackPage.goto(`${appBaseUrl}/`);
+    await fallbackPage
+      .getByRole("group", { name: "首页知识视图" })
+      .getByRole("button", { name: "Concept" })
+      .click();
 
     const fallbackMain = fallbackPage.getByRole("main", { name: "首页" });
     const fallbackStage = fallbackMain.getByRole("region", {

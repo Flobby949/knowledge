@@ -15,7 +15,7 @@ import "./home-view-switch.css";
 
 export type HomeKnowledgeView = "concept" | "tags";
 
-export const HOME_KNOWLEDGE_VIEW_STORAGE_KEY = "knowledge.home.view.v1";
+export const HOME_KNOWLEDGE_VIEW_STORAGE_KEY = "knowledge.home.view.v2";
 
 export function HomePage() {
   const [view, setView] = useState<HomeKnowledgeView>(readHomeKnowledgeView);
@@ -70,7 +70,7 @@ export function HomePage() {
 
 function readHomeKnowledgeView(): HomeKnowledgeView {
   if (typeof window === "undefined") {
-    return "concept";
+    return "tags";
   }
 
   const search = new URLSearchParams(window.location.search);
@@ -90,10 +90,10 @@ function readHomeKnowledgeView(): HomeKnowledgeView {
 
   try {
     return window.localStorage.getItem(HOME_KNOWLEDGE_VIEW_STORAGE_KEY) ===
-      "tags"
-      ? "tags"
-      : "concept";
+      "concept"
+      ? "concept"
+      : "tags";
   } catch {
-    return "concept";
+    return "tags";
   }
 }
