@@ -541,6 +541,12 @@
   font-size: 12px;
 }
 
+.tag-atlas-count > small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+}
+
 .tag-atlas-feedback,
 .tag-atlas-empty {
   color: #987385;
@@ -1122,4 +1128,220 @@
   .tag-atlas-grid li.is-batch-selected > button {
     outline: 2px solid CanvasText;
   }
+}
+
+/* Tag hierarchy: level trail, card navigation and drawer controls. */
+.tag-level-trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 20px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tag-level-trail a {
+  color: var(--signal);
+  text-decoration: none;
+}
+
+.tag-level-trail a:hover {
+  text-decoration: underline;
+}
+
+.tag-level-trail strong {
+  color: var(--text);
+  font-weight: 680;
+}
+
+.tag-level-trail .tag-level-detail {
+  min-height: 28px;
+  margin-inline-start: 6px;
+  padding-inline: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.tag-atlas-grid .tag-atlas-name {
+  display: grid;
+  grid-column: 1 / -1;
+  align-self: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tag-atlas-grid .tag-atlas-name strong {
+  -webkit-line-clamp: 1;
+}
+
+.tag-atlas-path {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-card-children {
+  position: absolute;
+  z-index: 1;
+  right: 12px;
+  bottom: 12px;
+  padding: 3px 9px;
+  color: var(--signal);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+  text-decoration: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.tag-card-children:hover {
+  background: var(--signal-soft);
+  border-color: var(--border-strong);
+}
+
+.tag-card-children:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.tag-hierarchy {
+  display: grid;
+  gap: 12px;
+  padding: 20px 30px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tag-hierarchy-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tag-hierarchy-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.tag-hierarchy-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tag-hierarchy-heading a {
+  color: var(--signal);
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tag-child-list {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.tag-child-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tag-child-list button {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.tag-child-list button:hover {
+  color: var(--signal);
+}
+
+.tag-child-list span {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.tag-move-form {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-move-form label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tag-move-form select,
+.tag-approve-parent select {
+  min-width: 0;
+  min-height: 34px;
+  padding-inline: 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+}
+
+.tag-move-form button {
+  min-height: 34px;
+  padding-inline: 12px;
+  font-size: 11px;
+}
+
+.tag-drawer-actions.has-parent-picker {
+  flex-wrap: wrap;
+}
+
+.tag-drawer-actions.has-parent-picker > .tag-approve-parent {
+  display: grid;
+  flex: 1 0 100%;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  order: -1;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tag-related-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tag-related-note a {
+  color: var(--signal);
 }

@@ -41,6 +41,7 @@ import {
 } from "./network-workspace-controller.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
+import { tagPathLabel } from "./tag-path.js";
 import { useTheme } from "./theme.js";
 import "./network-page.css";
 import "./home-page.css";
@@ -122,7 +123,9 @@ export function ConceptHomePage({
 
     return normalized
       ? tags
-          .filter(({ name }) => name.toLocaleLowerCase().includes(normalized))
+          .filter((tag) =>
+            tagPathLabel(tag).toLocaleLowerCase().includes(normalized),
+          )
           .slice(0, 8)
       : [];
   }, [tagQuery, tags]);
@@ -484,7 +487,7 @@ export function ConceptHomePage({
                           onClick={() => openTag(tag)}
                           type="button"
                         >
-                          {tag.name}
+                          {tagPathLabel(tag)}
                         </button>
                       ))
                     ) : (

@@ -123,6 +123,10 @@ describe("V1 tag management public HTTP contract", () => {
         origin: "user_created",
         approvalStatus: "user_approved",
         recordCount: 0,
+        directRecordCount: 0,
+        parentId: null,
+        ancestors: [],
+        childCount: 0,
       },
     });
 
@@ -226,9 +230,14 @@ describe("V1 tag management public HTTP contract", () => {
         origin: "ai_created",
         approvalStatus: "candidate",
         recordCount: 1,
+        directRecordCount: 1,
+        parentId: null,
+        ancestors: [],
+        childCount: 0,
       },
       aliases: [],
       mergedSources: [],
+      children: [],
       records: [
         {
           record: { id: record.id, title: plan.title },

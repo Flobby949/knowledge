@@ -112,7 +112,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     format4TargetDatabase?.dispose();
   }, 30_000);
 
-  it("round-trips Concept relations in format 8 and restores fixed formats 4–7", async () => {
+  it("round-trips Concept relations in format 9 and restores fixed formats 4–7", async () => {
     const ids = await seedConceptDomain(sourcePool);
     const before = await snapshotTables(sourcePool, [...V3_TABLES]);
     const requested = await sourceApp.inject({
@@ -126,7 +126,7 @@ describe("V3 Concept and Candidate export and restore", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
-      manifest: { formatVersion: 8, recordCount: 2 },
+      manifest: { formatVersion: 9, recordCount: 2 },
     });
 
     const downloaded = await sourceApp.inject({
@@ -135,8 +135,8 @@ describe("V3 Concept and Candidate export and restore", () => {
     });
 
     expect(downloaded.statusCode).toBe(200);
-    const format8Archive = downloaded.rawPayload;
-    const domainEntry = readStoredZip(format8Archive).get("domain.json");
+    const format9Archive = downloaded.rawPayload;
+    const domainEntry = readStoredZip(format9Archive).get("domain.json");
 
     if (!domainEntry) {
       throw new Error("domain.json is missing");
@@ -148,7 +148,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     >;
 
     expect(domain).toMatchObject({
-      formatVersion: 8,
+      formatVersion: 9,
       concepts: expect.arrayContaining([
         expect.objectContaining({ id: ids.conceptId }),
         expect.objectContaining({ id: ids.secondConceptId }),
@@ -230,20 +230,20 @@ describe("V3 Concept and Candidate export and restore", () => {
     });
 
     const invalidArchives = [
-      mutateDomainJson(format8Archive, (snapshot) => {
+      mutateDomainJson(format9Archive, (snapshot) => {
         snapshot.conceptRelationSuggestions[0]!.source_concept_revision_id =
           crypto.randomUUID();
       }),
-      mutateDomainJson(format8Archive, (snapshot) => {
+      mutateDomainJson(format9Archive, (snapshot) => {
         snapshot.conceptRelations[0]!.source_concept_id =
           snapshot.conceptRelations[0]!.target_concept_id;
       }),
-      mutateDomainJson(format8Archive, (snapshot) => {
+      mutateDomainJson(format9Archive, (snapshot) => {
         snapshot.conceptRelationSuggestions.find(
           (row) => row.status === "PENDING_REVIEW",
         )!.decided_at = new Date().toISOString();
       }),
-      mutateDomainJson(format8Archive, (snapshot) => {
+      mutateDomainJson(format9Archive, (snapshot) => {
         const relation = snapshot.conceptRelations.find(
           (row) => row.relation_type === "PREREQUISITE",
         )!;
@@ -259,11 +259,11 @@ describe("V3 Concept and Candidate export and restore", () => {
       await expectInvalidRestorePackage(currentTargetApp, archive);
     }
 
-    const currentInspection = await inspect(currentTargetApp, format8Archive);
+    const currentInspection = await inspect(currentTargetApp, format9Archive);
 
     expect(currentInspection).toMatchObject({
       canRestore: true,
-      formatVersion: 8,
+      formatVersion: 9,
       recordCount: 2,
     });
     await restore(currentTargetApp, currentInspection.id);
@@ -293,7 +293,7 @@ describe("V3 Concept and Candidate export and restore", () => {
       },
     });
 
-    const fixedFormat7Archive = downgradeToFormat7(format8Archive);
+    const fixedFormat7Archive = downgradeToFormat7(format9Archive);
     const format7Inspection = await inspect(
       format7TargetApp,
       fixedFormat7Archive,
@@ -737,8 +737,38 @@ async function seedConceptDomain(pool: Pool) {
   }
 }
 
-function downgradeToFormat7(archive: Buffer): Buffer {
+function downgradeToFormat8(archive: Buffer): Buffer {
   const entries = readStoredZip(archive);
+  const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8")) as {
+    formatVersion: number;
+  };
+  const domain = JSON.parse(entries.get("domain.json")!.toString("utf8")) as {
+    formatVersion: number;
+    tags: Array<Record<string, unknown>>;
+  };
+
+  manifest.formatVersion = 8;
+  domain.formatVersion = 8;
+
+  for (const tag of domain.tags) {
+    delete tag.parent_tag_id;
+  }
+
+  return createZip(
+    [...entries].map(([name, data]) => ({
+      name,
+      data:
+        name === "manifest.json"
+          ? Buffer.from(JSON.stringify(manifest), "utf8")
+          : name === "domain.json"
+            ? Buffer.from(JSON.stringify(domain), "utf8")
+            : data,
+    })),
+  );
+}
+
+function downgradeToFormat7(archive: Buffer): Buffer {
+  const entries = readStoredZip(downgradeToFormat8(archive));
   const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8")) as {
     formatVersion: number;
   };

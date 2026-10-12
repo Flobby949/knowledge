@@ -12,7 +12,7 @@
 - **有据整理**：AI 从原文生成 1–5 个自包含知识点，每个知识点都带有可精确定位的证据片段。
 - **两种处理方式**：支持自动发布，也支持进入待审查队列后逐条确认、修正或拒绝。
 - **人类修正层**：用户修正不会改写 AI 原始结果，原文、AI 输出和用户认知各自保留来源。
-- **统一标签体系**：手动标签与 AI 候选标签共享词表，并保留创建来源和认可状态。
+- **统一标签体系**：手动标签与 AI 候选标签共享词表，并保留创建来源和认可状态；已认可标签可组织为最多 5 级的单父层级，按上级筛选时自动包含全部下级。
 - **可维护 Concept**：可以把多个当前知识点组织成稳定定义，保留定义版本、成员变更、来源状态和归档历史。
 - **AI Concept 候选**：新知识生效后自动从全局知识点召回关联内容，也可一键为尚未覆盖的历史知识补做全量发现；“仅保存”不进入 Concept 关联，候选只有人工编辑并确认后才会晋级为正式 Concept。
 - **功能性知识网络**：新知识生效并完成全局召回后，AI 自动判断并建立带模型、理由和输入快照的 Concept Relation；用户也可直接补充或撤销关系。独立 `/network` 工作区只绘制真实有效的 Membership、Knowledge Relation 与 Concept Relation，支持节点搜索、局部展开、来源抽屉、服务端路径和键盘等价列表。
@@ -125,6 +125,7 @@ V3.4 首页的 Concept 视图复用同一网络控制器和确定性布局：3D 
 - [Concept Relation 的确认、方向与复核边界](docs/adr/0034-concept-relations-require-confirmation.md)
 - [用户直接建立 Concept Relation](docs/adr/0038-users-can-create-concept-relations-directly.md)
 - [知识召回后自动维护 Concept Relation](docs/adr/0039-concept-relations-are-automatically-maintained-after-knowledge-recall.md)
+- [标签使用单父层级并保持名称全局唯一](docs/adr/0040-tags-form-a-single-parent-hierarchy.md)
 - [功能性网络的确定性 2D 布局与降级合同](docs/adr/0035-network-workspace-uses-deterministic-2d-layout.md)
 - [首页真实 3D 网络复用功能性网络合同](docs/adr/0036-home-3d-reuses-network-workspace-contract.md)
 - [本地开发环境](docs/DEVELOPMENT.md)

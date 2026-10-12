@@ -35,6 +35,8 @@ test.describe("complete visual theme switching", () => {
     await expect(sciFiChoice).toBeChecked();
 
     await page.goto(appUrl("/"));
+    await page.getByRole("group", { name: "首页知识视图" })
+      .getByRole("button", { name: "Concept", exact: true }).click();
     const networkStage = page.getByRole("region", {
       name: "真实 3D 知识网络",
     });
@@ -67,6 +69,8 @@ test.describe("complete visual theme switching", () => {
     await disableWebGl2(page);
     await installMinimalNetwork(page);
     await page.goto(appUrl("/"));
+    await page.getByRole("group", { name: "首页知识视图" })
+      .getByRole("button", { name: "Concept", exact: true }).click();
 
     const root = page.locator("html");
     const stage = page.getByRole("region", { name: "真实 3D 知识网络" });

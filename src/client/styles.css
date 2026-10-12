@@ -266,6 +266,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   font-size: 12px;
 }
 
+/* Child Tags sit under their parent; both themes share this indentation. */
+.tag-filter-option[data-depth] {
+  padding-inline-start: calc(9px + var(--tag-depth, 0) * 16px);
+}
+
 .archive-filter,
 .select-filter {
   gap: 10px;

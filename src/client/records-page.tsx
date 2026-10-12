@@ -19,6 +19,7 @@ import {
 } from "./api.js";
 import { AiTaskPulse } from "./ai-task-pulse.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
+import { hierarchicalOrder, tagPathLabel } from "./tag-path.js";
 import { ThemeToggleButton, useTheme } from "./theme.js";
 
 type ArchiveScope = "active" | "archived" | "all";
@@ -469,8 +470,18 @@ export function RecordsPage() {
                 role="group"
               >
                 {availableTags.length > 0 ? (
-                  availableTags.map((tag) => (
-                    <label className="tag-filter-option" key={tag.id}>
+                  hierarchicalOrder(availableTags).map(({ depth, tag }) => (
+                    <label
+                      className="tag-filter-option"
+                      data-depth={depth > 0 ? depth : undefined}
+                      key={tag.id}
+                      style={
+                        depth > 0
+                          ? ({ "--tag-depth": depth } as CSSProperties)
+                          : undefined
+                      }
+                      title={depth > 0 ? tagPathLabel(tag) : undefined}
+                    >
                       <input
                         aria-label={tag.name}
                         checked={tagIds.includes(tag.id)}
@@ -551,8 +562,8 @@ export function RecordsPage() {
                 </button>
               ) : null}
               {tagIds.map((tagId) => {
-                const name =
-                  availableTags.find((tag) => tag.id === tagId)?.name ?? tagId;
+                const selectedTag = availableTags.find((tag) => tag.id === tagId);
+                const name = selectedTag ? tagPathLabel(selectedTag) : tagId;
 
                 return (
                   <button
@@ -562,7 +573,11 @@ export function RecordsPage() {
                     onClick={() => toggleTag(tagId, false)}
                     type="button"
                   >
-                    标签：{name} <span aria-hidden="true">×</span>
+                    标签：{name}
+                    {availableTags.some((tag) => tag.parentId === tagId)
+                      ? "（含下级）"
+                      : ""}{" "}
+                    <span aria-hidden="true">×</span>
                   </button>
                 );
               })}

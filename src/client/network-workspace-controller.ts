@@ -333,8 +333,8 @@ export function useNetworkWorkspaceController(): NetworkWorkspaceController {
         "图形渲染不可用，已切换到等价列表。所有查询状态均已保留。",
       );
       setSearchParams(
-        (current) => {
-          const next = new URLSearchParams(current);
+        () => {
+          const next = new URLSearchParams(window.location.search);
 
           next.set("view", "list");
           return next;
@@ -443,8 +443,10 @@ export function useNetworkWorkspaceController(): NetworkWorkspaceController {
         drawerEntryMutated.current = true;
       }
       setSearchParams(
-        (current) => {
-          const next = new URLSearchParams(current);
+        () => {
+          // Browser history updates before the router's transition renders.
+          // Preserve parameters set by a preceding interaction in that gap.
+          const next = new URLSearchParams(window.location.search);
 
           mutate(next);
           return next;

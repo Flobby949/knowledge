@@ -66,6 +66,10 @@ describe("user-approved tag listing public HTTP flow", () => {
           origin: "user_created",
           approvalStatus: "user_approved",
           recordCount: 1,
+          directRecordCount: 1,
+          parentId: null,
+          ancestors: [],
+          childCount: 0,
         },
       ],
       page: {

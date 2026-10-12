@@ -278,6 +278,9 @@ describe("permanent record deletion", () => {
       name: sharedCandidateName,
       approval: "candidate",
       recordCount: 1,
+      directRecordCount: 1,
+      parentId: null,
+      ancestors: [],
     });
     expect(await searchRecordIdsByTag(app, sharedCandidate.id)).toEqual([
       shared.id,

@@ -15,6 +15,7 @@ import {
   type UserTagListItem,
 } from "./api.js";
 import { getPreferences } from "./preferences-api.js";
+import { tagAncestorLabel } from "./tag-path.js";
 import "./new-record-dialog.css";
 
 export interface NewRecordDialogProps {
@@ -430,7 +431,14 @@ export function NewRecordDialog({
                       role="option"
                       type="button"
                     >
-                      <span>{tag.name}</span>
+                      <span>
+                        {tag.ancestors.length > 0 ? (
+                          <small className="tag-option-path">
+                            {tagAncestorLabel(tag)} ›{" "}
+                          </small>
+                        ) : null}
+                        {tag.name}
+                      </span>
                       <small>{tag.recordCount} 条记录</small>
                     </button>
                   ))}

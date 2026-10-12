@@ -105,12 +105,19 @@ describe("effective tag record aggregation", () => {
       origin: "user_created",
       approvalStatus: "user_approved",
       recordCount: 2,
+      directRecordCount: 2,
+      parentId: null,
+      ancestors: [],
+      childCount: 0,
     });
     expect(tagField.items).toContainEqual({
       id: sharedTagId,
       name: sharedTagName,
       approval: "approved",
       recordCount: 2,
+      directRecordCount: 2,
+      parentId: null,
+      ancestors: [],
     });
     expect(relatedRecords.items.map(({ id }) => id).sort()).toEqual(
       [recordA.id, recordB.id].sort(),

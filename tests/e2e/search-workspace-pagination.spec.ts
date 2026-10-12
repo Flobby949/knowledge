@@ -197,17 +197,19 @@ test.describe("search snapshot workspace", () => {
     await expect(stage.getByRole("article")).toHaveCount(0);
     await expect(reviewScope).not.toBeChecked();
 
-    await reviewScope.check();
+    await reviewScope.click();
 
     await expect.poll(() => new URL(page.url()).searchParams.get("scope")).toBe(
       "include_review",
     );
+    await expect(reviewScope).toBeChecked();
     await expect(stage.getByRole("article")).toHaveCount(1);
     await expect(stage.getByText("待审查内容", { exact: true })).toBeVisible();
     await expect(stage.getByText("AI 整理命中", { exact: true })).toBeVisible();
 
-    await reviewScope.uncheck();
+    await reviewScope.click();
     await expect.poll(() => new URL(page.url()).searchParams.get("scope")).toBeNull();
+    await expect(reviewScope).not.toBeChecked();
     await expect(stage.getByRole("article")).toHaveCount(0);
   });
 

@@ -162,7 +162,8 @@ interface TagVisibilityParams extends TagParams {
 
 type TagPatchBody =
   | { name: string }
-  | { approvalStatus: "archived" | "user_approved" };
+  | { approvalStatus: "archived" | "user_approved" }
+  | { parentId: string | null };
 
 interface TagVisibilityBody {
   status: "active" | "suppressed";
@@ -170,6 +171,11 @@ interface TagVisibilityBody {
 
 interface CreateTagBody {
   name: string;
+  parentId?: string | null;
+}
+
+interface ApproveTagBody {
+  parentId?: string | null;
 }
 
 interface CreateTagMergeBody {
@@ -187,16 +193,25 @@ interface TagChip {
 }
 
 interface PublicTag extends TagChip {
+  ancestors: TagChip[];
   approvalStatus: "archived" | "candidate" | "user_approved";
+  childCount: number;
+  directRecordCount: number;
   origin: "ai_created" | "user_created";
+  parentId: string | null;
   recordCount: number;
 }
 
 interface TagSummaryRow {
   approval_status: "ARCHIVED" | "CANDIDATE" | "USER_APPROVED";
+  child_count: number;
+  direct_record_count: number;
   display_name: string;
   id: string;
   origin: "AI_CREATED" | "USER_CREATED";
+  parent_tag_id: string | null;
+  path_ids: string[];
+  path_names: string[];
   record_count: number;
 }
 
@@ -358,6 +373,62 @@ const LIBRARY_TAG_RECORDS_CTE = `library_tag_records AS (
    WHERE assignment.assigned_by = 'AI'
      AND assignment.status = 'ACTIVE'
 )`;
+
+// Counts are reported both directly and for the whole subtree, because a
+// parent Tag filters records through all of its descendants.
+const TAG_RECORD_COUNT_CTES = `tag_direct_record_counts AS (
+  SELECT effective_record.tag_id,
+         COUNT(DISTINCT effective_record.record_id)::integer AS record_count
+    FROM effective_tag_records AS effective_record
+   GROUP BY effective_record.tag_id
+),
+tag_subtree_record_counts AS (
+  SELECT ancestor.tag_id,
+         COUNT(DISTINCT effective_record.record_id)::integer AS record_count
+    FROM effective_tag_records AS effective_record
+    INNER JOIN tag_hierarchy_paths AS tag_path
+      ON tag_path.tag_id = effective_record.tag_id
+    CROSS JOIN LATERAL unnest(tag_path.path_ids) AS ancestor(tag_id)
+   GROUP BY ancestor.tag_id
+)`;
+
+async function readPublicTagRows(
+  database: Pool | PoolClient,
+  where: string,
+  parameters: unknown[],
+  orderBy = "tag.display_name, tag.id",
+): Promise<TagSummaryRow[]> {
+  const result = await database.query<TagSummaryRow>(
+    `WITH ${EFFECTIVE_TAG_RECORDS_CTE},
+     ${TAG_RECORD_COUNT_CTES}
+     SELECT tag.id,
+            tag.display_name,
+            tag.origin,
+            tag.approval_status,
+            tag.parent_tag_id,
+            COALESCE(subtree_count.record_count, 0) AS record_count,
+            COALESCE(direct_count.record_count, 0) AS direct_record_count,
+            (
+              SELECT COUNT(*)::integer
+                FROM tags AS child
+               WHERE child.parent_tag_id = tag.id
+            ) AS child_count,
+            COALESCE(tag_path.path_ids, ARRAY[tag.id]) AS path_ids,
+            COALESCE(tag_path.path_names, ARRAY[tag.display_name]) AS path_names
+       FROM tags AS tag
+       LEFT JOIN tag_direct_record_counts AS direct_count
+         ON direct_count.tag_id = tag.id
+       LEFT JOIN tag_subtree_record_counts AS subtree_count
+         ON subtree_count.tag_id = tag.id
+       LEFT JOIN tag_hierarchy_paths AS tag_path
+         ON tag_path.tag_id = tag.id
+      WHERE ${where}
+      ORDER BY ${orderBy}`,
+    parameters,
+  );
+
+  return result.rows;
+}
 
 export async function buildApp(
   options: BuildAppOptions,
@@ -898,12 +969,13 @@ export async function buildApp(
       const name = request.body?.name;
       const normalizedName =
         typeof name === "string" ? normalizeTagName(name) : "";
+      const parentId = optionalParentId(request.body?.parentId);
 
-      if (!normalizedName) {
+      if (!normalizedName || parentId === undefined) {
         return reply.code(422).send({
           error: {
             code: "TAG_CREATE_INVALID",
-            message: "标签名称不能为空。",
+            message: "标签名称不能为空，上级标签必须有效。",
           },
         });
       }
@@ -925,17 +997,27 @@ export async function buildApp(
         });
       }
 
+      if (parentId && !(await tagExists(pool, parentId))) {
+        return tagParentNotFound(reply);
+      }
+
       const tagId = randomUUID();
 
       try {
         await pool.query(
           `INSERT INTO tags
              (id, display_name, normalized_name, origin, approval_status,
-              user_approved_at)
-           VALUES ($1, $2, $3, 'USER_CREATED', 'USER_APPROVED', now())`,
-          [tagId, name, normalizedName],
+              user_approved_at, parent_tag_id)
+           VALUES ($1, $2, $3, 'USER_CREATED', 'USER_APPROVED', now(), $4)`,
+          [tagId, name, normalizedName, parentId],
         );
       } catch (error) {
+        const hierarchyViolation = tagHierarchyViolationResponse(error);
+
+        if (hierarchyViolation) {
+          return reply.code(409).send({ error: hierarchyViolation });
+        }
+
         if (!isTagNameUniqueViolation(error)) {
           throw error;
         }
@@ -995,125 +1077,140 @@ export async function buildApp(
         sort === "name_desc"
           ? "tag.display_name DESC, tag.id DESC"
           : sort === "record_count_desc"
-            ? "record_count DESC, tag.display_name, tag.id"
+            ? "COALESCE(subtree_count.record_count, 0) DESC, tag.display_name, tag.id"
             : "tag.display_name, tag.id";
-      const result = await pool.query<{
-        id: string;
-        display_name: string;
-        origin: "USER_CREATED" | "AI_CREATED";
-        approval_status: "CANDIDATE" | "USER_APPROVED";
-        record_count: number;
-      }>(
-        `WITH ${EFFECTIVE_TAG_RECORDS_CTE}
-         SELECT tag.id,
-                tag.display_name,
-                tag.origin,
-                tag.approval_status,
-                COUNT(DISTINCT effective_record.record_id)::integer AS record_count
-           FROM tags AS tag
-           LEFT JOIN effective_tag_records AS effective_record
-             ON effective_record.tag_id = tag.id
-          WHERE tag.approval_status = $2
-            AND tag.archived_at IS NULL
-            AND NOT EXISTS (
-              SELECT 1
-                FROM tag_merges AS active_merge
-               WHERE active_merge.source_tag_id = tag.id
-                 AND active_merge.undone_at IS NULL
-            )
-            AND (
-              $1::text = ''
-              OR tag.display_name ILIKE '%' || $1 || '%'
-              OR EXISTS (
-                SELECT 1
-                  FROM tag_aliases AS alias
-                 WHERE resolve_tag_id(alias.tag_id) = tag.id
-                   AND alias.display_name ILIKE '%' || $1 || '%'
-              )
-              OR EXISTS (
-                SELECT 1
-                  FROM tag_merges AS active_merge
-                  INNER JOIN tags AS source_tag
-                    ON source_tag.id = active_merge.source_tag_id
-                 WHERE active_merge.target_tag_id = tag.id
-                   AND active_merge.undone_at IS NULL
-                   AND source_tag.display_name ILIKE '%' || $1 || '%'
-              )
-            )
-          GROUP BY tag.id
-          ORDER BY ${orderBy}`,
+      const rows = await readPublicTagRows(
+        pool,
+        `tag.approval_status = $2
+         AND tag.archived_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+             FROM tag_merges AS active_merge
+            WHERE active_merge.source_tag_id = tag.id
+              AND active_merge.undone_at IS NULL
+         )
+         AND (
+           $1::text = ''
+           OR array_to_string(
+                COALESCE(tag_path.path_names, ARRAY[tag.display_name]),
+                ' '
+              ) ILIKE '%' || $1 || '%'
+           OR EXISTS (
+             SELECT 1
+               FROM tag_aliases AS alias
+              WHERE resolve_tag_id(alias.tag_id) = tag.id
+                AND alias.display_name ILIKE '%' || $1 || '%'
+           )
+           OR EXISTS (
+             SELECT 1
+               FROM tag_merges AS active_merge
+               INNER JOIN tags AS source_tag
+                 ON source_tag.id = active_merge.source_tag_id
+              WHERE active_merge.target_tag_id = tag.id
+                AND active_merge.undone_at IS NULL
+                AND source_tag.display_name ILIKE '%' || $1 || '%'
+           )
+         )`,
         [query, approvalStatus],
+        orderBy,
       );
 
       return {
-        items: result.rows.map(publicTagFromRow),
+        items: rows.map(publicTagFromRow),
         page: { nextCursor: null },
       };
     },
   );
 
   app.get("/api/v1/tag-field", async () => {
-    const result = await pool.query<{
-      id: string;
-      display_name: string;
-      approval_status: "CANDIDATE" | "USER_APPROVED";
-      record_count: number;
-    }>(
-      `WITH ${EFFECTIVE_TAG_RECORDS_CTE}
-       SELECT tag.id,
-              tag.display_name,
-              tag.approval_status,
-              COUNT(DISTINCT effective_record.record_id)::integer AS record_count
-         FROM tags AS tag
-         LEFT JOIN effective_tag_records AS effective_record
-           ON effective_record.tag_id = tag.id
-        WHERE tag.approval_status IN ('CANDIDATE', 'USER_APPROVED')
-          AND tag.archived_at IS NULL
-          AND NOT EXISTS (
-            SELECT 1
-              FROM tag_merges AS active_merge
-             WHERE active_merge.source_tag_id = tag.id
-               AND active_merge.undone_at IS NULL
-          )
-        GROUP BY tag.id
-        ORDER BY tag.display_name, tag.id`,
+    const rows = await readPublicTagRows(
+      pool,
+      `tag.approval_status IN ('CANDIDATE', 'USER_APPROVED')
+       AND tag.archived_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1
+           FROM tag_merges AS active_merge
+          WHERE active_merge.source_tag_id = tag.id
+            AND active_merge.undone_at IS NULL
+       )`,
+      [],
     );
 
     return {
-      items: result.rows.map((row) => ({
-        id: row.id,
-        name: row.display_name,
-        approval:
-          row.approval_status === "USER_APPROVED" ? "approved" : "candidate",
-        recordCount: row.record_count,
-      })),
+      items: rows.map((row) => {
+        const tag = publicTagFromRow(row);
+
+        return {
+          id: tag.id,
+          name: tag.name,
+          approval:
+            tag.approvalStatus === "user_approved" ? "approved" : "candidate",
+          recordCount: tag.recordCount,
+          directRecordCount: tag.directRecordCount,
+          parentId: tag.parentId,
+          ancestors: tag.ancestors,
+        };
+      }),
     };
   });
 
-  app.post<{ Params: TagParams }>(
+  app.post<{ Body: ApproveTagBody | undefined; Params: TagParams }>(
     "/api/v1/tags/:id/approve",
     async (request, reply) => {
-      const result = await pool.query<{
-        id: string;
-        display_name: string;
-        origin: "AI_CREATED";
-      }>(
-        `UPDATE tags
-            SET approval_status = 'USER_APPROVED',
-                user_approved_at = clock_timestamp(),
-                updated_at = clock_timestamp()
-          WHERE id = $1
-            AND origin = 'AI_CREATED'
-            AND approval_status = 'CANDIDATE'
-            AND NOT EXISTS (
-              SELECT 1
-                FROM tag_merges AS active_merge
-               WHERE active_merge.source_tag_id = tags.id
-                 AND active_merge.undone_at IS NULL
-            )
-          RETURNING id, display_name, origin`,
-        [request.params.id],
-      );
+      const parentId = optionalParentId(request.body?.parentId);
+
+      if (parentId === undefined) {
+        return reply.code(422).send({
+          error: {
+            code: "TAG_APPROVAL_INVALID",
+            message: "上级标签必须有效。",
+          },
+        });
+      }
+
+      if (parentId && !(await tagExists(pool, parentId))) {
+        return tagParentNotFound(reply);
+      }
+
+      let result;
+
+      try {
+        result = await withTagMutationLock(
+          pool,
+          "knowledge-tag-hierarchy",
+          (client) => client.query<{
+            id: string;
+            display_name: string;
+            origin: "AI_CREATED";
+          }>(
+            `UPDATE tags
+              SET approval_status = 'USER_APPROVED',
+                  user_approved_at = clock_timestamp(),
+                  updated_at = clock_timestamp(),
+                  parent_tag_id = $2
+            WHERE id = $1
+              AND origin = 'AI_CREATED'
+              AND approval_status = 'CANDIDATE'
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM tag_merges AS active_merge
+                 WHERE active_merge.source_tag_id = tags.id
+                   AND active_merge.undone_at IS NULL
+              )
+            RETURNING id, display_name, origin`,
+            [request.params.id, parentId],
+          ),
+        );
+      } catch (error) {
+        const hierarchyViolation = tagHierarchyViolationResponse(error);
+
+        if (hierarchyViolation) {
+          return reply.code(409).send({ error: hierarchyViolation });
+        }
+
+        throw error;
+      }
+
       const tag = result.rows[0];
 
       if (!tag) {
@@ -1277,17 +1374,41 @@ export async function buildApp(
         });
       }
 
+      if (sourceTags.some((tag) => (tag?.childCount ?? 0) > 0)) {
+        return tagMergeSourceHasChildren(reply);
+      }
+
       const operationId = randomUUID();
+      const client = await pool.connect();
 
       try {
-        await pool.query(
+        await client.query("BEGIN");
+        await lockTagHierarchy(client);
+        // A merge source resolves to its target everywhere, so it leaves the
+        // hierarchy instead of staying as an invisible child of its parent.
+        await client.query(
+          `UPDATE tags
+              SET parent_tag_id = NULL,
+                  updated_at = clock_timestamp()
+            WHERE id = ANY($1::uuid[])
+              AND parent_tag_id IS NOT NULL`,
+          [sourceTagIds],
+        );
+        await client.query(
           `INSERT INTO tag_merges
              (operation_id, source_tag_id, target_tag_id)
            SELECT $1, source_tag_id, $3
              FROM unnest($2::uuid[]) AS source_tag_id`,
           [operationId, sourceTagIds, targetTagId],
         );
+        await client.query("COMMIT");
       } catch (error) {
+        await client.query("ROLLBACK");
+
+        if (isTagMergeSourceWithChildrenViolation(error)) {
+          return tagMergeSourceHasChildren(reply);
+        }
+
         if (!isTagMergeConstraintViolation(error)) {
           throw error;
         }
@@ -1298,6 +1419,8 @@ export async function buildApp(
             message: "标签已参与其他有效合并，不能形成合并链或重复合并。",
           },
         });
+      } finally {
+        client.release();
       }
 
       const mergedTarget = await readPublicTag(pool, targetTagId);
@@ -1366,13 +1489,14 @@ export async function buildApp(
         return reply.code(422).send({
           error: {
             code: "TAG_UPDATE_INVALID",
-            message: "一次只能改名，或变更归档状态。",
+            message: "一次只能改名、调整上级，或变更归档状态。",
           },
         });
       }
 
       if ("name" in request.body) {
-        const normalizedName = normalizeTagName(request.body.name);
+        const { name } = request.body;
+        const normalizedName = normalizeTagName(name);
 
         if (!normalizedName) {
           return reply.code(422).send({
@@ -1390,15 +1514,19 @@ export async function buildApp(
         }
 
         try {
-          const renamed = await pool.query<{ id: string }>(
-            `UPDATE tags
+          const renamed = await withTagMutationLock(
+            pool,
+            "knowledge-tag-vocabulary-names",
+            (client) => client.query<{ id: string }>(
+              `UPDATE tags
                 SET display_name = $2,
                     normalized_name = $3,
                     updated_at = clock_timestamp()
               WHERE id = $1
                 AND approval_status = 'USER_APPROVED'
               RETURNING id`,
-            [request.params.id, request.body.name, normalizedName],
+              [request.params.id, name, normalizedName],
+            ),
           );
 
           if (!renamed.rows[0]) {
@@ -1417,11 +1545,52 @@ export async function buildApp(
 
           return tagNameConflict(reply, conflict);
         }
+      } else if ("parentId" in request.body) {
+        const { parentId } = request.body;
+
+        if (parentId && !(await tagExists(pool, parentId))) {
+          return tagParentNotFound(reply);
+        }
+
+        try {
+          const moved = await withTagMutationLock(
+            pool,
+            "knowledge-tag-hierarchy",
+            (client) => client.query<{ id: string }>(
+              `UPDATE tags
+                SET parent_tag_id = $2,
+                    updated_at = clock_timestamp()
+              WHERE id = $1
+                AND approval_status = 'USER_APPROVED'
+                AND archived_at IS NULL
+              RETURNING id`,
+              [request.params.id, parentId],
+            ),
+          );
+
+          if (!moved.rows[0]) {
+            return tagUpdateNotFoundOrAllowed(
+              pool,
+              request.params.id,
+              reply,
+              "只有当前有效的“我的标签”可以调整上级。",
+            );
+          }
+        } catch (error) {
+          const hierarchyViolation = tagHierarchyViolationResponse(error);
+
+          if (hierarchyViolation) {
+            return reply.code(409).send({ error: hierarchyViolation });
+          }
+
+          throw error;
+        }
       } else {
         const client = await pool.connect();
 
         try {
           await client.query("BEGIN");
+          await lockTagHierarchy(client);
           const current = await client.query<{
             approval_status: "ARCHIVED" | "CANDIDATE" | "USER_APPROVED";
           }>(
@@ -1514,10 +1683,26 @@ export async function buildApp(
                 });
               }
 
+              const children = await client.query<{ has_children: boolean }>(
+                `SELECT EXISTS (
+                   SELECT 1
+                     FROM tags AS child
+                    WHERE child.parent_tag_id = $1
+                 ) AS has_children`,
+                [request.params.id],
+              );
+
+              if (children.rows[0]?.has_children) {
+                await client.query("ROLLBACK");
+                return tagArchiveHasChildren(reply);
+              }
+
+              // An archived Tag leaves the hierarchy and returns at the top level.
               await client.query(
                 `UPDATE tags
                     SET approval_status = 'ARCHIVED',
                         archived_at = clock_timestamp(),
+                        parent_tag_id = NULL,
                         updated_at = clock_timestamp()
                   WHERE id = $1`,
                 [request.params.id],
@@ -1566,6 +1751,13 @@ export async function buildApp(
                 message: "请先移除标签别名或撤销相关合并，再变更标签状态。",
               },
             });
+          }
+
+          if (
+            tagHierarchyViolationKind(error) ===
+            "tag_hierarchy_parent_must_stay_active"
+          ) {
+            return tagArchiveHasChildren(reply);
           }
 
           throw error;
@@ -2542,22 +2734,13 @@ async function readPublicTag(
   pool: Pool,
   tagId: string,
 ): Promise<PublicTag | null> {
-  const result = await pool.query<TagSummaryRow>(
-    `WITH ${EFFECTIVE_TAG_RECORDS_CTE}
-     SELECT tag.id,
-            tag.display_name,
-            tag.origin,
-            tag.approval_status,
-            COUNT(DISTINCT effective_record.record_id)::integer AS record_count
-       FROM tags AS tag
-       LEFT JOIN effective_tag_records AS effective_record
-         ON effective_record.tag_id = tag.id
-      WHERE tag.id = resolve_tag_id($1::uuid)
-      GROUP BY tag.id`,
+  const [row] = await readPublicTagRows(
+    pool,
+    "tag.id = resolve_tag_id($1::uuid)",
     [tagId],
   );
 
-  return result.rows[0] ? publicTagFromRow(result.rows[0]) : null;
+  return row ? publicTagFromRow(row) : null;
 }
 
 async function readTagDetail(pool: Pool, tagId: string) {
@@ -2567,7 +2750,7 @@ async function readTagDetail(pool: Pool, tagId: string) {
     return null;
   }
 
-  const [result, aliasResult, mergedSourceResult] = await Promise.all([
+  const [result, aliasResult, mergedSourceResult, childRows] = await Promise.all([
     pool.query<{
     assignment_status: "ACTIVE" | "SUPPRESSED" | null;
     content: string;
@@ -2695,6 +2878,7 @@ async function readTagDetail(pool: Pool, tagId: string) {
         ORDER BY active_merge.created_at, source.display_name, source.id`,
       [tag.id],
     ),
+    readPublicTagRows(pool, "tag.parent_tag_id = $1", [tag.id]),
   ]);
   const records = new Map<
     string,
@@ -2757,6 +2941,7 @@ async function readTagDetail(pool: Pool, tagId: string) {
       mergeId: source.operation_id,
       name: source.display_name,
     })),
+    children: childRows.map(publicTagFromRow),
     records: [...records.values()],
   };
 }
@@ -2773,6 +2958,13 @@ function publicTagFromRow(row: TagSummaryRow): PublicTag {
           ? "candidate"
           : "archived",
     recordCount: row.record_count,
+    directRecordCount: row.direct_record_count,
+    parentId: row.parent_tag_id,
+    ancestors: row.path_ids.slice(0, -1).map((id, index) => ({
+      id,
+      name: row.path_names[index] ?? "",
+    })),
+    childCount: row.child_count,
   };
 }
 
@@ -2803,7 +2995,149 @@ function isTagPatchBody(value: unknown): value is TagPatchBody {
     (keys.length === 1 &&
       keys[0] === "approvalStatus" &&
       (body.approvalStatus === "archived" ||
-        body.approvalStatus === "user_approved"))
+        body.approvalStatus === "user_approved")) ||
+    (keys.length === 1 &&
+      keys[0] === "parentId" &&
+      (body.parentId === null ||
+        (typeof body.parentId === "string" && isUuid(body.parentId))))
+  );
+}
+
+/**
+ * Returns null for "top level", the id for a valid parent, and undefined
+ * when the submitted value cannot name a parent Tag.
+ */
+function optionalParentId(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return typeof value === "string" && isUuid(value) ? value : undefined;
+}
+
+async function tagExists(pool: Pool, tagId: string): Promise<boolean> {
+  const result = await pool.query("SELECT 1 FROM tags WHERE id = $1", [tagId]);
+
+  return Boolean(result.rows[0]);
+}
+
+async function lockTagHierarchy(client: PoolClient): Promise<void> {
+  // Acquire before tag row locks, including those taken by UPDATE itself.
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended('knowledge-tag-hierarchy', 0))",
+  );
+}
+
+async function withTagMutationLock<T>(
+  pool: Pool,
+  lockName: "knowledge-tag-hierarchy" | "knowledge-tag-vocabulary-names",
+  mutation: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      lockName,
+    ]);
+    const result = await mutation(client);
+
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function tagParentNotFound(reply: FastifyReply) {
+  return reply.code(404).send({
+    error: { code: "TAG_PARENT_NOT_FOUND", message: "上级标签不存在。" },
+  });
+}
+
+function tagArchiveHasChildren(reply: FastifyReply) {
+  return reply.code(409).send({
+    error: {
+      code: "TAG_ARCHIVE_HAS_CHILDREN",
+      message: "这个标签还有下级标签，请先移走或归档下级标签。",
+    },
+  });
+}
+
+function tagMergeSourceHasChildren(reply: FastifyReply) {
+  return reply.code(409).send({
+    error: {
+      code: "TAG_MERGE_SOURCE_HAS_CHILDREN",
+      message: "有下级标签的标签不能作为合并来源，请先移走下级标签或将它选为主标签。",
+    },
+  });
+}
+
+function tagHierarchyViolationKind(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const postgresError = error as { code?: string; constraint?: string };
+
+  return postgresError.code === "23514" &&
+    (postgresError.constraint?.startsWith("tag_hierarchy_") === true ||
+      postgresError.constraint === "tags_parent_not_self_check" ||
+      postgresError.constraint ===
+        "tags_parent_requires_active_approved_check")
+    ? postgresError.constraint
+    : null;
+}
+
+function tagHierarchyViolationResponse(
+  error: unknown,
+): { code: string; message: string } | null {
+  switch (tagHierarchyViolationKind(error)) {
+    case "tag_hierarchy_no_cycles":
+    case "tags_parent_not_self_check":
+      return {
+        code: "TAG_HIERARCHY_CYCLE",
+        message: "不能把标签移到它自己或它的下级标签之下。",
+      };
+    case "tag_hierarchy_max_depth":
+      return {
+        code: "TAG_HIERARCHY_TOO_DEEP",
+        message: "标签层级最多 5 级，请选择更靠上的位置。",
+      };
+    case "tag_hierarchy_parent_must_be_active":
+      return {
+        code: "TAG_PARENT_NOT_ALLOWED",
+        message: "上级必须是当前有效的“我的标签”。",
+      };
+    case "tag_hierarchy_member_must_be_canonical":
+    case "tags_parent_requires_active_approved_check":
+      return {
+        code: "TAG_HIERARCHY_NOT_ALLOWED",
+        message: "只有当前有效的“我的标签”可以放入层级。",
+      };
+    case "tag_hierarchy_parent_must_stay_active":
+      return {
+        code: "TAG_ARCHIVE_HAS_CHILDREN",
+        message: "这个标签还有下级标签，请先移走或归档下级标签。",
+      };
+    default:
+      return null;
+  }
+}
+
+function isTagMergeSourceWithChildrenViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const postgresError = error as { code?: string; constraint?: string };
+
+  return (
+    postgresError.code === "23514" &&
+    postgresError.constraint === "tag_merges_source_without_children"
   );
 }
 
@@ -2864,6 +3198,7 @@ async function tagUpdateNotFoundOrAllowed(
   pool: Pool,
   tagId: string,
   reply: FastifyReply,
+  message = "当前标签状态不允许改名。",
 ) {
   const existing = await pool.query<{ approval_status: string }>(
     "SELECT approval_status FROM tags WHERE id = $1",
@@ -2874,7 +3209,7 @@ async function tagUpdateNotFoundOrAllowed(
     ? reply.code(409).send({
         error: {
           code: "TAG_UPDATE_NOT_ALLOWED",
-          message: "当前标签状态不允许改名。",
+          message,
         },
       })
     : reply.code(404).send({
@@ -3211,10 +3546,8 @@ async function findRecords(
             SELECT 1
               FROM library_tag_records AS filter_assignment
              WHERE filter_assignment.record_id = record.id
-               AND EXISTS (
-                 SELECT 1
-                   FROM unnest($4::uuid[]) AS requested_tag(id)
-                  WHERE filter_assignment.tag_id = resolve_tag_id(requested_tag.id)
+               AND filter_assignment.tag_id IN (
+                 SELECT tag_subtree_ids($4::uuid[])
                )
           )
         )

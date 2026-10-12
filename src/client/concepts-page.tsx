@@ -97,7 +97,7 @@ export function ConceptsPage() {
   }, [requestedConceptId]);
 
   useEffect(() => {
-    if (!selectedId || mode === "create") {
+    if (!selectedId || mode !== "view") {
       return;
     }
 

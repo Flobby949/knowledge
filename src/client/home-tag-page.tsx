@@ -18,6 +18,7 @@ import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
 import { createTagBubbleField } from "./tag-bubble-field.js";
 import { createTagMembraneField } from "./tag-membrane-field.js";
+import { tagPathLabel } from "./tag-path.js";
 import { useTheme, type AppTheme } from "./theme.js";
 import "./home-page.css";
 import "./home-tag-page.css";
@@ -210,7 +211,9 @@ export function TagHomePage() {
     const normalized = query.trim().toLocaleLowerCase();
 
     return normalized
-      ? tags.filter((tag) => tag.name.toLocaleLowerCase().includes(normalized))
+      ? tags.filter((tag) =>
+          tagPathLabel(tag).toLocaleLowerCase().includes(normalized),
+        )
       : [];
   }, [query, tags]);
   const focused = tags.find((tag) => tag.id === focusedId) ?? null;
@@ -472,7 +475,7 @@ export function TagHomePage() {
                   style={{ left: `${position.x}%`, top: `${position.y}%` }}
                 >
                   <button
-                    aria-label={tag.name}
+                    aria-label={tagPathLabel(tag)}
                     data-state={`${tag.approval} ${
                       tag.approval === "approved" ? "complete-ring" : "dashed-ring"
                     }${focusedState}`}
@@ -580,7 +583,7 @@ export function TagHomePage() {
             role="status"
           >
             {focused
-              ? `${focused.name} · ${focused.approval === "candidate" ? "AI 候选" : "已认可"} · ${focused.recordCount} 条记录`
+              ? `${tagPathLabel(focused)} · ${focused.approval === "candidate" ? "AI 候选" : "已认可"} · ${focused.recordCount} 条记录（含下级）· 直接关联 ${focused.directRecordCount} 条`
               : theme === "scifi"
                 ? "选择一个标签以查看信号信息"
                 : "选择一个标签查看记录信息"}
@@ -672,7 +675,7 @@ export function TagHomePage() {
                     }}
                     type="button"
                   >
-                    {tag.name}
+                    {tagPathLabel(tag)}
                   </button>
                 )) : <span className="suggestion-empty">没有匹配标签</span>}
               </div>

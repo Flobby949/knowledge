@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 8,
+  formatVersion: 9,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -49,6 +49,7 @@ interface TagSnapshotRow extends DomainRow {
   archived_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+  parent_tag_id: string | null;
 }
 
 interface TagAssignmentSnapshotRow extends DomainRow {
@@ -417,7 +418,7 @@ interface ConceptRelationSnapshotRow extends DomainRow {
 }
 
 interface DomainSnapshot {
-  formatVersion: 8;
+  formatVersion: 9;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
@@ -455,7 +456,7 @@ interface DomainSnapshot {
 
 interface ParsedSnapshot {
   snapshot: DomainSnapshot;
-  sourceFormatVersion: 4 | 5 | 6 | 7 | 8;
+  sourceFormatVersion: 4 | 5 | 6 | 7 | 8 | 9;
 }
 
 interface ExportRow {
@@ -881,7 +882,7 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       "SELECT * FROM concept_relations ORDER BY confirmed_at, id",
     );
     const snapshot: DomainSnapshot = {
-      formatVersion: 8,
+      formatVersion: 9,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
@@ -950,7 +951,8 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
       publicManifest.formatVersion !== 5 &&
       publicManifest.formatVersion !== 6 &&
       publicManifest.formatVersion !== 7 &&
-      publicManifest.formatVersion !== 8) ||
+      publicManifest.formatVersion !== 8 &&
+      publicManifest.formatVersion !== 9) ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -1006,7 +1008,8 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     value.formatVersion !== 5 &&
     value.formatVersion !== 6 &&
     value.formatVersion !== 7 &&
-    value.formatVersion !== 8
+    value.formatVersion !== 8 &&
+    value.formatVersion !== 9
   ) {
     throw new Error("domain snapshot version is unsupported");
   }
@@ -1070,11 +1073,11 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
             ],
   );
 
-  const normalizedValue: DomainRow =
+  const versionNormalizedValue: DomainRow =
     value.formatVersion === 4
       ? {
           ...value,
-          formatVersion: 8,
+          formatVersion: 9,
           concepts: [],
           conceptRevisions: [],
           conceptMemberships: [],
@@ -1090,7 +1093,7 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
       : value.formatVersion === 5
         ? {
             ...value,
-            formatVersion: 8,
+            formatVersion: 9,
             conceptCandidateScans: [],
             conceptCandidateInputs: [],
             conceptCandidates: [],
@@ -1102,7 +1105,7 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
         : value.formatVersion === 6
           ? {
               ...value,
-              formatVersion: 8,
+              formatVersion: 9,
               conceptCandidateScans: requireRows(
                 value.conceptCandidateScans,
                 "conceptCandidateScans",
@@ -1116,11 +1119,24 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
           : value.formatVersion === 7
             ? {
                 ...value,
-                formatVersion: 8,
+                formatVersion: 9,
                 conceptRelationSuggestions: [],
                 conceptRelations: [],
               }
             : value;
+
+  // Format 9 adds the Tag hierarchy; every Tag from an older package is a root.
+  const normalizedValue: DomainRow =
+    value.formatVersion === 9
+      ? versionNormalizedValue
+      : {
+          ...versionNormalizedValue,
+          formatVersion: 9,
+          tags: requireRows(versionNormalizedValue.tags, "tags").map((row) => ({
+            ...row,
+            parent_tag_id: null,
+          })),
+        };
 
   const records = requireRows(normalizedValue.records, "records");
   const fragmentRevisions = requireRows(
@@ -1322,10 +1338,12 @@ function validateTagRow(row: DomainRow): void {
     "archived_at",
     "created_at",
     "updated_at",
+    "parent_tag_id",
   ]);
   requireUuid(row, "id");
   requireNonEmptyString(row, "display_name");
   requireNonEmptyString(row, "normalized_name");
+  requireNullableUuid(row, "parent_tag_id");
   requireEnum(row, "origin", ["USER_CREATED", "AI_CREATED"]);
   requireEnum(row, "approval_status", [
     "CANDIDATE",
@@ -1347,6 +1365,13 @@ function validateTagRow(row: DomainRow): void {
       (row.user_approved_at === null || row.archived_at === null))
   ) {
     throw new Error("tag lifecycle is invalid");
+  }
+
+  if (
+    row.parent_tag_id !== null &&
+    (row.parent_tag_id === row.id || row.approval_status !== "USER_APPROVED")
+  ) {
+    throw new Error("only active user-approved tags can have a parent tag");
   }
 }
 
@@ -2972,6 +2997,8 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
     throw new Error("active tag merge chains are not supported");
   }
 
+  validateTagHierarchy(snapshot.tags, activeSourceIds);
+
   for (const revision of snapshot.fragmentRevisions) {
     if (!records.has(revision.record_id)) {
       throw new Error("fragment revision record reference is invalid");
@@ -3300,6 +3327,85 @@ function validateSnapshotReferences(snapshot: DomainSnapshot): void {
   }
 }
 
+const MAX_TAG_HIERARCHY_DEPTH = 5;
+
+function validateTagHierarchy(
+  tags: TagSnapshotRow[],
+  activeMergeSourceIds: Set<string>,
+): void {
+  const byId = new Map(tags.map((tag) => [tag.id, tag]));
+
+  for (const tag of tags) {
+    if (tag.parent_tag_id === null) {
+      continue;
+    }
+
+    const parent = byId.get(tag.parent_tag_id);
+
+    if (
+      !parent ||
+      parent.approval_status !== "USER_APPROVED" ||
+      parent.archived_at !== null ||
+      activeMergeSourceIds.has(parent.id) ||
+      activeMergeSourceIds.has(tag.id)
+    ) {
+      throw new Error("tag hierarchy reference is invalid");
+    }
+  }
+
+  // Walking up from every Tag also rejects cycles, which never end.
+  for (const tag of tags) {
+    tagHierarchyDepth(byId, tag);
+  }
+}
+
+function tagHierarchyDepth(
+  tags: Map<string, TagSnapshotRow>,
+  tag: TagSnapshotRow,
+): number {
+  let depth = 1;
+  let current = tag;
+
+  while (current.parent_tag_id !== null) {
+    const parent = tags.get(current.parent_tag_id);
+
+    depth += 1;
+
+    if (!parent || depth > MAX_TAG_HIERARCHY_DEPTH) {
+      throw new Error("tag hierarchy is too deep or cyclic");
+    }
+
+    current = parent;
+  }
+
+  return depth;
+}
+
+function tagPathLabel(
+  tags: Map<string, TagSnapshotRow>,
+  tag: TagSnapshotRow,
+): string {
+  const names = [tag.display_name];
+  let current = tag;
+
+  for (
+    let depth = 1;
+    current.parent_tag_id !== null && depth < MAX_TAG_HIERARCHY_DEPTH;
+    depth += 1
+  ) {
+    const parent = tags.get(current.parent_tag_id);
+
+    if (!parent) {
+      break;
+    }
+
+    names.unshift(parent.display_name);
+    current = parent;
+  }
+
+  return names.join(" › ");
+}
+
 function requireRows(value: unknown, name: string): DomainRow[] {
   if (!Array.isArray(value) || !value.every(isDomainRow)) {
     throw new Error(`${name} must be an array of objects`);
@@ -3490,6 +3596,21 @@ async function restoreSnapshot(
     "created_at",
     "undone_at",
   ], snapshot.tagMerges);
+
+  // Tags are inserted as roots first; parents are attached top-down so every
+  // step satisfies the same hierarchy trigger as a user move.
+  const tagsById = new Map(snapshot.tags.map((tag) => [tag.id, tag]));
+  const childTags = snapshot.tags
+    .filter((tag) => tag.parent_tag_id !== null)
+    .map((tag) => ({ depth: tagHierarchyDepth(tagsById, tag), tag }))
+    .sort((left, right) => left.depth - right.depth);
+
+  for (const { tag } of childTags) {
+    await client.query("UPDATE tags SET parent_tag_id = $2 WHERE id = $1", [
+      tag.id,
+      tag.parent_tag_id,
+    ]);
+  }
   await insertRows(client, "records", [
     "id",
     "current_fragment_revision_id",
@@ -3905,7 +4026,7 @@ function renderRecordMarkdown(
           const tag = tags.get(assignment.tag_id);
 
           return tag
-            ? `- ${escapeMarkdownInline(tag.display_name)} (\`${tag.id}\`)`
+            ? `- ${escapeMarkdownInline(tagPathLabel(tags, tag))} (\`${tag.id}\`)`
             : `- 未知标签 (\`${assignment.tag_id}\`)`;
         })
       : ["无。"]),
@@ -4026,7 +4147,7 @@ function renderRecordMarkdown(
 
         lines.push(
           tag
-            ? `- ${escapeMarkdownInline(tag.display_name)} (\`${tag.id}\`) · ` +
+            ? `- ${escapeMarkdownInline(tagPathLabel(tags, tag))} (\`${tag.id}\`) · ` +
                 `\`${tag.approval_status}\` · \`${assignment.status}\``
             : `- 未知标签 (\`${assignment.tag_id}\`)`,
         );

@@ -4,8 +4,8 @@
  * STORY: The user scans the vocabulary, selects one term, and manages its record-level footprint in place.
  * FIRST VIEWPORT: 60px navigation, five equal card columns, then a non-modal push drawer on selection.
  */
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import {
   approveCandidateTag,
@@ -25,16 +25,23 @@ import {
 } from "./api.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
+import { tagAncestorLabel, tagPathLabel } from "./tag-path.js";
 import "./tags-page.css";
 
 type TagSection = "candidate" | "user_approved";
 type TagSort = "name_asc" | "name_desc" | "record_count_desc";
 
+const MAX_TAG_DEPTH = 5;
+
 export function TagsPage() {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const requestedLevelId = searchParams.get("level");
   const [section, setSection] = useState<TagSection>("user_approved");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<TagSort>("name_asc");
   const [tags, setTags] = useState<TagListItem[]>([]);
+  const [hierarchyTags, setHierarchyTags] = useState<TagListItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -122,6 +129,37 @@ export function TagsPage() {
       controller.abort();
     };
   }, [query, reloadVersion, section, sort]);
+
+  // The complete approved vocabulary feeds the move and approval pickers even
+  // while the atlas itself shows search results or AI candidates.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void listTags({
+      approval: "user_approved",
+      query: "",
+      sort: "name_asc",
+      signal: controller.signal,
+    })
+      .then(setHierarchyTags)
+      .catch(() => undefined);
+
+    return () => controller.abort();
+  }, [reloadVersion]);
+
+  useEffect(() => {
+    setQuery("");
+  }, [location.key]);
+
+  // "我的标签" is browsed one level at a time; searching flattens every level.
+  const browsingLevels = section === "user_approved" && query === "";
+  const levelTag =
+    browsingLevels && requestedLevelId
+      ? (tags.find(({ id }) => id === requestedLevelId) ?? null)
+      : null;
+  const visibleTags = browsingLevels
+    ? tags.filter((tag) => tag.parentId === (levelTag?.id ?? null))
+    : tags;
 
   useEffect(() => {
     if (!selectedTag) {
@@ -359,7 +397,7 @@ export function TagsPage() {
     }
   }
 
-  async function handleApprove() {
+  async function handleApprove(parentId: string | null) {
     if (!selectedTag) {
       return;
     }
@@ -369,7 +407,7 @@ export function TagsPage() {
     setActionNotice("");
 
     try {
-      await approveCandidateTag(selectedTag.id);
+      await approveCandidateTag(selectedTag.id, parentId);
       const nextDetail = await refreshSelected(selectedTag.id);
 
       setSelectedTag(nextDetail.tag);
@@ -382,6 +420,34 @@ export function TagsPage() {
       setActionNotice("已认可为“我的标签”，历史关联保持不变。");
     } catch (error) {
       setActionError(tagActionMessage(error, "候选标签未能认可，请重试。"));
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function handleMove(parentId: string | null): Promise<boolean> {
+    if (!selectedTag) {
+      return false;
+    }
+
+    setActionBusy("move");
+    setActionError("");
+    setActionNotice("");
+
+    try {
+      const moved = await updateTag(selectedTag.id, { parentId });
+
+      await refreshSelected(selectedTag.id);
+      setReloadVersion((current) => current + 1);
+      setActionNotice(
+        moved.ancestors.length > 0
+          ? `已移动到“${tagAncestorLabel(moved)}”之下。`
+          : "已移到顶层。",
+      );
+      return true;
+    } catch (error) {
+      setActionError(tagActionMessage(error, "标签未能移动，请重试。"));
+      return false;
     } finally {
       setActionBusy("");
     }
@@ -630,7 +696,7 @@ export function TagsPage() {
     setPageNotice("");
 
     try {
-      const created = await createTag(name);
+      const created = await createTag(name, levelTag?.id ?? null);
 
       setNewTagOpen(false);
       setNewTagName("");
@@ -639,10 +705,16 @@ export function TagsPage() {
         setListLoading(true);
       }
       setSection("user_approved");
-      setQuery(created.name);
+      if (!levelTag) {
+        setQuery(created.name);
+      }
       setSort("name_asc");
       setReloadVersion((current) => current + 1);
-      setPageNotice(`已创建“我的标签”${created.name}。`);
+      setPageNotice(
+        levelTag
+          ? `已在“${tagPathLabel(levelTag)}”下创建“我的标签”${created.name}。`
+          : `已创建“我的标签”${created.name}。`,
+      );
       selectTag(created);
     } catch (error) {
       setNewTagError(tagActionMessage(error, "标签未能创建，请重试。"));
@@ -675,6 +747,9 @@ export function TagsPage() {
   ).length;
   const selectedApprovedTags = tags.filter(({ id }) =>
     selectedApprovedIds.has(id),
+  );
+  const blockedMergeSources = selectedApprovedTags.filter(
+    (tag) => tag.id !== mergeTargetId && tag.childCount > 0,
   );
 
   return (
@@ -768,7 +843,11 @@ export function TagsPage() {
             >
               <div>
                 <label htmlFor="new-tag-name">标签名称</label>
-                <p>新标签会加入“我的标签”，即使暂时没有关联记录也会保留。</p>
+                <p>
+                  {levelTag
+                    ? `新标签会创建在“${tagPathLabel(levelTag)}”之下，即使暂时没有关联记录也会保留。`
+                    : "新标签会加入“我的标签”，即使暂时没有关联记录也会保留。"}
+                </p>
               </div>
               <input
                 aria-describedby={newTagError ? "new-tag-error" : undefined}
@@ -943,6 +1022,12 @@ export function TagsPage() {
                       ))}
                     </div>
                   </fieldset>
+                  {blockedMergeSources.length > 0 ? (
+                    <p className="tag-batch-error" role="alert">
+                      {blockedMergeSources.map(({ name }) => `“${name}”`).join("、")}
+                      有下级标签，不能作为合并来源；请把它选为主标签，或先移走它的下级标签。
+                    </p>
+                  ) : null}
                   <div className="tag-merge-confirm-actions">
                     <span>
                       其余 {Math.max(selectedApprovedTags.length - 1, 0)} 个标签将作为可撤销来源
@@ -950,7 +1035,11 @@ export function TagsPage() {
                     <div>
                       <button
                         className="primary-button"
-                        disabled={!mergeTargetId || actionBusy === "batch-merge"}
+                        disabled={
+                          !mergeTargetId ||
+                          blockedMergeSources.length > 0 ||
+                          actionBusy === "batch-merge"
+                        }
                         onClick={() => void handleBatchMerge()}
                         ref={batchMergeConfirmButton}
                         type="button"
@@ -1034,6 +1123,29 @@ export function TagsPage() {
 
             {listLoading ? <p className="tag-atlas-feedback" role="status">正在载入{sectionLabel}…</p> : null}
 
+            {levelTag ? (
+              <nav aria-label="标签层级" className="tag-level-trail">
+                <Link to="/tags">全部标签</Link>
+                {levelTag.ancestors.map((ancestor) => (
+                  <Fragment key={ancestor.id}>
+                    <span aria-hidden="true">›</span>
+                    <Link to={`/tags?level=${encodeURIComponent(ancestor.id)}`}>
+                      {ancestor.name}
+                    </Link>
+                  </Fragment>
+                ))}
+                <span aria-hidden="true">›</span>
+                <strong aria-current="location">{levelTag.name}</strong>
+                <button
+                  className="tag-level-detail"
+                  onClick={() => selectTag(levelTag)}
+                  type="button"
+                >
+                  查看“{levelTag.name}”详情
+                </button>
+              </nav>
+            ) : null}
+
             <ul
               aria-busy={
                 actionBusy === "batch-delete" || actionBusy === "batch-merge"
@@ -1041,7 +1153,7 @@ export function TagsPage() {
               aria-label="标签图鉴"
               className="tag-atlas-grid"
             >
-              {tags.map((tag, index) => (
+              {visibleTags.map((tag, index) => (
                 <li
                   className={
                     selectedCandidateIds.has(tag.id) ||
@@ -1087,17 +1199,54 @@ export function TagsPage() {
                     {tag.approvalStatus === "candidate" ? (
                       <span className="tag-atlas-state">AI 候选</span>
                     ) : null}
-                    <strong>{tag.name}</strong>
-                    <span className="tag-atlas-count">{tag.recordCount} 条记录</span>
+                    {!browsingLevels && tag.ancestors.length > 0 ? (
+                      <span className="tag-atlas-name">
+                        <small className="tag-atlas-path">
+                          {tagAncestorLabel(tag)}
+                        </small>
+                        <strong>{tag.name}</strong>
+                      </span>
+                    ) : (
+                      <strong>{tag.name}</strong>
+                    )}
+                    <span className="tag-atlas-count">
+                      {tag.recordCount} 条记录{tag.childCount > 0 ? "（含下级）" : ""}
+                      {tag.childCount > 0 ? (
+                        <small>直接关联 {tag.directRecordCount} 条</small>
+                      ) : null}
+                    </span>
                   </button>
+                  {tag.childCount > 0 && tag.approvalStatus === "user_approved" ? (
+                    <Link
+                      aria-label={`进入“${tag.name}”的 ${tag.childCount} 个下级标签`}
+                      className="tag-card-children"
+                      to={`/tags?level=${encodeURIComponent(tag.id)}`}
+                    >
+                      {tag.childCount} 个下级 <span aria-hidden="true">›</span>
+                    </Link>
+                  ) : null}
                 </li>
               ))}
             </ul>
 
-            {!listLoading && !loadError && tags.length === 0 ? (
+            {!listLoading && !loadError && visibleTags.length === 0 ? (
               <div className="tag-atlas-empty" role="status">
-                <strong>{query ? "没有匹配的标签" : `还没有${sectionLabel}`}</strong>
-                <span>{query ? "请调整搜索词。" : section === "candidate" ? "AI 整理产生的候选会显示在这里。" : "创建第一个标签，开始整理你的词表。"}</span>
+                <strong>
+                  {query
+                    ? "没有匹配的标签"
+                    : levelTag
+                      ? "这一层还没有下级标签"
+                      : `还没有${sectionLabel}`}
+                </strong>
+                <span>
+                  {query
+                    ? "请调整搜索词。"
+                    : levelTag
+                      ? "可以在这里新建标签，或从其他标签详情中移动过来。"
+                      : section === "candidate"
+                        ? "AI 整理产生的候选会显示在这里。"
+                        : "创建第一个标签，开始整理你的词表。"}
+                </span>
               </div>
             ) : null}
           </div>
@@ -1110,14 +1259,17 @@ export function TagsPage() {
             actionNotice={actionNotice}
             detail={detail}
             error={drawerError}
+            hierarchyTags={hierarchyTags}
             loading={drawerLoading}
             onAddAlias={handleCreateAlias}
-            onApprove={() => void handleApprove()}
+            onApprove={(parentId) => void handleApprove(parentId)}
             onArchiveStatus={(status) => void handleArchiveStatus(status)}
             onClose={() => closeDrawer(true)}
             onDelete={() => void handleDeleteCandidate()}
             onDeleteAlias={(aliasId) => void handleDeleteAlias(aliasId)}
+            onMove={handleMove}
             onRename={handleRename}
+            onSelectTag={selectTag}
             onUndoMerge={(mergeId) => void handleUndoMerge(mergeId)}
             onVisibility={(recordId, itemId, status) =>
               void handleVisibility(recordId, itemId, status)
@@ -1145,6 +1297,7 @@ function TagDetailDrawer({
   actionNotice,
   detail,
   error,
+  hierarchyTags,
   loading,
   onAddAlias,
   onApprove,
@@ -1152,7 +1305,9 @@ function TagDetailDrawer({
   onClose,
   onDelete,
   onDeleteAlias,
+  onMove,
   onRename,
+  onSelectTag,
   onUndoMerge,
   onVisibility,
   tag,
@@ -1162,14 +1317,17 @@ function TagDetailDrawer({
   actionNotice: string;
   detail: TagDetail | null;
   error: string;
+  hierarchyTags: TagListItem[];
   loading: boolean;
   onAddAlias: (name: string) => Promise<boolean>;
-  onApprove: () => void;
+  onApprove: (parentId: string | null) => void;
   onArchiveStatus: (status: "archived" | "user_approved") => void;
   onClose: () => void;
   onDelete: () => void;
   onDeleteAlias: (aliasId: string) => void;
+  onMove: (parentId: string | null) => Promise<boolean>;
   onRename: (name: string) => Promise<boolean>;
+  onSelectTag: (tag: TagListItem) => void;
   onUndoMerge: (mergeId: string) => void;
   onVisibility: (
     recordId: string,
@@ -1183,6 +1341,8 @@ function TagDetailDrawer({
   const [renameValue, setRenameValue] = useState(tag.name);
   const [aliasValue, setAliasValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [moveTarget, setMoveTarget] = useState(tag.parentId ?? "");
+  const [approveParent, setApproveParent] = useState("");
   const renameInput = useRef<HTMLInputElement>(null);
   const aliasInput = useRef<HTMLInputElement>(null);
 
@@ -1192,7 +1352,12 @@ function TagDetailDrawer({
     setRenameValue(tag.name);
     setAliasValue("");
     setConfirmDelete(false);
+    setApproveParent("");
   }, [tag.id]);
+
+  useEffect(() => {
+    setMoveTarget(tag.parentId ?? "");
+  }, [tag.id, tag.parentId]);
 
   function toggleRecord(recordId: string) {
     setExpandedRecords((current) => {
@@ -1238,9 +1403,17 @@ function TagDetailDrawer({
   }
 
   const records = detail?.records ?? [];
+  const children = detail?.children ?? [];
   const candidate = tag.approvalStatus === "candidate";
   const archived = tag.approvalStatus === "archived";
   const mergeGroups = groupMergedSources(detail?.mergedSources ?? []);
+  const moveOptions = hierarchyDestinations(hierarchyTags, tag);
+  const approveOptions = hierarchyDestinations(hierarchyTags, null);
+
+  async function submitMove(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onMove(moveTarget || null);
+  }
 
   return (
     <aside aria-label="标签详情" className="tag-detail-drawer" role="region">
@@ -1250,10 +1423,80 @@ function TagDetailDrawer({
           <button aria-label="关闭标签详情" onClick={onClose} type="button">×</button>
         </div>
         <h2>{tag.name}</h2>
-        <span>{tag.recordCount} 条当前有效关联记录 · {tagOriginLabel(tag)}</span>
+        <span>
+          {tag.childCount > 0
+            ? `${tag.recordCount} 条记录（含下级）· 直接关联 ${tag.directRecordCount} 条`
+            : `${tag.recordCount} 条当前有效关联记录`}
+          {" · "}
+          {tagOriginLabel(tag)}
+        </span>
       </header>
 
       <div className="tag-drawer-body">
+        {!candidate && !archived ? (
+          <section aria-labelledby="tag-hierarchy-title" className="tag-hierarchy">
+            <div className="tag-hierarchy-heading">
+              <div>
+                <h3 id="tag-hierarchy-title">标签层级</h3>
+                <p>
+                  {tag.ancestors.length > 0
+                    ? `位于“${tagAncestorLabel(tag)}”之下`
+                    : "位于顶层"}
+                </p>
+              </div>
+              {tag.childCount > 0 || tag.ancestors.length + 1 < MAX_TAG_DEPTH ? (
+                <Link to={`/tags?level=${encodeURIComponent(tag.id)}`}>
+                  {tag.childCount > 0 ? "浏览下级" : "新增下级"}
+                </Link>
+              ) : null}
+            </div>
+
+            {children.length > 0 ? (
+              <ul aria-label="下级标签" className="tag-child-list">
+                {children.map((child) => (
+                  <li key={child.id}>
+                    <button onClick={() => onSelectTag(child)} type="button">
+                      {child.name}
+                    </button>
+                    <span>{child.recordCount} 条记录</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="tag-governance-empty">没有下级标签。</p>
+            )}
+
+            <form
+              aria-label="移动标签"
+              className="tag-move-form"
+              onSubmit={(event) => void submitMove(event)}
+            >
+              <label htmlFor="tag-move-parent">移动到</label>
+              <select
+                disabled={actionBusy === "move"}
+                id="tag-move-parent"
+                onChange={(event) => setMoveTarget(event.target.value)}
+                value={moveTarget}
+              >
+                <option value="">顶层</option>
+                {moveOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {tagPathLabel(option)}
+                  </option>
+                ))}
+              </select>
+              <button
+                disabled={
+                  Boolean(actionBusy) || moveTarget === (tag.parentId ?? "")
+                }
+                type="submit"
+              >
+                {actionBusy === "move" ? "移动中…" : "移动"}
+              </button>
+            </form>
+          </section>
+        ) : null}
+
         {!candidate && !archived ? (
           <section aria-labelledby="tag-governance-title" className="tag-governance">
             <div className="tag-governance-heading">
@@ -1349,6 +1592,13 @@ function TagDetailDrawer({
           <h3 id="tag-records-title">关联记录</h3>
           <span>每条记录仅显示一次</span>
         </div>
+        {tag.childCount > 0 ? (
+          <p className="tag-related-note">
+            这里只列出直接关联的记录；包含下级的全部 {tag.recordCount} 条记录可在
+            <Link to={`/search?tag=${encodeURIComponent(tag.id)}`}>搜索结果</Link>
+            中查看。
+          </p>
+        ) : null}
 
         {loading ? <p className="tag-drawer-feedback" role="status">正在载入关联来源…</p> : null}
         {error ? <p className="tag-drawer-feedback is-error" role="alert">{error}</p> : null}
@@ -1456,10 +1706,30 @@ function TagDetailDrawer({
               </div>
             </div>
           ) : (
-            <div className="tag-drawer-actions">
+            <div className="tag-drawer-actions has-parent-picker">
               <p>认可后复用同一标签身份，已有 AI 关联不会被改写为手动关联。</p>
+              <label className="tag-approve-parent">
+                <span>认可后放在</span>
+                <select
+                  disabled={Boolean(actionBusy)}
+                  onChange={(event) => setApproveParent(event.target.value)}
+                  value={approveParent}
+                >
+                  <option value="">顶层</option>
+                  {approveOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {tagPathLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div>
-                <button className="primary-button" disabled={Boolean(actionBusy)} onClick={onApprove} type="button">
+                <button
+                  className="primary-button"
+                  disabled={Boolean(actionBusy)}
+                  onClick={() => onApprove(approveParent || null)}
+                  type="button"
+                >
                   {actionBusy === "approve" ? "认可中…" : "认可为我的标签"}
                 </button>
                 <button className="danger-link" disabled={Boolean(actionBusy)} onClick={() => setConfirmDelete(true)} type="button">删除候选</button>
@@ -1491,6 +1761,57 @@ function TagDetailDrawer({
       </footer>
     </aside>
   );
+}
+
+/**
+ * Approved Tags that can become the parent of `tag` (or of a newly approved
+ * candidate when `tag` is null) without forming a cycle or a sixth level.
+ * The server enforces the same rules; this only keeps the picker honest.
+ */
+function hierarchyDestinations(
+  tags: TagListItem[],
+  tag: TagListItem | null,
+): TagListItem[] {
+  const childrenByParent = new Map<string, TagListItem[]>();
+
+  for (const candidate of tags) {
+    if (candidate.parentId) {
+      const siblings = childrenByParent.get(candidate.parentId) ?? [];
+
+      siblings.push(candidate);
+      childrenByParent.set(candidate.parentId, siblings);
+    }
+  }
+
+  const subtree = new Set<string>();
+  let height = 1;
+
+  if (tag) {
+    const pending = [{ depth: 1, id: tag.id }];
+
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+
+      subtree.add(current.id);
+      height = Math.max(height, current.depth);
+
+      for (const child of childrenByParent.get(current.id) ?? []) {
+        if (!subtree.has(child.id)) {
+          pending.push({ depth: current.depth + 1, id: child.id });
+        }
+      }
+    }
+  }
+
+  return tags
+    .filter(
+      (candidate) =>
+        !subtree.has(candidate.id) &&
+        candidate.ancestors.length + 1 + height <= MAX_TAG_DEPTH,
+    )
+    .sort((left, right) =>
+      tagPathLabel(left).localeCompare(tagPathLabel(right), "zh-Hans-CN"),
+    );
 }
 
 function groupMergedSources(sources: TagDetail["mergedSources"]) {

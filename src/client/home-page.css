@@ -675,8 +675,23 @@ html[data-theme="scifi"] .home-network-viewport::after {
 }
 
 .home-workbench > .network-drawer {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  width: auto;
+  height: 100%;
+  max-height: none;
   color: var(--workspace-ink);
   background: var(--workspace-panel);
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.home-workbench > .network-drawer > .network-drawer-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 @keyframes home-layout-turn {

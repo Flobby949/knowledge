@@ -8,7 +8,13 @@ export type RecordTagSelection = TagChip | string;
 export interface TagListItem extends TagChip {
   origin: "user_created" | "ai_created";
   approvalStatus: "archived" | "candidate" | "user_approved";
+  /** Records reachable through this Tag, including all descendant Tags. */
   recordCount: number;
+  directRecordCount: number;
+  parentId: string | null;
+  /** Ancestors from the top level down to the parent. */
+  ancestors: TagChip[];
+  childCount: number;
 }
 
 export interface UserTagListItem extends TagListItem {
@@ -19,6 +25,7 @@ export interface TagDetail {
   tag: TagListItem;
   aliases: Array<{ id: string; name: string }>;
   mergedSources: Array<{ id: string; mergeId: string; name: string }>;
+  children: TagListItem[];
   records: Array<{
     record: { id: string; title: string };
     sourceSummary: {
@@ -247,7 +254,11 @@ export interface TagFieldItem {
   id: string;
   name: string;
   approval: "approved" | "candidate";
+  /** Records reachable through this Tag, including all descendant Tags. */
   recordCount: number;
+  directRecordCount: number;
+  parentId: string | null;
+  ancestors: TagChip[];
 }
 
 export interface AiTask {
@@ -1223,11 +1234,14 @@ export async function listTags(options: {
   return body.items;
 }
 
-export async function createTag(name: string): Promise<TagListItem> {
+export async function createTag(
+  name: string,
+  parentId: string | null = null,
+): Promise<TagListItem> {
   const response = await fetch("/api/v1/tags", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(parentId ? { name, parentId } : { name }),
   });
   const body = await parseTagResponse<TagMutationResponse>(response);
 
@@ -1301,7 +1315,8 @@ export async function updateTag(
   tagId: string,
   input:
     | { name: string }
-    | { approvalStatus: "archived" | "user_approved" },
+    | { approvalStatus: "archived" | "user_approved" }
+    | { parentId: string | null },
 ): Promise<TagListItem> {
   const response = await fetch(
     `/api/v1/tags/${encodeURIComponent(tagId)}`,
@@ -1316,10 +1331,17 @@ export async function updateTag(
   return body.tag;
 }
 
-export async function approveCandidateTag(tagId: string): Promise<void> {
+export async function approveCandidateTag(
+  tagId: string,
+  parentId: string | null = null,
+): Promise<void> {
   const response = await fetch(
     `/api/v1/tags/${encodeURIComponent(tagId)}/approve`,
-    { method: "POST" },
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ parentId }),
+    },
   );
 
   await parseTagResponse(response);

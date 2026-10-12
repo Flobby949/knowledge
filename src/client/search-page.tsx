@@ -32,6 +32,7 @@ import {
 } from "./api.js";
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
+import { tagPathLabel } from "./tag-path.js";
 import "./search-page.css";
 
 type SearchScope = "current" | "include_review";
@@ -493,9 +494,13 @@ export function SearchPage() {
                 <strong>匹配任一标签</strong>
                 <div>
                   {tagIds.map((tagId) => {
-                    const name =
-                      availableTags.find((tag) => tag.id === tagId)?.name ??
-                      tagId;
+                    const selectedTag = availableTags.find(
+                      (tag) => tag.id === tagId,
+                    );
+                    const name = selectedTag ? tagPathLabel(selectedTag) : tagId;
+                    const includesChildren = availableTags.some(
+                      (tag) => tag.parentId === tagId,
+                    );
 
                     return (
                       <button
@@ -504,7 +509,9 @@ export function SearchPage() {
                         onClick={() => removeTag(tagId)}
                         type="button"
                       >
-                        {name} <span aria-hidden="true">×</span>
+                        {name}
+                        {includesChildren ? "（含下级）" : ""}{" "}
+                        <span aria-hidden="true">×</span>
                       </button>
                     );
                   })}

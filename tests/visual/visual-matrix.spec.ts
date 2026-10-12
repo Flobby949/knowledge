@@ -626,6 +626,7 @@ test("Search / 搜索 · 1600×1000 基线与 1280×800 的 480px 推挤抽屉",
 
 test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480px 推挤抽屉", async ({
   page,
+  request,
 }) => {
   await page.goto(`${appBaseUrl}/tags`);
 
@@ -672,6 +673,42 @@ test("Tags / 标签 · 1600×1000 基线与 1280×800 的等尺寸图鉴及 480p
   await expectBox(cards.first(), { x: 111, width: 218.33, height: 128 }, 3);
   await expectBox(cards.nth(1), { x: 329.33, width: 218.33, height: 128 }, 3);
   await expectBox(cards.nth(2), { x: 547.67, width: 218.33, height: 128 }, 3);
+
+  const listed = await request.get(`${appBaseUrl}/api/v1/tags?approval=user_approved`);
+  const { items } = await listed.json() as {
+    items: Array<{ id: string; recordCount: number }>;
+  };
+  const child = items.find(({ id }) => id !== visualFixture.primaryTagId)!;
+  const primary = items.find(({ id }) => id === visualFixture.primaryTagId)!;
+  const childUrl = `${appBaseUrl}/api/v1/tags/${child.id}`;
+
+  try {
+    expect((await request.patch(childUrl, {
+      data: { parentId: visualFixture.primaryTagId },
+    })).status()).toBe(200);
+    await page.reload();
+    const parentCard = atlas.getByRole("button", {
+      name: visualFixture.primaryTagName,
+      exact: true,
+    });
+
+    await expect(parentCard).toContainText("（含下级）");
+    await expect(parentCard).toContainText(`直接关联 ${primary.recordCount} 条`);
+    await parentCard.click();
+    await expect(drawer.getByRole("list", { name: "下级标签" }))
+      .toBeVisible();
+    await page.waitForTimeout(220);
+    await expectBox(drawer, { x: 800, y: 72, width: 480, height: 728 });
+    await expect(page).toHaveScreenshot(snapshotName(theme, "tags-hierarchy"), {
+      animations: "disabled",
+      caret: "hide",
+      fullPage: false,
+      maxDiffPixels: 500,
+    });
+  } finally {
+    expect((await request.patch(childUrl, { data: { parentId: null } })).status())
+      .toBe(200);
+  }
 });
 
 test("Concepts / 概念 · 1600×1000 横向索引阅读台与 1280×800 几何", async ({
