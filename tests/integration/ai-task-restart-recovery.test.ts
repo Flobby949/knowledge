@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -23,13 +24,13 @@ describe("AI task recovery after a service restart", () => {
   let originalApp: FastifyInstance;
   let restartedApp: FastifyInstance | undefined;
   let database: PreparedTestDatabase;
+  let pool: Pool;
   const sourceText = "服务重启后，未完成的 AI 整理应允许重试或归档。";
   const queuedSourceText = "服务在任务排队后终止时，也必须释放归档入口。";
   const interruptedAnalysis = analysisFor(
     sourceText,
     "不应发布的迟到整理",
   );
-  const queuedAnalysis = analysisFor(queuedSourceText, "不应启动的排队整理");
   const retriedAnalysis = analysisFor(sourceText, "恢复后重试成功");
   const originalGenerationStarted = deferred<void>();
   const releaseOriginalGeneration = deferred<GeneratedAnalysis>();
@@ -40,16 +41,13 @@ describe("AI task recovery after a service restart", () => {
       return releaseOriginalGeneration.promise;
     }
 
-    if (input.sourceText === queuedSourceText) {
-      return queuedAnalysis;
-    }
-
     throw new Error(`unexpected source text: ${input.sourceText}`);
   });
   const restartedGenerator = vi.fn<AnalysisGenerator>(async () => retriedAnalysis);
 
   beforeAll(async () => {
     database = prepareTestDatabase();
+    pool = new Pool({ connectionString: database.databaseUrl });
     originalApp = await buildApp({
       databaseUrl: database.databaseUrl,
       embedText: async () => [1, 0, 0],
@@ -67,6 +65,7 @@ describe("AI task recovery after a service restart", () => {
     releaseOriginalGeneration.resolve(interruptedAnalysis);
     await restartedApp?.close();
     await originalApp?.close();
+    await pool?.end();
     database?.dispose();
   }, 30_000);
 
@@ -99,7 +98,25 @@ describe("AI task recovery after a service restart", () => {
     });
 
     const queuedRecordId = await createRecord(originalApp, queuedSourceText);
-    const queuedTask = await startOrganization(originalApp, queuedRecordId);
+    // Persist the state left by a process that exited before dispatching its
+    // worker. The HTTP start route also dispatches a live worker, which can
+    // finish before the restarted service reaches its recovery hook.
+    const queued = await pool.query<{ id: string }>(
+      `INSERT INTO ai_tasks
+         (record_id, fragment_revision_id, model_config_version, handling,
+          analysis_prompt)
+       SELECT record.id, record.current_fragment_revision_id,
+              configuration.version, 'AUTOMATIC', preference.analysis_prompt
+         FROM records AS record
+         CROSS JOIN model_configurations AS configuration
+         CROSS JOIN instance_preferences AS preference
+        WHERE record.id = $1
+          AND configuration.state = 'ACTIVE'
+          AND preference.singleton = true
+       RETURNING id`,
+      [queuedRecordId],
+    );
+    const queuedTask = await getTask(originalApp, queued.rows[0]!.id);
 
     expect(queuedTask.status).toBe("queued");
     await restartedApp.ready();
@@ -120,7 +137,7 @@ describe("AI task recovery after a service restart", () => {
       status: "failed",
       failure: { code: "SYSTEM_INTERRUPTED" },
     });
-    await waitForTaskSettlement(settledOriginalTaskIds, queuedTask.id);
+    expect(originalGenerator).toHaveBeenCalledTimes(1);
 
     const queuedHistory = await restartedApp.inject({
       method: "GET",
