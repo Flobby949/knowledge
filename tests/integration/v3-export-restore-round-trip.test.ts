@@ -112,7 +112,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     format4TargetDatabase?.dispose();
   }, 30_000);
 
-  it("round-trips Concept relations in format 9 and restores fixed formats 4–7", async () => {
+  it("round-trips Concept relations in format 10 and restores fixed formats 4–7", async () => {
     const ids = await seedConceptDomain(sourcePool);
     const before = await snapshotTables(sourcePool, [...V3_TABLES]);
     const requested = await sourceApp.inject({
@@ -126,7 +126,7 @@ describe("V3 Concept and Candidate export and restore", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
-      manifest: { formatVersion: 9, recordCount: 2 },
+      manifest: { formatVersion: 10, recordCount: 2 },
     });
 
     const downloaded = await sourceApp.inject({
@@ -148,7 +148,7 @@ describe("V3 Concept and Candidate export and restore", () => {
     >;
 
     expect(domain).toMatchObject({
-      formatVersion: 9,
+      formatVersion: 10,
       concepts: expect.arrayContaining([
         expect.objectContaining({ id: ids.conceptId }),
         expect.objectContaining({ id: ids.secondConceptId }),
@@ -263,7 +263,7 @@ describe("V3 Concept and Candidate export and restore", () => {
 
     expect(currentInspection).toMatchObject({
       canRestore: true,
-      formatVersion: 9,
+      formatVersion: 10,
       recordCount: 2,
     });
     await restore(currentTargetApp, currentInspection.id);
@@ -745,10 +745,12 @@ function downgradeToFormat8(archive: Buffer): Buffer {
   const domain = JSON.parse(entries.get("domain.json")!.toString("utf8")) as {
     formatVersion: number;
     tags: Array<Record<string, unknown>>;
+    textHighlights?: unknown[];
   };
 
   manifest.formatVersion = 8;
   domain.formatVersion = 8;
+  delete domain.textHighlights;
 
   for (const tag of domain.tags) {
     delete tag.parent_tag_id;

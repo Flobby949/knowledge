@@ -43,6 +43,7 @@ import {
   type BootstrapModelDraft,
 } from "./model-config-routes.js";
 import { registerNetworkRoutes } from "./network-routes.js";
+import { registerTextHighlightRoutes } from "./text-highlight-routes.js";
 import {
   testOpenAICompatibleEndpoint,
   type ModelEndpointTester,
@@ -477,6 +478,7 @@ export async function buildApp(
     pool,
   });
   registerNetworkRoutes(app, { pool });
+  registerTextHighlightRoutes(app, { pool });
   const conceptCandidateAutomation = registerConceptCandidateRoutes(app, {
     pool,
     credentialSecret,

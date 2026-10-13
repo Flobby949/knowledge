@@ -7,6 +7,7 @@ import {
   type RecordHistoryEntry,
   type RecordHistorySnapshot,
 } from "./api.js";
+import { HighlightableText } from "./text-highlights.js";
 import "./record-history-workspace.css";
 
 interface RecordHistoryWorkspaceProps {
@@ -269,11 +270,13 @@ export function RecordHistoryWorkspace({
               {compare ? (
                 <div className="history-compare-grid">
                   <HistoryPane
+                    recordId={record.id}
                     label={`历史版本 v${selected.version}`}
                     text={selected.snapshot.text}
                     version={selected.version}
                   />
                   <HistoryPane
+                    recordId={record.id}
                     label={`当前版本 v${record.editable.textVersion}`}
                     text={record.editable.text}
                     version={record.editable.textVersion}
@@ -284,7 +287,12 @@ export function RecordHistoryWorkspace({
                   aria-label={`版本 v${selected.version} 原文`}
                   className="history-selected-text"
                 >
-                  {selected.snapshot.text}
+                  <HighlightableText
+                    recordId={record.id}
+                    target={`source:${selected.version}`}
+                    text={selected.snapshot.text}
+                    readOnly
+                  />
                 </pre>
               )}
             </>
@@ -334,10 +342,12 @@ export function RecordHistoryWorkspace({
 }
 
 function HistoryPane({
+  recordId,
   label,
   text,
   version,
 }: {
+  recordId: string;
   label: string;
   text: string;
   version: number;
@@ -348,7 +358,14 @@ function HistoryPane({
         <span>{label}</span>
         <span>原文 v{version}</span>
       </header>
-      <pre aria-label="完整原文">{text}</pre>
+      <pre aria-label="完整原文">
+        <HighlightableText
+          recordId={recordId}
+          target={`source:${version}`}
+          text={text}
+          readOnly
+        />
+      </pre>
     </section>
   );
 }

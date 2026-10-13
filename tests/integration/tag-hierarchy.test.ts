@@ -454,7 +454,7 @@ describe("multi-level tag hierarchy", () => {
     const archive = await exportArchive(app);
     const domain = readDomain(archive);
 
-    expect(domain.formatVersion).toBe(9);
+    expect(domain.formatVersion).toBe(10);
     expect(domain.tags.find(({ id }) => id === leaf.id)).toMatchObject({
       parent_tag_id: root.id,
     });
@@ -477,7 +477,7 @@ describe("multi-level tag hierarchy", () => {
     const format8App = await buildApp({ databaseUrl: format8Target.databaseUrl });
 
     try {
-      await restoreArchive(format9App, archive, 9);
+      await restoreArchive(format9App, archive, 10);
 
       const restoredSource = await listApproved(app);
       const restoredTarget = await listApproved(format9App);
@@ -503,6 +503,7 @@ describe("multi-level tag hierarchy", () => {
 
       const format8Archive = rewriteDomain(archive, (snapshot) => {
         snapshot.formatVersion = 8;
+        delete snapshot.textHighlights;
 
         for (const tag of snapshot.tags) {
           delete tag.parent_tag_id;
@@ -524,6 +525,7 @@ describe("multi-level tag hierarchy", () => {
 });
 
 type DomainJson = {
+  textHighlights?: unknown[];
   formatVersion: number;
   tags: Array<{ id: string; parent_tag_id?: string | null }>;
 };

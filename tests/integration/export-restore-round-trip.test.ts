@@ -291,7 +291,7 @@ describe("complete export and empty-instance restore", () => {
       completedAt: expect.any(String),
       downloadUrl: expect.any(String),
       manifest: {
-        formatVersion: 9,
+        formatVersion: 10,
         recordCount: 1,
         included: expect.arrayContaining(["markdown", "domain_json"]),
         excluded: expect.arrayContaining([
@@ -392,6 +392,7 @@ describe("complete export and empty-instance restore", () => {
       [
         "analyses",
         "corrections",
+        "textHighlights",
         "evidenceSpans",
         "formatVersion",
         "fragmentRevisions",
@@ -566,7 +567,7 @@ describe("complete export and empty-instance restore", () => {
     expect(inspection).toMatchObject({
       id: expect.any(String),
       status: "valid",
-      formatVersion: 9,
+      formatVersion: 10,
       recordCount: 1,
       canRestore: true,
     });

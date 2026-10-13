@@ -32,6 +32,7 @@ import {
 import { NewRecordDialog } from "./new-record-dialog.js";
 import { AppNavigation } from "./records-page.js";
 import { RecordHistoryWorkspace } from "./record-history-workspace.js";
+import { HighlightableText } from "./text-highlights.js";
 import "./record-detail.css";
 
 export function RecordDetailPage() {
@@ -1074,10 +1075,13 @@ function RecordDetailContent({
             </p>
           ) : null}
           <pre aria-label="完整原文">
-            <HighlightedSource
+            <HighlightableText
+              key={`${record.id}:source:${historicalSource?.version ?? record.editable.textVersion}`}
+              recordId={record.id}
+              target={`source:${historicalSource?.version ?? record.editable.textVersion}`}
               evidence={selectedEvidence}
               marker={selectedKnowledgeIndex || undefined}
-              sourceText={historicalSource?.text ?? record.editable.text}
+              text={historicalSource?.text ?? record.editable.text}
             />
           </pre>
         </div>
@@ -1201,7 +1205,14 @@ function RecordDetailContent({
                       </span>
                     </div>
                     <h3>{item.title}</h3>
-                    <p aria-label="知识点正文">{item.body}</p>
+                    <p aria-label="知识点正文">
+                      <HighlightableText
+                        key={`${item.id}:${item.body}`}
+                        recordId={record.id}
+                        target={`knowledge:${item.id}`}
+                        text={item.body}
+                      />
+                    </p>
                     <ul aria-label="AI 标签" className="knowledge-point-tags">
                       {item.tags.map((tag) => (
                         <li key={tag.id}>{tag.name}</li>
@@ -1301,7 +1312,14 @@ function RecordDetailContent({
                         <span>已不采用</span>
                       </div>
                       <h3>{item.title}</h3>
-                      <p aria-label="知识点正文">{item.body}</p>
+                      <p aria-label="知识点正文">
+                        <HighlightableText
+                          key={`${item.id}:${item.body}`}
+                          recordId={record.id}
+                          target={`knowledge:${item.id}`}
+                          text={item.body}
+                        />
+                      </p>
                       <div className="knowledge-point-actions">
                         <button
                           disabled={inclusionBusyId === item.id}
@@ -2088,31 +2106,6 @@ function KnowledgeCorrectionDialog({
         ) : null}
       </div>
     </div>
-  );
-}
-
-function HighlightedSource({
-  evidence,
-  marker,
-  sourceText,
-}: {
-  evidence: EvidenceSpan | null;
-  marker?: number | undefined;
-  sourceText: string;
-}) {
-  if (
-    !evidence ||
-    sourceText.slice(evidence.start, evidence.end) !== evidence.quote
-  ) {
-    return sourceText;
-  }
-
-  return (
-    <>
-      {sourceText.slice(0, evidence.start)}
-      <mark data-marker={marker}>{evidence.quote}</mark>
-      {sourceText.slice(evidence.end)}
-    </>
   );
 }
 

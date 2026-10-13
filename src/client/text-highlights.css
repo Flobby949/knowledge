@@ -1,0 +1,116 @@
+[data-color="yellow"] {
+  --highlight-fill: #fff09a;
+}
+[data-color="green"] {
+  --highlight-fill: #c6efb0;
+}
+[data-color="blue"] {
+  --highlight-fill: #bfe4ff;
+}
+[data-color="pink"] {
+  --highlight-fill: #ffd0e1;
+}
+[data-color="purple"] {
+  --highlight-fill: #e0ceff;
+}
+
+.highlightable-text {
+  outline-offset: 4px;
+}
+.highlightable-text mark.user-text-highlight {
+  padding: 0;
+  color: #302936;
+  background: var(--highlight-fill);
+  border: 0;
+  border-radius: 2px;
+  box-shadow: none;
+  cursor: pointer;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.user-text-highlight:focus-visible,
+.text-highlight-palette button:focus-visible {
+  outline: 2px solid var(--signal, #c63d68);
+  outline-offset: 3px;
+}
+.source-evidence-highlight:has(.user-text-highlight) {
+  text-decoration: underline;
+  text-decoration-color: var(--signal, #c63d68);
+  text-underline-offset: 4px;
+}
+.text-highlight-palette {
+  position: fixed;
+  z-index: 1200;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  padding: 12px 14px;
+  color: var(--ink, #39232e);
+  background: var(--surface, #fff);
+  border-radius: 10px;
+  box-shadow: 0 5px 22px #24152829;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: normal;
+}
+.text-highlight-palette-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.text-highlight-palette-heading > span {
+  color: #766170;
+  font-size: 12px;
+}
+.text-highlight-colors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.text-highlight-colors button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.text-highlight-colors button:hover {
+  border-color: #937b8a;
+}
+.text-highlight-colors button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.text-highlight-colors button > span {
+  display: grid;
+  place-items: center;
+  color: #302936;
+  font-size: 16px;
+  font-weight: 700;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: var(--highlight-fill);
+}
+.text-highlight-colors .text-highlight-remove {
+  width: auto;
+  margin-left: auto;
+  color: inherit;
+  font-size: 12px;
+}
+.text-highlight-error,
+.highlight-load-error {
+  display: block;
+  color: #b4233d;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.highlight-load-error button,
+.text-highlight-error button {
+  margin-left: 8px;
+}

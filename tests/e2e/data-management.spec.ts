@@ -117,7 +117,7 @@ test.describe("settings data management", () => {
     expect(await inspectionResponse.json()).toMatchObject({
       inspection: {
         status: "valid",
-        formatVersion: 9,
+        formatVersion: 10,
         canRestore: false,
         blockingReason: "INSTANCE_NOT_EMPTY",
       },

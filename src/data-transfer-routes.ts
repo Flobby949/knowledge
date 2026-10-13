@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 
+import { highlightColors, type TextHighlight } from "./domain/text-highlights.js";
 import { createZip, readStoredZip } from "./zip-archive.js";
 
 const manifest = {
-  formatVersion: 9,
+  formatVersion: 10,
   included: ["markdown", "domain_json"],
   excluded: [
     "model_credentials",
@@ -417,8 +418,16 @@ interface ConceptRelationSnapshotRow extends DomainRow {
   removed_at: Timestamp | null;
 }
 
+interface TextHighlightSnapshotRow extends DomainRow {
+  record_id: string;
+  target: string;
+  content: string;
+  highlights: TextHighlight[];
+  revision: number;
+}
+
 interface DomainSnapshot {
-  formatVersion: 9;
+  formatVersion: 10;
   records: RecordSnapshotRow[];
   fragmentRevisions: FragmentRevisionSnapshotRow[];
   tags: TagSnapshotRow[];
@@ -429,6 +438,7 @@ interface DomainSnapshot {
   knowledgePoints: KnowledgePointSnapshotRow[];
   evidenceSpans: EvidenceSpanSnapshotRow[];
   corrections: CorrectionSnapshotRow[];
+  textHighlights: TextHighlightSnapshotRow[];
   overviewCorrections: OverviewCorrectionSnapshotRow[];
   duplicateSuggestions: DuplicateSuggestionSnapshotRow[];
   duplicateConsolidations: DuplicateConsolidationSnapshotRow[];
@@ -456,7 +466,7 @@ interface DomainSnapshot {
 
 interface ParsedSnapshot {
   snapshot: DomainSnapshot;
-  sourceFormatVersion: 4 | 5 | 6 | 7 | 8 | 9;
+  sourceFormatVersion: 4 | 5 | 6 | 7 | 8 | 9 | 10;
 }
 
 interface ExportRow {
@@ -756,6 +766,9 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
     const evidenceSpans = await client.query(
       "SELECT * FROM evidence_spans ORDER BY knowledge_point_id, position",
     );
+    const textHighlights = await client.query(
+      "SELECT * FROM text_highlights ORDER BY record_id, target",
+    );
     const corrections = await client.query(
       "SELECT * FROM knowledge_point_corrections ORDER BY knowledge_point_id",
     );
@@ -882,7 +895,7 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       "SELECT * FROM concept_relations ORDER BY confirmed_at, id",
     );
     const snapshot: DomainSnapshot = {
-      formatVersion: 9,
+      formatVersion: 10,
       records: records.rows,
       fragmentRevisions: fragmentRevisions.rows,
       tags: tags.rows,
@@ -893,6 +906,7 @@ async function readSnapshot(pool: Pool): Promise<DomainSnapshot> {
       knowledgePoints: knowledgePoints.rows,
       evidenceSpans: evidenceSpans.rows,
       corrections: corrections.rows,
+      textHighlights: textHighlights.rows,
       overviewCorrections: overviewCorrections.rows,
       duplicateSuggestions: duplicateSuggestions.rows,
       duplicateConsolidations: duplicateConsolidations.rows,
@@ -952,7 +966,8 @@ function parseSnapshot(archive: Buffer): ParsedSnapshot {
       publicManifest.formatVersion !== 6 &&
       publicManifest.formatVersion !== 7 &&
       publicManifest.formatVersion !== 8 &&
-      publicManifest.formatVersion !== 9) ||
+      publicManifest.formatVersion !== 9 &&
+      publicManifest.formatVersion !== 10) ||
     !Number.isInteger(publicManifest.recordCount) ||
     !isStringArray(publicManifest.included) ||
     !isStringArray(publicManifest.excluded)
@@ -1009,7 +1024,8 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     value.formatVersion !== 6 &&
     value.formatVersion !== 7 &&
     value.formatVersion !== 8 &&
-    value.formatVersion !== 9
+    value.formatVersion !== 9 &&
+    value.formatVersion !== 10
   ) {
     throw new Error("domain snapshot version is unsupported");
   }
@@ -1070,6 +1086,7 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
               ...conceptKeys,
               ...candidateKeys,
               ...conceptRelationKeys,
+              ...(value.formatVersion >= 10 ? ["textHighlights"] : []),
             ],
   );
 
@@ -1077,7 +1094,7 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
     value.formatVersion === 4
       ? {
           ...value,
-          formatVersion: 9,
+          formatVersion: 10,
           concepts: [],
           conceptRevisions: [],
           conceptMemberships: [],
@@ -1093,7 +1110,7 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
       : value.formatVersion === 5
         ? {
             ...value,
-            formatVersion: 9,
+            formatVersion: 10,
             conceptCandidateScans: [],
             conceptCandidateInputs: [],
             conceptCandidates: [],
@@ -1105,7 +1122,7 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
         : value.formatVersion === 6
           ? {
               ...value,
-              formatVersion: 9,
+              formatVersion: 10,
               conceptCandidateScans: requireRows(
                 value.conceptCandidateScans,
                 "conceptCandidateScans",
@@ -1119,24 +1136,35 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
           : value.formatVersion === 7
             ? {
                 ...value,
-                formatVersion: 9,
+                formatVersion: 10,
                 conceptRelationSuggestions: [],
                 conceptRelations: [],
               }
             : value;
 
   // Format 9 adds the Tag hierarchy; every Tag from an older package is a root.
-  const normalizedValue: DomainRow =
-    value.formatVersion === 9
+  const hierarchyNormalizedValue: DomainRow =
+    value.formatVersion >= 9
       ? versionNormalizedValue
       : {
           ...versionNormalizedValue,
-          formatVersion: 9,
+          formatVersion: 10,
           tags: requireRows(versionNormalizedValue.tags, "tags").map((row) => ({
             ...row,
             parent_tag_id: null,
           })),
         };
+
+  const normalizedValue: DomainRow = {
+    ...hierarchyNormalizedValue,
+    formatVersion: 10,
+    textHighlights: value.formatVersion >= 10 ? value.textHighlights : [],
+  };
+  const textHighlights = requireRows(
+    normalizedValue.textHighlights,
+    "textHighlights",
+  );
+  textHighlights.forEach(validateTextHighlightRow);
 
   const records = requireRows(normalizedValue.records, "records");
   const fragmentRevisions = requireRows(
@@ -1291,6 +1319,30 @@ function validateDomainSnapshot(value: unknown): DomainSnapshot {
   validateSnapshotReferences(snapshot);
 
   return snapshot;
+}
+
+function validateTextHighlightRow(row: DomainRow): void {
+  requireExactKeys(row, [
+    "record_id", "target", "content", "highlights", "revision",
+  ]);
+  requireUuid(row, "record_id");
+  requireNonEmptyString(row, "target");
+  requireNonEmptyString(row, "content");
+  requireInteger(row, "revision", 1);
+  if (!/^(source:[1-9][0-9]{0,8}|knowledge:[0-9a-f-]{36})$/.test(row.target as string)) {
+    throw new Error("highlight target is invalid");
+  }
+  let previousEnd = 0;
+  for (const highlight of requireRows(row.highlights, "highlights")) {
+    requireExactKeys(highlight, ["start", "end", "color"]);
+    requireInteger(highlight, "start", previousEnd);
+    requireInteger(
+      highlight, "end", (highlight.start as number) + 1,
+      (row.content as string).length,
+    );
+    requireEnum(highlight, "color", [...highlightColors]);
+    previousEnd = highlight.end as number;
+  }
 }
 
 function validateRecordRow(row: DomainRow): void {
@@ -2343,6 +2395,21 @@ function isSymmetricRelationType(value: unknown): boolean {
 }
 
 function validateSnapshotReferences(snapshot: DomainSnapshot): void {
+  assertUnique(
+    snapshot.textHighlights,
+    (row) => `${row.record_id}:${row.target}`,
+    "highlight target",
+  );
+  for (const row of snapshot.textHighlights) {
+    const [kind, id] = row.target.split(":");
+    const valid = kind === "source"
+      ? snapshot.fragmentRevisions.some((source) =>
+          source.record_id === row.record_id &&
+          source.revision_number === Number(id) && source.content === row.content)
+      : snapshot.knowledgePoints.some((point) =>
+          point.record_id === row.record_id && point.id === id);
+    if (!valid) throw new Error("highlight target reference is invalid");
+  }
   assertUnique(snapshot.records, (row) => row.id, "record id");
   assertUnique(
     snapshot.fragmentRevisions,
@@ -3658,6 +3725,9 @@ async function restoreSnapshot(
     "end_offset",
     "quote",
   ], snapshot.evidenceSpans);
+  await insertRows(client, "text_highlights", [
+    "record_id", "target", "content", "highlights", "revision",
+  ], snapshot.textHighlights.map((row) => ({ ...row, highlights: JSON.stringify(row.highlights) })));
   await insertRows(client, "knowledge_point_corrections", [
     "knowledge_point_id",
     "title",
@@ -3969,7 +4039,7 @@ function renderReadme(snapshot: DomainSnapshot): string {
   return [
     "# Knowledge 完整导出",
     "",
-    "每条记录均有独立 Markdown 阅读文件；恢复只使用 domain.json。",
+    "每条记录均有独立 Markdown 阅读文件；恢复只使用 domain.json。重点标记及颜色完整保存在 domain.json 中。",
     "",
     "## 记录",
     "",
